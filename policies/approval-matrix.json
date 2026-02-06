@@ -594,5 +594,662 @@
       "humanEscalationChannel": "owner-dm-plus-sms",
       "maxRetries": 1
     }
+  },
+  "loops": {
+    "ralph-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required when loop proposes policy or tool changes; read-only strategy analysis is pre-approved."
+    },
+    "research-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Read-only evidence gathering; no external side effects."
+    },
+    "discovery-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Read-only hypothesis generation from existing data."
+    },
+    "bug-finder-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "core"
+    },
+    "debugging-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalPoints": [
+        "external_side_effects",
+        "writes_outside_sandbox"
+      ],
+      "tier": "core"
+    },
+    "end-to-end-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalPoints": [
+        "external_side_effects"
+      ],
+      "tier": "core"
+    },
+    "meta-cognition-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Strategy analysis and self-critique; internal only."
+    },
+    "exploration-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "core"
+    },
+    "self-driven-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required for any task execution beyond proposal; proposals themselves are pre-approved."
+    },
+    "self-learning-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "core"
+    },
+    "self-updating-loop-v1": {
+      "riskTier": "high",
+      "approvalRequired": true,
+      "approvalPoints": [
+        "config_change_proposal",
+        "prompt_change_proposal"
+      ],
+      "tier": "core"
+    },
+    "self-upgrading-loop-v1": {
+      "riskTier": "high",
+      "approvalRequired": true,
+      "approvalPoints": [
+        "upgrade_proposal",
+        "rollback_plan_review"
+      ],
+      "tier": "core"
+    },
+    "planning-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Produces prioritized plans and backlogs; no side effects."
+    },
+    "context-engineering-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalPoints": [
+        "policy_changes"
+      ],
+      "tier": "core"
+    },
+    "context-prompt-engineering-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalPoints": [
+        "prompt_baseline_publish"
+      ],
+      "tier": "core"
+    },
+    "intake-normalization-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "intent-classification-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "route-resolution-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "session-key-resolution-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "session-isolation-guard-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "queue-admission-control-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "queue-backpressure-relief-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "retry-orchestration-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "dead-letter-recovery-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "presence-refresh-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "hook-dispatch-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "hook-retry-replay-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "heartbeat-synthesis-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Periodic health check synthesis; internal only."
+    },
+    "heartbeat-escalation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "cron-dispatch-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "cron-catch-up-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "cron-isolated-session-bootstrap-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "model-fallback-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "thinking-level-controller-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "tool-eligibility-resolver-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "context-budget-manager-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "context-snapshot-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "memory-writeback-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "memory-retrieval-validation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "memory-compaction-trigger-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "memory-consolidation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Internal memory merge and deduplication."
+    },
+    "identity-drift-detection-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "soul-consistency-enforcement-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "user-profile-refresh-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "preference-learning-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "relationship-continuity-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "gmail-watch-renewal-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalCondition": "Pre-approved; renews Gmail watch subscription on schedule (daily cadence)."
+    },
+    "gmail-notification-intake-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Receives and validates Gmail push notifications; read-only intake."
+    },
+    "gmail-history-delta-sync-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Reads Gmail history delta from last known historyId."
+    },
+    "gmail-full-resync-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required; full resync is resource-intensive and resets baseline state."
+    },
+    "gmail-action-execution-loop-v1": {
+      "riskTier": "high",
+      "approvalRequired": true,
+      "approvalCondition": "Always required; executes Gmail actions (send, delete, forward) which are irreversible."
+    },
+    "twilio-webhook-verification-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Validates X-Twilio-Signature on inbound webhooks; read-only security check."
+    },
+    "sms-inbound-processing-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Processes inbound SMS messages; normalizes and routes to session."
+    },
+    "sms-delivery-reconciliation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Reconciles SMS delivery status callbacks; updates internal state."
+    },
+    "voice-call-orchestration-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required; initiating or managing voice calls has external communication effects."
+    },
+    "voice-callback-reconciliation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Processes Twilio voice status callbacks; updates internal call state."
+    },
+    "browser-session-lifecycle-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required for session creation/teardown; manages isolated browser profiles."
+    },
+    "browser-workflow-executor-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required; executes browser actions (navigation, clicks, form fills) with potential side effects."
+    },
+    "browser-artifact-verification-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Verifies browser action outcomes via screenshots, DOM digests, and action logs."
+    },
+    "browser-prompt-injection-scanner-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Scans browser page content for prompt injection patterns; read-only analysis."
+    },
+    "stt-stream-processing-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "tts-synthesis-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "wakeword-arbitration-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "voice-barge-in-coordination-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "voice-transcript-redaction-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "pairing-challenge-trust-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "A"
+    },
+    "mention-gate-enforcement-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "A"
+    },
+    "privilege-escalation-approval-loop-v1": {
+      "riskTier": "high",
+      "approvalRequired": true,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "A"
+    },
+    "command-risk-scoring-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "A"
+    },
+    "secret-rotation-loop-v1": {
+      "riskTier": "high",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "A"
+    },
+    "exfiltration-guard-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "A"
+    },
+    "access-anomaly-detection-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "B"
+    },
+    "incident-containment-loop-v1": {
+      "riskTier": "high",
+      "approvalRequired": true,
+      "approvalCondition": "Always required; containment actions (kill switch, isolation) are irreversible."
+    },
+    "forensics-package-builder-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "B"
+    },
+    "policy-drift-audit-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "privilege_escalation"
+      ],
+      "tier": "B"
+    },
+    "health-probing-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Read-only service health checks."
+    },
+    "watchdog-recovery-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required when recovery involves service restarts or state resets."
+    },
+    "restart-governor-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": true,
+      "approvalCondition": "Required; governs restart decisions with bounded retry policy."
+    },
+    "backup-snapshot-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "restore-validation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "log-compaction-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Compacts and archives logs; reversible via backup."
+    },
+    "metrics-export-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "slo-burn-rate-alert-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalCondition": "Monitors SLO burn rate and emits alerts; internal metrics analysis."
+    },
+    "cost-budget-control-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "latency-regression-detection-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "capacity-forecast-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "canary-release-validation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "rollback-verification-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "chaos-drill-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "postmortem-synthesis-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "regression-suite-orchestration-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "A"
+    },
+    "test-gap-discovery-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "config-drift-reconciliation-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "dependency-vulnerability-tracking-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "schema-migration-safety-loop-v1": {
+      "riskTier": "safe",
+      "approvalRequired": false,
+      "approvalPoints": [],
+      "tier": "B"
+    },
+    "proposal-aggregation-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    },
+    "approval-queue-manager-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "A"
+    },
+    "human-in-the-loop-timeout-escalation-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    },
+    "safe-mode-guardian-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "A"
+    },
+    "goal-priority-rebalancer-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    },
+    "objective-conflict-resolver-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    },
+    "learning-quality-auditor-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    },
+    "self-change-rollback-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    },
+    "knowledge-decay-cleanup-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    },
+    "weekly-strategy-renewal-loop-v1": {
+      "riskTier": "moderate",
+      "approvalRequired": false,
+      "approvalPoints": [
+        "policy_change"
+      ],
+      "tier": "B"
+    }
   }
 }
