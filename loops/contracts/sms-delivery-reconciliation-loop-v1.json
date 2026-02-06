@@ -1,0 +1,97 @@
+{
+  "loopId": "sms-delivery-reconciliation-loop-v1",
+  "version": "1.0.0",
+  "displayName": "SMS Delivery Reconciliation Loop",
+  "description": "Reconciles SMS delivery status callbacks with sent messages using message SID and status timestamp dedup.",
+  "ownerAgent": "twilio-sms-agent",
+  "category": "integration-twilio",
+  "tier": "A",
+  "dependencyLayer": "integration",
+  "priority": 57,
+  "triggerTypes": [
+    "event"
+  ],
+  "triggerClass": "event-triggered",
+  "cadence": {
+    "default": "event-driven"
+  },
+  "entryCriteria": [
+    "sms_delivery_status_callback_received"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "sms-delivery-reconciliation-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "integration-twilio_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "signature_mismatch"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "twilio.api",
+    "memory.write",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 12,
+  "maxDurationSec": 180,
+  "riskTier": "safe",
+  "successCriteria": [
+    "sms_delivery_status_reconciled_with_sent_messages"
+  ],
+  "rollbackPlan": "Abort Twilio operation and log security event if signature invalid.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "retry_then_escalate",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": true,
+    "nextRequired": false
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

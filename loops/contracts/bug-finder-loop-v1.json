@@ -1,0 +1,115 @@
+{
+  "loopId": "bug-finder-loop-v1",
+  "version": "1.0.0",
+  "tier": "core",
+  "displayName": "Bug Finder Loop",
+  "description": "Reproducibility-first defect hunter that creates minimal failing test cases from SLO violations, user reports, or automated detection signals.",
+  "ownerAgent": "bug-finder-agent",
+  "category": "delivery",
+  "dependencyLayer": "delivery",
+  "priority": 8,
+  "triggerTypes": [
+    "event",
+    "manual"
+  ],
+  "triggerClass": "event-triggered",
+  "cadence": {
+    "default": "event-driven",
+    "quietHours": "allow",
+    "override": "immediate-on-slo-breach"
+  },
+  "entryCriteria": [
+    "failed_slo_or_test_or_user_defect_report_exists",
+    "debugging_budget_available"
+  ],
+  "hardStops": [
+    "reproduction_impossible_after_max_attempts",
+    "budget_exhausted",
+    "operator_abort"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "defect_signal",
+    "relevant_source_code",
+    "test_suite_state",
+    "recent_change_log"
+  ],
+  "thinkingPolicy": {
+    "default": "high",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "complex_reproduction_path"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "file.read",
+    "file.write",
+    "test.run",
+    "code.search"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 24,
+  "maxDurationSec": 900,
+  "riskTier": "safe",
+  "successCriteria": [
+    "reproducible_defect_card_created",
+    "minimal_failing_test_written",
+    "root_cause_hypothesis_documented"
+  ],
+  "rollbackPlan": "Discard incomplete defect card and escalate to human triage.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "reflect",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.6,
+    "toolFailureBudget": 4,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1",
+      "end-to-end-loop-v1"
+    ],
+    "canCall": [
+      "research-loop-v1",
+      "debugging-loop-v1"
+    ]
+  }
+}

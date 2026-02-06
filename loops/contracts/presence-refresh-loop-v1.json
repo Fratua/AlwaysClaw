@@ -1,0 +1,98 @@
+{
+  "loopId": "presence-refresh-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Presence Refresh Loop",
+  "description": "Refreshes ephemeral presence entries before TTL expiration (5 min) and prunes stale entries beyond 200 cap.",
+  "ownerAgent": "presence-agent",
+  "category": "runtime",
+  "tier": "B",
+  "dependencyLayer": "runtime-orchestration",
+  "priority": 37,
+  "triggerTypes": [
+    "event"
+  ],
+  "triggerClass": "always-on",
+  "cadence": {
+    "default": "continuous"
+  },
+  "entryCriteria": [
+    "presence_entry_approaching_ttl_expiration"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "presence-refresh-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "runtime_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "repeated_failure"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "metrics.query",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 10,
+  "maxDurationSec": 120,
+  "riskTier": "safe",
+  "successCriteria": [
+    "presence_entries_refreshed_stale_pruned"
+  ],
+  "rollbackPlan": "Revert to previous state and emit error event.",
+  "fallbackLoopChain": [
+    "retry-orchestration-loop-v1"
+  ],
+  "terminationPolicy": "retry_then_escalate",
+  "writebacks": {
+    "memory": false,
+    "logs": true,
+    "actionArtifacts": false,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": false,
+    "nextRequired": false
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

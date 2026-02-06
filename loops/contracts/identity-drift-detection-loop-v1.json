@@ -1,0 +1,100 @@
+{
+  "loopId": "identity-drift-detection-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Identity Drift Detection Loop",
+  "description": "Detects drift between active agent behavior and IDENTITY.md/SOUL.md baseline specifications over time.",
+  "ownerAgent": "identity-runtime-agent",
+  "category": "context-memory",
+  "tier": "B",
+  "dependencyLayer": "context-memory",
+  "priority": 49,
+  "triggerTypes": [
+    "event",
+    "cron"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily"
+  },
+  "entryCriteria": [
+    "identity_behavior_samples_collected_for_drift_check"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "identity-drift-detection-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "context-memory_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "data_inconsistency"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "file.read",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 14,
+  "maxDurationSec": 300,
+  "riskTier": "safe",
+  "successCriteria": [
+    "identity_drift_assessment_completed_with_score"
+  ],
+  "rollbackPlan": "Discard pending writes and retain current state.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": false,
+    "auditTrail": false
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

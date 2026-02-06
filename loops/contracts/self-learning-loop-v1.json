@@ -1,0 +1,104 @@
+{
+  "loopId": "self-learning-loop-v1",
+  "version": "1.0.0",
+  "tier": "core",
+  "displayName": "Self-Learning Loop",
+  "description": "Converts loop outcomes into reusable memory cards and playbooks. Runs continuously after any loop completion to capture lessons learned.",
+  "ownerAgent": "self-learning-agent",
+  "category": "autonomy",
+  "dependencyLayer": "autonomy",
+  "priority": 16,
+  "triggerTypes": [
+    "event"
+  ],
+  "triggerClass": "event-triggered",
+  "cadence": {
+    "default": "continuous",
+    "quietHours": "allow",
+    "override": "on-loop-completion"
+  },
+  "entryCriteria": [
+    "loop_completion_event_received",
+    "learning_pipeline_available"
+  ],
+  "hardStops": [
+    "memory_write_failure",
+    "budget_exhausted",
+    "operator_abort"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "completed_loop_output",
+    "existing_playbooks",
+    "memory_index"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "novel_pattern_detected"
+    ],
+    "deescalateOn": [
+      "routine_outcome"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "file.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send",
+    "config.write",
+    "file.write"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 12,
+  "maxDurationSec": 360,
+  "riskTier": "safe",
+  "successCriteria": [
+    "memory_cards_written",
+    "playbook_entries_updated_or_created"
+  ],
+  "rollbackPlan": "Discard new memory cards and retain existing playbooks unchanged.",
+  "fallbackLoopChain": [],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": false,
+    "auditTrail": false
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.4,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "meta-cognition-loop-v1"
+    ],
+    "canCall": []
+  }
+}

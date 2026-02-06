@@ -1,0 +1,100 @@
+{
+  "loopId": "config-drift-reconciliation-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Config Drift Reconciliation Loop",
+  "description": "Detects and reconciles configuration drift between running state and declared config baseline.",
+  "ownerAgent": "observability-agent",
+  "category": "quality",
+  "tier": "B",
+  "dependencyLayer": "governance",
+  "priority": 85,
+  "triggerTypes": [
+    "event",
+    "cron"
+  ],
+  "triggerClass": "event-triggered",
+  "cadence": {
+    "default": "on-change"
+  },
+  "entryCriteria": [
+    "config_state_check_interval_elapsed"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "config-drift-reconciliation-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "quality_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "test_failure_spike"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "test.run",
+    "file.read",
+    "memory.write",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 16,
+  "maxDurationSec": 360,
+  "riskTier": "safe",
+  "successCriteria": [
+    "config_drift_detected_and_reconciliation_proposed"
+  ],
+  "rollbackPlan": "Log test results and defer to next quality gate.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": false
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

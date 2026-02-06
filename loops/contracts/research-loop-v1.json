@@ -1,0 +1,114 @@
+{
+  "loopId": "research-loop-v1",
+  "version": "1.0.0",
+  "tier": "core",
+  "displayName": "Research Loop",
+  "description": "Collects, grades, and normalizes evidence from multiple sources. Requires source quality scoring and produces structured evidence packs for downstream decision loops.",
+  "ownerAgent": "research-agent",
+  "category": "knowledge",
+  "dependencyLayer": "knowledge",
+  "priority": 5,
+  "triggerTypes": [
+    "manual",
+    "event"
+  ],
+  "triggerClass": "event-triggered",
+  "cadence": {
+    "default": "on-demand",
+    "quietHours": "defer",
+    "override": "immediate-on-uncertainty"
+  },
+  "entryCriteria": [
+    "fact_gap_identified_or_uncertainty_threshold_exceeded",
+    "research_budget_available"
+  ],
+  "hardStops": [
+    "source_access_failure_cascade",
+    "budget_limit_reached",
+    "operator_abort"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "research_brief",
+    "prior_evidence_packs",
+    "domain_context"
+  ],
+  "thinkingPolicy": {
+    "default": "high",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "extreme_ambiguity",
+      "conflicting_sources"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "web.search",
+    "web.fetch",
+    "file.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.formSubmit",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 24,
+  "maxDurationSec": 720,
+  "riskTier": "safe",
+  "successCriteria": [
+    "evidence_pack_emitted_with_quality_scores",
+    "minimum_three_sources_consulted",
+    "confidence_above_threshold"
+  ],
+  "rollbackPlan": "Discard partial evidence pack and return uncertainty signal to caller.",
+  "fallbackLoopChain": [
+    "discovery-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": false
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "reflect",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.6,
+    "toolFailureBudget": 5,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1",
+      "planning-loop-v1",
+      "bug-finder-loop-v1"
+    ],
+    "canCall": [
+      "discovery-loop-v1"
+    ]
+  }
+}

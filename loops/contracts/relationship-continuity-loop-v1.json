@@ -1,0 +1,100 @@
+{
+  "loopId": "relationship-continuity-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Relationship Continuity Loop",
+  "description": "Maintains conversation relationship context across sessions ensuring natural interaction continuity.",
+  "ownerAgent": "identity-runtime-agent",
+  "category": "context-memory",
+  "tier": "B",
+  "dependencyLayer": "context-memory",
+  "priority": 52,
+  "triggerTypes": [
+    "event",
+    "cron"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily"
+  },
+  "entryCriteria": [
+    "cross_session_context_requires_continuity_check"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "relationship-continuity-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "context-memory_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "data_inconsistency"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "file.read",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 14,
+  "maxDurationSec": 300,
+  "riskTier": "safe",
+  "successCriteria": [
+    "cross_session_continuity_context_verified"
+  ],
+  "rollbackPlan": "Discard pending writes and retain current state.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": false,
+    "auditTrail": false
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

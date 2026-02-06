@@ -1,0 +1,117 @@
+{
+  "loopId": "meta-cognition-loop-v1",
+  "version": "1.0.0",
+  "tier": "core",
+  "displayName": "Meta-Cognition Loop",
+  "description": "Critiques loop execution strategy and rewrites future run strategy rules. Analyzes repeated failures to derive systemic improvements across the loop kernel.",
+  "ownerAgent": "meta-cognition-agent",
+  "category": "strategic",
+  "dependencyLayer": "strategic",
+  "priority": 3,
+  "triggerTypes": [
+    "cron",
+    "event"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily",
+    "quietHours": "suppress",
+    "override": "on-repeat-failure-threshold"
+  },
+  "entryCriteria": [
+    "repeated_loop_failure_detected_or_periodic_review_due",
+    "loop_telemetry_available"
+  ],
+  "hardStops": [
+    "strategy_rewrite_causes_validation_failure",
+    "budget_exhausted",
+    "operator_abort"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "SOUL.md",
+    "loop_scorecards",
+    "failure_telemetry",
+    "current_strategy_rules"
+  ],
+  "thinkingPolicy": {
+    "default": "xhigh",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "systemic_pattern_detected"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "metrics.query",
+    "config.read",
+    "config.propose"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send",
+    "config.write"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [
+    "strategy_deltas",
+    "policy_amendments"
+  ],
+  "approvalRequired": false,
+  "maxSteps": 22,
+  "maxDurationSec": 900,
+  "riskTier": "safe",
+  "successCriteria": [
+    "strategy_deltas_emitted",
+    "policy_amendments_proposed",
+    "improvement_hypothesis_documented"
+  ],
+  "rollbackPlan": "Discard proposed strategy changes and retain current policy.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "reflect",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.65,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": [
+      "research-loop-v1",
+      "self-learning-loop-v1"
+    ]
+  }
+}

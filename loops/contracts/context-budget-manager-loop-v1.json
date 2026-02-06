@@ -1,0 +1,100 @@
+{
+  "loopId": "context-budget-manager-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Context Budget Manager Loop",
+  "description": "Manages token budget allocation across context slices ensuring prompt assembly stays within model limits.",
+  "ownerAgent": "context-compiler-agent",
+  "category": "context-memory",
+  "tier": "B",
+  "dependencyLayer": "context-memory",
+  "priority": 45,
+  "triggerTypes": [
+    "event",
+    "cron"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily"
+  },
+  "entryCriteria": [
+    "prompt_assembly_approaching_token_budget_limit"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "context-budget-manager-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "context-memory_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "data_inconsistency"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "file.read",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 14,
+  "maxDurationSec": 300,
+  "riskTier": "safe",
+  "successCriteria": [
+    "token_budget_allocated_within_model_limits"
+  ],
+  "rollbackPlan": "Discard pending writes and retain current state.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": false,
+    "auditTrail": false
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "loopId": "privilege-escalation-approval-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Privilege Escalation Approval Loop",
+  "description": "Gates privilege escalation requests through explicit human approval workflow with command audit trail.",
+  "ownerAgent": "elevated-exec-guard-agent",
+  "category": "security",
+  "tier": "A",
+  "dependencyLayer": "security",
+  "priority": 67,
+  "triggerTypes": [
+    "event"
+  ],
+  "triggerClass": "always-on",
+  "cadence": {
+    "default": "continuous"
+  },
+  "entryCriteria": [
+    "privilege_escalation_request_submitted"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "privilege-escalation-approval-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "security_context"
+  ],
+  "thinkingPolicy": {
+    "default": "high",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "active_threat_detected"
+    ],
+    "deescalateOn": [
+      "false_positive_confirmed"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "config.read",
+    "metrics.query",
+    "auth.verify"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [
+    "privilege_escalation"
+  ],
+  "approvalRequired": true,
+  "maxSteps": 15,
+  "maxDurationSec": 300,
+  "riskTier": "high",
+  "successCriteria": [
+    "privilege_escalation_approved_or_denied_with_audit"
+  ],
+  "rollbackPlan": "Revert to last known secure state and alert operator.",
+  "fallbackLoopChain": [
+    "incident-containment-loop-v1"
+  ],
+  "terminationPolicy": "hard_stop_and_alert",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.7,
+    "toolFailureBudget": 2,
+    "sideEffectApprovalRequired": true
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

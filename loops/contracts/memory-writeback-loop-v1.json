@@ -1,0 +1,100 @@
+{
+  "loopId": "memory-writeback-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Memory Writeback Loop",
+  "description": "Persists loop outputs and conversation insights to disk memory and vector store with structured indexing.",
+  "ownerAgent": "memory-runtime-agent",
+  "category": "context-memory",
+  "tier": "A",
+  "dependencyLayer": "context-memory",
+  "priority": 46,
+  "triggerTypes": [
+    "event",
+    "cron"
+  ],
+  "triggerClass": "always-on",
+  "cadence": {
+    "default": "daily"
+  },
+  "entryCriteria": [
+    "loop_output_or_insight_ready_for_persistence"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "memory-writeback-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "context-memory_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "data_inconsistency"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "file.read",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 14,
+  "maxDurationSec": 300,
+  "riskTier": "safe",
+  "successCriteria": [
+    "loop_output_persisted_to_memory_and_vector_store"
+  ],
+  "rollbackPlan": "Discard pending writes and retain current state.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": false,
+    "auditTrail": false
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

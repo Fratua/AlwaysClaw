@@ -1,0 +1,97 @@
+{
+  "loopId": "gmail-history-delta-sync-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Gmail History Delta Sync Loop",
+  "description": "Performs incremental mailbox sync using history.list from stored lastHistoryId to process new messages.",
+  "ownerAgent": "gmail-integration-agent",
+  "category": "integration-gmail",
+  "tier": "A",
+  "dependencyLayer": "integration",
+  "priority": 54,
+  "triggerTypes": [
+    "event"
+  ],
+  "triggerClass": "event-triggered",
+  "cadence": {
+    "default": "event-driven"
+  },
+  "entryCriteria": [
+    "gmail_sync_job_enqueued_with_valid_history_id"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "gmail-history-delta-sync-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "integration-gmail_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "auth_failure"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "gmail.api",
+    "memory.write",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 12,
+  "maxDurationSec": 180,
+  "riskTier": "safe",
+  "successCriteria": [
+    "mailbox_delta_synced_via_history_api"
+  ],
+  "rollbackPlan": "Abort Gmail operation and log failure event.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "retry_then_escalate",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": true,
+    "nextRequired": false
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "loopId": "end-to-end-loop-v1",
+  "version": "1.0.0",
+  "tier": "core",
+  "displayName": "End-to-End Loop",
+  "description": "Executes full scenario from trigger to user-visible completion. Validates feature correctness across the entire stack with structured execution traces.",
+  "ownerAgent": "e2e-agent",
+  "category": "delivery",
+  "dependencyLayer": "delivery",
+  "priority": 10,
+  "triggerTypes": [
+    "event",
+    "cron",
+    "manual"
+  ],
+  "triggerClass": "manual-scheduled-hybrid",
+  "cadence": {
+    "default": "per-release",
+    "quietHours": "suppress",
+    "override": "nightly"
+  },
+  "entryCriteria": [
+    "feature_marked_implementation_complete",
+    "test_environment_available"
+  ],
+  "hardStops": [
+    "environment_unavailable",
+    "critical_infrastructure_failure",
+    "operator_abort"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "feature_spec",
+    "test_scenarios",
+    "deployment_state",
+    "integration_endpoints"
+  ],
+  "thinkingPolicy": {
+    "default": "xhigh",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "complex_multi_service_failure"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "test.run",
+    "file.read",
+    "browser.navigate",
+    "browser.screenshot",
+    "api.call"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "email.send",
+    "browser.formSubmit"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [
+    "external_side_effects"
+  ],
+  "approvalRequired": true,
+  "maxSteps": 30,
+  "maxDurationSec": 1200,
+  "riskTier": "moderate",
+  "successCriteria": [
+    "end_to_end_execution_trace_recorded",
+    "pass_fail_verdict_emitted",
+    "all_assertions_passed"
+  ],
+  "rollbackPlan": "Flag feature as validation-failed and notify release gate.",
+  "fallbackLoopChain": [
+    "bug-finder-loop-v1",
+    "debugging-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "awaiting_approval",
+    "verify",
+    "commit",
+    "reflect",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.8,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": true
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1",
+      "debugging-loop-v1"
+    ],
+    "canCall": [
+      "bug-finder-loop-v1"
+    ]
+  }
+}

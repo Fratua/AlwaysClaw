@@ -1,0 +1,100 @@
+{
+  "loopId": "rollback-verification-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Rollback Verification Loop",
+  "description": "Verifies rollback completeness after deployment reversal ensuring system state matches pre-deployment baseline.",
+  "ownerAgent": "rollback-agent",
+  "category": "reliability",
+  "tier": "B",
+  "dependencyLayer": "reliability",
+  "priority": 81,
+  "triggerTypes": [
+    "cron",
+    "event"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily"
+  },
+  "entryCriteria": [
+    "rollback_executed_pending_state_verification"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "rollback-verification-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "reliability_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "slo_breach_imminent"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "metrics.query",
+    "memory.write",
+    "config.read",
+    "health.check"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 14,
+  "maxDurationSec": 300,
+  "riskTier": "safe",
+  "successCriteria": [
+    "rollback_state_verified_matches_pre_deployment"
+  ],
+  "rollbackPlan": "Log failure and defer to next scheduled run.",
+  "fallbackLoopChain": [
+    "chaos-drill-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": false,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": true,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

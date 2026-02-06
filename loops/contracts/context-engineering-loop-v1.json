@@ -1,0 +1,114 @@
+{
+  "loopId": "context-engineering-loop-v1",
+  "version": "1.0.0",
+  "tier": "core",
+  "displayName": "Context Engineering Loop",
+  "description": "Optimizes context packing, retrieval windows, and compaction strategy. Responds to token pressure or context retrieval misses with policy revisions.",
+  "ownerAgent": "context-engineering-agent",
+  "category": "knowledge",
+  "dependencyLayer": "knowledge",
+  "priority": 7,
+  "triggerTypes": [
+    "cron",
+    "event"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily",
+    "quietHours": "suppress",
+    "override": "on-token-pressure-threshold"
+  },
+  "entryCriteria": [
+    "token_pressure_or_context_retrieval_misses_detected",
+    "context_optimization_budget_available"
+  ],
+  "hardStops": [
+    "context_corruption_detected",
+    "budget_exhausted",
+    "operator_abort"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "context_metrics",
+    "retrieval_miss_log",
+    "compaction_policy"
+  ],
+  "thinkingPolicy": {
+    "default": "high",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "severe_context_degradation"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "config.read",
+    "config.propose",
+    "metrics.query"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [
+    "policy_changes"
+  ],
+  "approvalRequired": true,
+  "maxSteps": 18,
+  "maxDurationSec": 600,
+  "riskTier": "moderate",
+  "successCriteria": [
+    "retrieval_packing_policy_revision_emitted",
+    "context_miss_rate_reduction_projected"
+  ],
+  "rollbackPlan": "Revert to previous context packing policy.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "awaiting_approval",
+    "verify",
+    "commit",
+    "reflect",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.7,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": true
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1",
+      "planning-loop-v1"
+    ],
+    "canCall": [
+      "research-loop-v1"
+    ]
+  }
+}

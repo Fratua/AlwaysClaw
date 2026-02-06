@@ -1,0 +1,98 @@
+{
+  "loopId": "session-isolation-guard-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Session Isolation Guard Loop",
+  "description": "Enforces session isolation boundaries to prevent cross-session data leakage and unauthorized access between sessions.",
+  "ownerAgent": "session-engine-agent",
+  "category": "runtime",
+  "tier": "A",
+  "dependencyLayer": "runtime-orchestration",
+  "priority": 34,
+  "triggerTypes": [
+    "event"
+  ],
+  "triggerClass": "always-on",
+  "cadence": {
+    "default": "continuous"
+  },
+  "entryCriteria": [
+    "session_key_resolved_and_isolation_check_required"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "session-isolation-guard-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "runtime_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "repeated_failure"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "metrics.query",
+    "config.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 10,
+  "maxDurationSec": 120,
+  "riskTier": "safe",
+  "successCriteria": [
+    "session_isolation_verified_no_leakage_detected"
+  ],
+  "rollbackPlan": "Revert to previous state and emit error event.",
+  "fallbackLoopChain": [
+    "retry-orchestration-loop-v1"
+  ],
+  "terminationPolicy": "retry_then_escalate",
+  "writebacks": {
+    "memory": false,
+    "logs": true,
+    "actionArtifacts": false,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": false,
+    "actionsRequired": false,
+    "nextRequired": false
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

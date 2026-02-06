@@ -1,0 +1,114 @@
+{
+  "loopId": "self-upgrading-loop-v1",
+  "version": "1.0.0",
+  "tier": "core",
+  "displayName": "Self-Upgrading Loop",
+  "description": "Proposes binary/dependency/plugin upgrades with rollback plan. Must include smoke test and e2e verification plan before approval request.",
+  "ownerAgent": "self-upgrading-agent",
+  "category": "autonomy",
+  "dependencyLayer": "autonomy",
+  "priority": 19,
+  "triggerTypes": [
+    "cron",
+    "event"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "weekly",
+    "quietHours": "suppress",
+    "override": "on-security-patch"
+  },
+  "entryCriteria": [
+    "security_patch_or_performance_bottleneck_detected",
+    "upgrade_proposal_budget_available"
+  ],
+  "hardStops": [
+    "upgrade_test_failure",
+    "approval_denied",
+    "operator_abort"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "dependency_manifest",
+    "vulnerability_reports",
+    "performance_baselines"
+  ],
+  "thinkingPolicy": {
+    "default": "high",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "major_version_upgrade_required"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "file.read",
+    "dependency.scan",
+    "test.run"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "dependency.install",
+    "file.write",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [
+    "upgrade_proposal",
+    "rollback_plan_review"
+  ],
+  "approvalRequired": true,
+  "maxSteps": 18,
+  "maxDurationSec": 720,
+  "riskTier": "high",
+  "successCriteria": [
+    "upgrade_proposal_with_rollback_plan_emitted",
+    "smoke_test_plan_included",
+    "e2e_verification_plan_included"
+  ],
+  "rollbackPlan": "Discard upgrade proposal and retain current dependency versions.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "park_and_await_approval",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "awaiting_approval",
+    "verify",
+    "commit",
+    "reflect",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.85,
+    "toolFailureBudget": 2,
+    "sideEffectApprovalRequired": true
+  },
+  "composition": {
+    "canBeCalledBy": [],
+    "canCall": [
+      "research-loop-v1"
+    ]
+  }
+}

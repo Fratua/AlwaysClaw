@@ -1,0 +1,1372 @@
+{
+  "$schema": "../schema/loop.contract.schema.json",
+  "version": "1.0.0",
+  "generatedAt": "2026-02-06T18:27:55.076Z",
+  "counts": {
+    "total": 105,
+    "core": 15,
+    "derived": 90,
+    "tierA": 43,
+    "tierB": 47
+  },
+  "dependencyLayers": [
+    "strategic",
+    "knowledge",
+    "delivery",
+    "autonomy",
+    "runtime-intake",
+    "runtime-orchestration",
+    "context-memory",
+    "integration",
+    "security",
+    "reliability",
+    "governance"
+  ],
+  "loops": [
+    {
+      "loopId": "ralph-loop-v1",
+      "displayName": "Ralph Loop",
+      "tier": "core",
+      "category": "strategic",
+      "loopClass": "core",
+      "riskTier": "moderate",
+      "triggerClass": "manual-scheduled-hybrid",
+      "dependencyEdges": [
+        "research-loop-v1",
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/ralph-loop-v1.json"
+    },
+    {
+      "loopId": "research-loop-v1",
+      "displayName": "Research Loop",
+      "tier": "core",
+      "category": "knowledge",
+      "loopClass": "core",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "discovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/research-loop-v1.json"
+    },
+    {
+      "loopId": "discovery-loop-v1",
+      "displayName": "Discovery Loop",
+      "tier": "core",
+      "category": "knowledge",
+      "loopClass": "core",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/discovery-loop-v1.json"
+    },
+    {
+      "loopId": "bug-finder-loop-v1",
+      "displayName": "Bug Finder Loop",
+      "tier": "core",
+      "category": "delivery",
+      "loopClass": "core",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/bug-finder-loop-v1.json"
+    },
+    {
+      "loopId": "debugging-loop-v1",
+      "displayName": "Debugging Loop",
+      "tier": "core",
+      "category": "delivery",
+      "loopClass": "core",
+      "riskTier": "moderate",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1",
+        "bug-finder-loop-v1"
+      ],
+      "contractFile": "loops/contracts/debugging-loop-v1.json"
+    },
+    {
+      "loopId": "end-to-end-loop-v1",
+      "displayName": "End-to-End Loop",
+      "tier": "core",
+      "category": "delivery",
+      "loopClass": "core",
+      "riskTier": "moderate",
+      "triggerClass": "manual-scheduled-hybrid",
+      "dependencyEdges": [
+        "bug-finder-loop-v1",
+        "debugging-loop-v1"
+      ],
+      "contractFile": "loops/contracts/end-to-end-loop-v1.json"
+    },
+    {
+      "loopId": "meta-cognition-loop-v1",
+      "displayName": "Meta-Cognition Loop",
+      "tier": "core",
+      "category": "strategic",
+      "loopClass": "core",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/meta-cognition-loop-v1.json"
+    },
+    {
+      "loopId": "exploration-loop-v1",
+      "displayName": "Exploration Loop",
+      "tier": "core",
+      "category": "knowledge",
+      "loopClass": "core",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/exploration-loop-v1.json"
+    },
+    {
+      "loopId": "self-driven-loop-v1",
+      "displayName": "Self-Driven Loop",
+      "tier": "core",
+      "category": "autonomy",
+      "loopClass": "core",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/self-driven-loop-v1.json"
+    },
+    {
+      "loopId": "self-learning-loop-v1",
+      "displayName": "Self-Learning Loop",
+      "tier": "core",
+      "category": "autonomy",
+      "loopClass": "core",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/self-learning-loop-v1.json"
+    },
+    {
+      "loopId": "self-updating-loop-v1",
+      "displayName": "Self-Updating Loop",
+      "tier": "core",
+      "category": "autonomy",
+      "loopClass": "core",
+      "riskTier": "high",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/self-updating-loop-v1.json"
+    },
+    {
+      "loopId": "self-upgrading-loop-v1",
+      "displayName": "Self-Upgrading Loop",
+      "tier": "core",
+      "category": "autonomy",
+      "loopClass": "core",
+      "riskTier": "high",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/self-upgrading-loop-v1.json"
+    },
+    {
+      "loopId": "planning-loop-v1",
+      "displayName": "Planning Loop",
+      "tier": "core",
+      "category": "strategic",
+      "loopClass": "core",
+      "riskTier": "safe",
+      "triggerClass": "manual-scheduled-hybrid",
+      "dependencyEdges": [
+        "research-loop-v1",
+        "discovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/planning-loop-v1.json"
+    },
+    {
+      "loopId": "context-engineering-loop-v1",
+      "displayName": "Context Engineering Loop",
+      "tier": "core",
+      "category": "knowledge",
+      "loopClass": "core",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/context-engineering-loop-v1.json"
+    },
+    {
+      "loopId": "context-prompt-engineering-loop-v1",
+      "displayName": "Context Prompt Engineering Loop",
+      "tier": "core",
+      "category": "knowledge",
+      "loopClass": "core",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/context-prompt-engineering-loop-v1.json"
+    },
+    {
+      "loopId": "intake-normalization-loop-v1",
+      "displayName": "Intake Normalization Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/intake-normalization-loop-v1.json"
+    },
+    {
+      "loopId": "intent-classification-loop-v1",
+      "displayName": "Intent Classification Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/intent-classification-loop-v1.json"
+    },
+    {
+      "loopId": "route-resolution-loop-v1",
+      "displayName": "Route Resolution Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/route-resolution-loop-v1.json"
+    },
+    {
+      "loopId": "session-key-resolution-loop-v1",
+      "displayName": "Session Key Resolution Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/session-key-resolution-loop-v1.json"
+    },
+    {
+      "loopId": "session-isolation-guard-loop-v1",
+      "displayName": "Session Isolation Guard Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/session-isolation-guard-loop-v1.json"
+    },
+    {
+      "loopId": "queue-admission-control-loop-v1",
+      "displayName": "Queue Admission Control Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/queue-admission-control-loop-v1.json"
+    },
+    {
+      "loopId": "queue-backpressure-relief-loop-v1",
+      "displayName": "Queue Backpressure Relief Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "dead-letter-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/queue-backpressure-relief-loop-v1.json"
+    },
+    {
+      "loopId": "retry-orchestration-loop-v1",
+      "displayName": "Retry Orchestration Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/retry-orchestration-loop-v1.json"
+    },
+    {
+      "loopId": "dead-letter-recovery-loop-v1",
+      "displayName": "Dead-Letter Recovery Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/dead-letter-recovery-loop-v1.json"
+    },
+    {
+      "loopId": "presence-refresh-loop-v1",
+      "displayName": "Presence Refresh Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/presence-refresh-loop-v1.json"
+    },
+    {
+      "loopId": "hook-dispatch-loop-v1",
+      "displayName": "Hook Dispatch Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/hook-dispatch-loop-v1.json"
+    },
+    {
+      "loopId": "hook-retry-replay-loop-v1",
+      "displayName": "Hook Retry and Replay Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/hook-retry-replay-loop-v1.json"
+    },
+    {
+      "loopId": "heartbeat-synthesis-loop-v1",
+      "displayName": "Heartbeat Synthesis Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/heartbeat-synthesis-loop-v1.json"
+    },
+    {
+      "loopId": "heartbeat-escalation-loop-v1",
+      "displayName": "Heartbeat Escalation Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/heartbeat-escalation-loop-v1.json"
+    },
+    {
+      "loopId": "cron-dispatch-loop-v1",
+      "displayName": "Cron Dispatch Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/cron-dispatch-loop-v1.json"
+    },
+    {
+      "loopId": "cron-catch-up-loop-v1",
+      "displayName": "Cron Catch-Up Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/cron-catch-up-loop-v1.json"
+    },
+    {
+      "loopId": "cron-isolated-session-bootstrap-loop-v1",
+      "displayName": "Cron Isolated Session Bootstrap Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/cron-isolated-session-bootstrap-loop-v1.json"
+    },
+    {
+      "loopId": "model-fallback-loop-v1",
+      "displayName": "Model Fallback Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/model-fallback-loop-v1.json"
+    },
+    {
+      "loopId": "thinking-level-controller-loop-v1",
+      "displayName": "Thinking-Level Controller Loop",
+      "tier": "B",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/thinking-level-controller-loop-v1.json"
+    },
+    {
+      "loopId": "tool-eligibility-resolver-loop-v1",
+      "displayName": "Tool Eligibility Resolver Loop",
+      "tier": "A",
+      "category": "runtime",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "retry-orchestration-loop-v1"
+      ],
+      "contractFile": "loops/contracts/tool-eligibility-resolver-loop-v1.json"
+    },
+    {
+      "loopId": "context-budget-manager-loop-v1",
+      "displayName": "Context Budget Manager Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/context-budget-manager-loop-v1.json"
+    },
+    {
+      "loopId": "context-snapshot-loop-v1",
+      "displayName": "Context Snapshot Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/context-snapshot-loop-v1.json"
+    },
+    {
+      "loopId": "memory-writeback-loop-v1",
+      "displayName": "Memory Writeback Loop",
+      "tier": "A",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/memory-writeback-loop-v1.json"
+    },
+    {
+      "loopId": "memory-retrieval-validation-loop-v1",
+      "displayName": "Memory Retrieval Validation Loop",
+      "tier": "A",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/memory-retrieval-validation-loop-v1.json"
+    },
+    {
+      "loopId": "memory-compaction-trigger-loop-v1",
+      "displayName": "Memory Compaction Trigger Loop",
+      "tier": "A",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/memory-compaction-trigger-loop-v1.json"
+    },
+    {
+      "loopId": "memory-consolidation-loop-v1",
+      "displayName": "Memory Consolidation Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/memory-consolidation-loop-v1.json"
+    },
+    {
+      "loopId": "identity-drift-detection-loop-v1",
+      "displayName": "Identity Drift Detection Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/identity-drift-detection-loop-v1.json"
+    },
+    {
+      "loopId": "soul-consistency-enforcement-loop-v1",
+      "displayName": "Soul Consistency Enforcement Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/soul-consistency-enforcement-loop-v1.json"
+    },
+    {
+      "loopId": "user-profile-refresh-loop-v1",
+      "displayName": "User Profile Refresh Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/user-profile-refresh-loop-v1.json"
+    },
+    {
+      "loopId": "preference-learning-loop-v1",
+      "displayName": "Preference Learning Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/preference-learning-loop-v1.json"
+    },
+    {
+      "loopId": "relationship-continuity-loop-v1",
+      "displayName": "Relationship Continuity Loop",
+      "tier": "B",
+      "category": "context-memory",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/relationship-continuity-loop-v1.json"
+    },
+    {
+      "loopId": "gmail-watch-renewal-loop-v1",
+      "displayName": "Gmail Watch Renewal Loop",
+      "tier": "A",
+      "category": "integration-gmail",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/gmail-watch-renewal-loop-v1.json"
+    },
+    {
+      "loopId": "gmail-notification-intake-loop-v1",
+      "displayName": "Gmail Notification Intake Loop",
+      "tier": "A",
+      "category": "integration-gmail",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/gmail-notification-intake-loop-v1.json"
+    },
+    {
+      "loopId": "gmail-history-delta-sync-loop-v1",
+      "displayName": "Gmail History Delta Sync Loop",
+      "tier": "A",
+      "category": "integration-gmail",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/gmail-history-delta-sync-loop-v1.json"
+    },
+    {
+      "loopId": "gmail-full-resync-loop-v1",
+      "displayName": "Gmail Full Resync Loop",
+      "tier": "A",
+      "category": "integration-gmail",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "gmail-history-delta-sync-loop-v1"
+      ],
+      "contractFile": "loops/contracts/gmail-full-resync-loop-v1.json"
+    },
+    {
+      "loopId": "gmail-action-execution-loop-v1",
+      "displayName": "Gmail Action Execution Loop",
+      "tier": "B",
+      "category": "integration-gmail",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/gmail-action-execution-loop-v1.json"
+    },
+    {
+      "loopId": "twilio-webhook-verification-loop-v1",
+      "displayName": "Twilio Webhook Verification Loop",
+      "tier": "A",
+      "category": "integration-twilio",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/twilio-webhook-verification-loop-v1.json"
+    },
+    {
+      "loopId": "sms-inbound-processing-loop-v1",
+      "displayName": "SMS Inbound Processing Loop",
+      "tier": "A",
+      "category": "integration-twilio",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/sms-inbound-processing-loop-v1.json"
+    },
+    {
+      "loopId": "sms-delivery-reconciliation-loop-v1",
+      "displayName": "SMS Delivery Reconciliation Loop",
+      "tier": "A",
+      "category": "integration-twilio",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/sms-delivery-reconciliation-loop-v1.json"
+    },
+    {
+      "loopId": "voice-call-orchestration-loop-v1",
+      "displayName": "Voice Call Orchestration Loop",
+      "tier": "A",
+      "category": "integration-voice",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/voice-call-orchestration-loop-v1.json"
+    },
+    {
+      "loopId": "voice-callback-reconciliation-loop-v1",
+      "displayName": "Voice Callback Reconciliation Loop",
+      "tier": "B",
+      "category": "integration-voice",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/voice-callback-reconciliation-loop-v1.json"
+    },
+    {
+      "loopId": "browser-session-lifecycle-loop-v1",
+      "displayName": "Browser Session Lifecycle Loop",
+      "tier": "A",
+      "category": "integration-browser",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/browser-session-lifecycle-loop-v1.json"
+    },
+    {
+      "loopId": "browser-workflow-executor-loop-v1",
+      "displayName": "Browser Workflow Executor Loop",
+      "tier": "A",
+      "category": "integration-browser",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/browser-workflow-executor-loop-v1.json"
+    },
+    {
+      "loopId": "browser-artifact-verification-loop-v1",
+      "displayName": "Browser Artifact Verification Loop",
+      "tier": "A",
+      "category": "integration-browser",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/browser-artifact-verification-loop-v1.json"
+    },
+    {
+      "loopId": "browser-prompt-injection-scanner-loop-v1",
+      "displayName": "Browser Prompt-Injection Scanner Loop",
+      "tier": "A",
+      "category": "integration-browser",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/browser-prompt-injection-scanner-loop-v1.json"
+    },
+    {
+      "loopId": "stt-stream-processing-loop-v1",
+      "displayName": "STT Stream Processing Loop",
+      "tier": "A",
+      "category": "integration-voice",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/stt-stream-processing-loop-v1.json"
+    },
+    {
+      "loopId": "tts-synthesis-loop-v1",
+      "displayName": "TTS Synthesis Loop",
+      "tier": "A",
+      "category": "integration-voice",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/tts-synthesis-loop-v1.json"
+    },
+    {
+      "loopId": "wakeword-arbitration-loop-v1",
+      "displayName": "Wakeword Arbitration Loop",
+      "tier": "B",
+      "category": "integration-voice",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/wakeword-arbitration-loop-v1.json"
+    },
+    {
+      "loopId": "voice-barge-in-coordination-loop-v1",
+      "displayName": "Voice Barge-In Coordination Loop",
+      "tier": "B",
+      "category": "integration-voice",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/voice-barge-in-coordination-loop-v1.json"
+    },
+    {
+      "loopId": "voice-transcript-redaction-loop-v1",
+      "displayName": "Voice Transcript Redaction Loop",
+      "tier": "B",
+      "category": "integration-voice",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/voice-transcript-redaction-loop-v1.json"
+    },
+    {
+      "loopId": "pairing-challenge-trust-loop-v1",
+      "displayName": "Pairing Challenge and Trust Loop",
+      "tier": "A",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/pairing-challenge-trust-loop-v1.json"
+    },
+    {
+      "loopId": "mention-gate-enforcement-loop-v1",
+      "displayName": "Mention-Gate Enforcement Loop",
+      "tier": "A",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/mention-gate-enforcement-loop-v1.json"
+    },
+    {
+      "loopId": "privilege-escalation-approval-loop-v1",
+      "displayName": "Privilege Escalation Approval Loop",
+      "tier": "A",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "high",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/privilege-escalation-approval-loop-v1.json"
+    },
+    {
+      "loopId": "command-risk-scoring-loop-v1",
+      "displayName": "Command Risk Scoring Loop",
+      "tier": "A",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/command-risk-scoring-loop-v1.json"
+    },
+    {
+      "loopId": "secret-rotation-loop-v1",
+      "displayName": "Secret Rotation Loop",
+      "tier": "A",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "high",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/secret-rotation-loop-v1.json"
+    },
+    {
+      "loopId": "exfiltration-guard-loop-v1",
+      "displayName": "Exfiltration Guard Loop",
+      "tier": "A",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/exfiltration-guard-loop-v1.json"
+    },
+    {
+      "loopId": "access-anomaly-detection-loop-v1",
+      "displayName": "Access Anomaly Detection Loop",
+      "tier": "B",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/access-anomaly-detection-loop-v1.json"
+    },
+    {
+      "loopId": "incident-containment-loop-v1",
+      "displayName": "Incident Containment Loop",
+      "tier": "A",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "high",
+      "triggerClass": "always-on",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/incident-containment-loop-v1.json"
+    },
+    {
+      "loopId": "forensics-package-builder-loop-v1",
+      "displayName": "Forensics Package Builder Loop",
+      "tier": "B",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/forensics-package-builder-loop-v1.json"
+    },
+    {
+      "loopId": "policy-drift-audit-loop-v1",
+      "displayName": "Policy Drift Audit Loop",
+      "tier": "B",
+      "category": "security",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "incident-containment-loop-v1"
+      ],
+      "contractFile": "loops/contracts/policy-drift-audit-loop-v1.json"
+    },
+    {
+      "loopId": "health-probing-loop-v1",
+      "displayName": "Health Probing Loop",
+      "tier": "A",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/health-probing-loop-v1.json"
+    },
+    {
+      "loopId": "watchdog-recovery-loop-v1",
+      "displayName": "Watchdog Recovery Loop",
+      "tier": "A",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "restart-governor-loop-v1"
+      ],
+      "contractFile": "loops/contracts/watchdog-recovery-loop-v1.json"
+    },
+    {
+      "loopId": "restart-governor-loop-v1",
+      "displayName": "Restart Governor Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/restart-governor-loop-v1.json"
+    },
+    {
+      "loopId": "backup-snapshot-loop-v1",
+      "displayName": "Backup Snapshot Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/backup-snapshot-loop-v1.json"
+    },
+    {
+      "loopId": "restore-validation-loop-v1",
+      "displayName": "Restore Validation Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/restore-validation-loop-v1.json"
+    },
+    {
+      "loopId": "log-compaction-loop-v1",
+      "displayName": "Log Compaction Loop",
+      "tier": "A",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/log-compaction-loop-v1.json"
+    },
+    {
+      "loopId": "metrics-export-loop-v1",
+      "displayName": "Metrics Export Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/metrics-export-loop-v1.json"
+    },
+    {
+      "loopId": "slo-burn-rate-alert-loop-v1",
+      "displayName": "SLO Burn-Rate Alert Loop",
+      "tier": "A",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/slo-burn-rate-alert-loop-v1.json"
+    },
+    {
+      "loopId": "cost-budget-control-loop-v1",
+      "displayName": "Cost Budget Control Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/cost-budget-control-loop-v1.json"
+    },
+    {
+      "loopId": "latency-regression-detection-loop-v1",
+      "displayName": "Latency Regression Detection Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/latency-regression-detection-loop-v1.json"
+    },
+    {
+      "loopId": "capacity-forecast-loop-v1",
+      "displayName": "Capacity Forecast Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/capacity-forecast-loop-v1.json"
+    },
+    {
+      "loopId": "canary-release-validation-loop-v1",
+      "displayName": "Canary Release Validation Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/canary-release-validation-loop-v1.json"
+    },
+    {
+      "loopId": "rollback-verification-loop-v1",
+      "displayName": "Rollback Verification Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "chaos-drill-loop-v1"
+      ],
+      "contractFile": "loops/contracts/rollback-verification-loop-v1.json"
+    },
+    {
+      "loopId": "chaos-drill-loop-v1",
+      "displayName": "Chaos Drill Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/chaos-drill-loop-v1.json"
+    },
+    {
+      "loopId": "postmortem-synthesis-loop-v1",
+      "displayName": "Postmortem Synthesis Loop",
+      "tier": "B",
+      "category": "reliability",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "watchdog-recovery-loop-v1"
+      ],
+      "contractFile": "loops/contracts/postmortem-synthesis-loop-v1.json"
+    },
+    {
+      "loopId": "regression-suite-orchestration-loop-v1",
+      "displayName": "Regression Suite Orchestration Loop",
+      "tier": "A",
+      "category": "quality",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/regression-suite-orchestration-loop-v1.json"
+    },
+    {
+      "loopId": "test-gap-discovery-loop-v1",
+      "displayName": "Test Gap Discovery Loop",
+      "tier": "B",
+      "category": "quality",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/test-gap-discovery-loop-v1.json"
+    },
+    {
+      "loopId": "config-drift-reconciliation-loop-v1",
+      "displayName": "Config Drift Reconciliation Loop",
+      "tier": "B",
+      "category": "quality",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/config-drift-reconciliation-loop-v1.json"
+    },
+    {
+      "loopId": "dependency-vulnerability-tracking-loop-v1",
+      "displayName": "Dependency Vulnerability Tracking Loop",
+      "tier": "B",
+      "category": "quality",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/dependency-vulnerability-tracking-loop-v1.json"
+    },
+    {
+      "loopId": "schema-migration-safety-loop-v1",
+      "displayName": "Schema Migration Safety Loop",
+      "tier": "B",
+      "category": "quality",
+      "loopClass": "derived",
+      "riskTier": "safe",
+      "triggerClass": "event-triggered",
+      "dependencyEdges": [
+        "research-loop-v1"
+      ],
+      "contractFile": "loops/contracts/schema-migration-safety-loop-v1.json"
+    },
+    {
+      "loopId": "proposal-aggregation-loop-v1",
+      "displayName": "Proposal Aggregation Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/proposal-aggregation-loop-v1.json"
+    },
+    {
+      "loopId": "approval-queue-manager-loop-v1",
+      "displayName": "Approval Queue Manager Loop",
+      "tier": "A",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/approval-queue-manager-loop-v1.json"
+    },
+    {
+      "loopId": "human-in-the-loop-timeout-escalation-loop-v1",
+      "displayName": "Human-in-the-Loop Timeout Escalation Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/human-in-the-loop-timeout-escalation-loop-v1.json"
+    },
+    {
+      "loopId": "safe-mode-guardian-loop-v1",
+      "displayName": "Safe-Mode Guardian Loop",
+      "tier": "A",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "always-on",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/safe-mode-guardian-loop-v1.json"
+    },
+    {
+      "loopId": "goal-priority-rebalancer-loop-v1",
+      "displayName": "Goal Priority Rebalancer Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/goal-priority-rebalancer-loop-v1.json"
+    },
+    {
+      "loopId": "objective-conflict-resolver-loop-v1",
+      "displayName": "Objective Conflict Resolver Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/objective-conflict-resolver-loop-v1.json"
+    },
+    {
+      "loopId": "learning-quality-auditor-loop-v1",
+      "displayName": "Learning Quality Auditor Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/learning-quality-auditor-loop-v1.json"
+    },
+    {
+      "loopId": "self-change-rollback-loop-v1",
+      "displayName": "Self-Change Rollback Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [],
+      "contractFile": "loops/contracts/self-change-rollback-loop-v1.json"
+    },
+    {
+      "loopId": "knowledge-decay-cleanup-loop-v1",
+      "displayName": "Knowledge Decay Cleanup Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/knowledge-decay-cleanup-loop-v1.json"
+    },
+    {
+      "loopId": "weekly-strategy-renewal-loop-v1",
+      "displayName": "Weekly Strategy Renewal Loop",
+      "tier": "B",
+      "category": "governance",
+      "loopClass": "derived",
+      "riskTier": "moderate",
+      "triggerClass": "scheduled",
+      "dependencyEdges": [
+        "planning-loop-v1"
+      ],
+      "contractFile": "loops/contracts/weekly-strategy-renewal-loop-v1.json"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "loopId": "learning-quality-auditor-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Learning Quality Auditor Loop",
+  "description": "Audits quality of self-learning outputs ensuring memory cards and playbooks meet accuracy standards.",
+  "ownerAgent": "evolution-governor-agent",
+  "category": "governance",
+  "tier": "B",
+  "dependencyLayer": "governance",
+  "priority": 91,
+  "triggerTypes": [
+    "event",
+    "cron"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily"
+  },
+  "entryCriteria": [
+    "self_learning_outputs_accumulated_for_audit"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "learning-quality-auditor-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "governance_context"
+  ],
+  "thinkingPolicy": {
+    "default": "high",
+    "escalateTo": "xhigh",
+    "escalateOn": [
+      "policy_violation_detected"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "memory.search",
+    "memory.write",
+    "config.read",
+    "tasks.read"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send",
+    "config.write"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [
+    "policy_change"
+  ],
+  "approvalRequired": false,
+  "maxSteps": 14,
+  "maxDurationSec": 300,
+  "riskTier": "moderate",
+  "successCriteria": [
+    "learning_outputs_audited_quality_verified"
+  ],
+  "rollbackPlan": "Retain current governance policy and log audit failure.",
+  "fallbackLoopChain": [
+    "planning-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.6,
+    "toolFailureBudget": 2,
+    "sideEffectApprovalRequired": true
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

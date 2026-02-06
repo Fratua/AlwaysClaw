@@ -1,0 +1,100 @@
+{
+  "loopId": "chaos-drill-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Chaos Drill Loop",
+  "description": "Executes controlled failure injection drills validating system resilience and recovery procedures.",
+  "ownerAgent": "chaos-agent",
+  "category": "reliability",
+  "tier": "B",
+  "dependencyLayer": "reliability",
+  "priority": 82,
+  "triggerTypes": [
+    "cron",
+    "event"
+  ],
+  "triggerClass": "scheduled",
+  "cadence": {
+    "default": "daily"
+  },
+  "entryCriteria": [
+    "chaos_drill_window_open_for_failure_injection"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "chaos-drill-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "reliability_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "slo_breach_imminent"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "metrics.query",
+    "memory.write",
+    "config.read",
+    "health.check"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "browser.navigate",
+    "email.send"
+  ],
+  "toolTierBudget": "tier-0",
+  "approvalPoints": [],
+  "approvalRequired": false,
+  "maxSteps": 14,
+  "maxDurationSec": 300,
+  "riskTier": "safe",
+  "successCriteria": [
+    "chaos_drill_completed_resilience_report_generated"
+  ],
+  "rollbackPlan": "Log failure and defer to next scheduled run.",
+  "fallbackLoopChain": [
+    "watchdog-recovery-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": false,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": false,
+    "evidenceRequired": true,
+    "actionsRequired": false,
+    "nextRequired": true
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.5,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": false
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}

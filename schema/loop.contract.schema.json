@@ -1,0 +1,376 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://alwaysclaw.dev/schema/loop.contract.schema.json",
+  "title": "AlwaysClaw Loop Contract",
+  "description": "Canonical schema for hardcoded loop contracts in the AlwaysClaw loop kernel.",
+  "type": "object",
+  "required": [
+    "loopId",
+    "version",
+    "displayName",
+    "description",
+    "ownerAgent",
+    "category",
+    "tier",
+    "dependencyLayer",
+    "priority",
+    "triggerTypes",
+    "triggerClass",
+    "cadence",
+    "entryCriteria",
+    "hardStops",
+    "requiredContext",
+    "thinkingPolicy",
+    "allowedTools",
+    "forbiddenTools",
+    "toolTierBudget",
+    "approvalPoints",
+    "approvalRequired",
+    "maxSteps",
+    "maxDurationSec",
+    "riskTier",
+    "successCriteria",
+    "rollbackPlan",
+    "fallbackLoopChain",
+    "terminationPolicy",
+    "writebacks",
+    "outputContract",
+    "loopLifecycleStates",
+    "guardrails",
+    "composition"
+  ],
+  "properties": {
+    "loopId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+-v\\d+$",
+      "description": "Unique loop identifier in kebab-case with version suffix."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this loop contract."
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 3,
+      "description": "Human-readable name for the loop."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Detailed description of the loop purpose and behavior."
+    },
+    "ownerAgent": {
+      "type": "string",
+      "minLength": 2,
+      "description": "Agent responsible for this loop execution."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "strategic",
+        "knowledge",
+        "delivery",
+        "autonomy",
+        "runtime",
+        "context-memory",
+        "integration-gmail",
+        "integration-twilio",
+        "integration-browser",
+        "integration-voice",
+        "security",
+        "reliability",
+        "quality",
+        "governance"
+      ],
+      "description": "Functional category of the loop."
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["core", "A", "B"],
+      "description": "Execution tier. core = 15 core loops, A = mandatory for v1 parity, B = advanced autonomy phase-in."
+    },
+    "dependencyLayer": {
+      "type": "string",
+      "enum": [
+        "strategic",
+        "knowledge",
+        "delivery",
+        "autonomy",
+        "runtime-intake",
+        "runtime-orchestration",
+        "context-memory",
+        "integration",
+        "security",
+        "reliability",
+        "governance"
+      ],
+      "description": "Dependency layer in the loop supergraph."
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Execution priority (1 = highest, 100 = lowest)."
+    },
+    "triggerTypes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["manual", "event", "cron", "heartbeat", "self-driven", "api"]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "How this loop can be triggered."
+    },
+    "triggerClass": {
+      "type": "string",
+      "enum": ["always-on", "event-triggered", "scheduled", "manual-scheduled-hybrid"],
+      "description": "Operational trigger classification."
+    },
+    "cadence": {
+      "type": "object",
+      "required": ["default"],
+      "properties": {
+        "default": {
+          "type": "string",
+          "minLength": 2,
+          "description": "Default execution cadence (e.g., '30m', 'on-demand', 'daily')."
+        },
+        "quietHours": {
+          "type": "string",
+          "description": "Cadence during quiet hours."
+        },
+        "override": {
+          "type": "string",
+          "description": "Override cadence for special conditions."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Execution cadence configuration."
+    },
+    "entryCriteria": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Preconditions that must be true before the loop can start."
+    },
+    "hardStops": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Conditions that immediately halt the loop."
+    },
+    "requiredContext": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Context files, events, or memory needed for execution."
+    },
+    "thinkingPolicy": {
+      "type": "object",
+      "required": ["default"],
+      "properties": {
+        "default": {
+          "type": "string",
+          "enum": ["medium", "high", "xhigh"],
+          "description": "Default thinking level for model reasoning."
+        },
+        "escalateTo": {
+          "type": "string",
+          "enum": ["high", "xhigh"],
+          "description": "Thinking level to escalate to on failure or ambiguity."
+        },
+        "escalateOn": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Conditions that trigger thinking escalation."
+        },
+        "deescalateOn": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Conditions that trigger thinking de-escalation."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Model reasoning effort policy."
+    },
+    "allowedTools": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 2 },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Strict allowlist of tools this loop may invoke."
+    },
+    "forbiddenTools": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 2 },
+      "uniqueItems": true,
+      "description": "Hard deny list of tools this loop must never invoke."
+    },
+    "toolTierBudget": {
+      "type": "string",
+      "enum": ["tier-0", "tier-1", "tier-2"],
+      "description": "Maximum tool tier this loop is authorized to use."
+    },
+    "approvalPoints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Named checkpoints requiring approval before proceeding."
+    },
+    "approvalRequired": {
+      "type": "boolean",
+      "description": "Whether this loop requires manual approval for execution."
+    },
+    "maxSteps": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "description": "Maximum number of execution steps allowed."
+    },
+    "maxDurationSec": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 7200,
+      "description": "Maximum wall-clock duration in seconds."
+    },
+    "riskTier": {
+      "type": "string",
+      "enum": ["safe", "moderate", "high"],
+      "description": "Risk classification for approval and governance routing."
+    },
+    "successCriteria": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Deterministic conditions that define loop success."
+    },
+    "rollbackPlan": {
+      "type": "string",
+      "minLength": 5,
+      "description": "Strategy for reverting loop effects on failure."
+    },
+    "fallbackLoopChain": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9-]+-v\\d+$" },
+      "uniqueItems": true,
+      "description": "Ordered list of loops to invoke if this loop fails."
+    },
+    "terminationPolicy": {
+      "type": "string",
+      "enum": [
+        "safe_stop_and_report",
+        "hard_stop_and_alert",
+        "retry_then_escalate",
+        "park_and_await_approval"
+      ],
+      "description": "Behavior when the loop must terminate abnormally."
+    },
+    "writebacks": {
+      "type": "object",
+      "required": ["memory", "logs", "actionArtifacts", "auditTrail"],
+      "properties": {
+        "memory": { "type": "boolean", "description": "Write results to memory store." },
+        "logs": { "type": "boolean", "description": "Emit structured log entries." },
+        "actionArtifacts": { "type": "boolean", "description": "Persist action artifacts for verification." },
+        "auditTrail": { "type": "boolean", "description": "Write immutable audit records." }
+      },
+      "additionalProperties": false,
+      "description": "Writeback configuration for loop outputs."
+    },
+    "outputContract": {
+      "type": "object",
+      "required": [
+        "summaryRequired",
+        "confidenceRequired",
+        "evidenceRequired",
+        "actionsRequired",
+        "nextRequired"
+      ],
+      "properties": {
+        "summaryRequired": { "type": "boolean" },
+        "confidenceRequired": { "type": "boolean" },
+        "evidenceRequired": { "type": "boolean" },
+        "actionsRequired": { "type": "boolean" },
+        "nextRequired": { "type": "boolean" }
+      },
+      "additionalProperties": false,
+      "description": "Required output artifact fields."
+    },
+    "loopLifecycleStates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "preflight",
+          "context-build",
+          "reason",
+          "act",
+          "verify",
+          "commit",
+          "reflect",
+          "archive",
+          "awaiting_approval"
+        ]
+      },
+      "minItems": 5,
+      "uniqueItems": true,
+      "description": "Ordered lifecycle states this loop traverses."
+    },
+    "guardrails": {
+      "type": "object",
+      "required": ["confidenceThreshold", "toolFailureBudget", "sideEffectApprovalRequired"],
+      "properties": {
+        "confidenceThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum confidence score to proceed without fallback."
+        },
+        "toolFailureBudget": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum tolerated tool failures before incident."
+        },
+        "sideEffectApprovalRequired": {
+          "type": "boolean",
+          "description": "Require approval for any side effects."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Runtime guardrail configuration."
+    },
+    "composition": {
+      "type": "object",
+      "required": ["canBeCalledBy", "canCall"],
+      "properties": {
+        "canBeCalledBy": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9-]+-v\\d+$" },
+          "uniqueItems": true,
+          "description": "Loop IDs that can invoke this loop as a sub-loop."
+        },
+        "canCall": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9-]+-v\\d+$" },
+          "uniqueItems": true,
+          "description": "Loop IDs this loop can invoke as sub-loops."
+        },
+        "isSubLoopOf": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+-v\\d+$",
+          "description": "Parent loop ID if this is a dedicated sub-loop."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Composition rules for loop orchestration."
+    }
+  },
+  "additionalProperties": false
+}

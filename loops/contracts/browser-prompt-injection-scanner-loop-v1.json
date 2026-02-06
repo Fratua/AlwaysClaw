@@ -1,0 +1,103 @@
+{
+  "loopId": "browser-prompt-injection-scanner-loop-v1",
+  "version": "1.0.0",
+  "displayName": "Browser Prompt-Injection Scanner Loop",
+  "description": "Scans browser page content for prompt injection attempts before allowing agent interaction with page elements.",
+  "ownerAgent": "browser-risk-agent",
+  "category": "integration-browser",
+  "tier": "A",
+  "dependencyLayer": "integration",
+  "priority": 62,
+  "triggerTypes": [
+    "event",
+    "manual"
+  ],
+  "triggerClass": "always-on",
+  "cadence": {
+    "default": "on-demand"
+  },
+  "entryCriteria": [
+    "browser_page_loaded_pending_injection_scan"
+  ],
+  "hardStops": [
+    "budget_exhausted",
+    "operator_abort",
+    "browser-prompt-injection-scanner-loop_critical_failure"
+  ],
+  "requiredContext": [
+    "AGENTS.md",
+    "integration-browser_context"
+  ],
+  "thinkingPolicy": {
+    "default": "medium",
+    "escalateTo": "high",
+    "escalateOn": [
+      "page_injection_detected"
+    ],
+    "deescalateOn": [
+      "budget_pressure"
+    ]
+  },
+  "allowedTools": [
+    "browser.navigate",
+    "browser.screenshot",
+    "browser.readDom",
+    "memory.write"
+  ],
+  "forbiddenTools": [
+    "host.exec",
+    "email.send",
+    "browser.formSubmit"
+  ],
+  "toolTierBudget": "tier-1",
+  "approvalPoints": [
+    "form_submission",
+    "purchase_action"
+  ],
+  "approvalRequired": false,
+  "maxSteps": 15,
+  "maxDurationSec": 300,
+  "riskTier": "safe",
+  "successCriteria": [
+    "page_content_scanned_no_injection_threats_found"
+  ],
+  "rollbackPlan": "Close browser session and discard pending actions.",
+  "fallbackLoopChain": [
+    "research-loop-v1"
+  ],
+  "terminationPolicy": "safe_stop_and_report",
+  "writebacks": {
+    "memory": true,
+    "logs": true,
+    "actionArtifacts": true,
+    "auditTrail": true
+  },
+  "outputContract": {
+    "summaryRequired": true,
+    "confidenceRequired": true,
+    "evidenceRequired": true,
+    "actionsRequired": true,
+    "nextRequired": false
+  },
+  "loopLifecycleStates": [
+    "queued",
+    "preflight",
+    "context-build",
+    "reason",
+    "act",
+    "verify",
+    "commit",
+    "archive"
+  ],
+  "guardrails": {
+    "confidenceThreshold": 0.6,
+    "toolFailureBudget": 3,
+    "sideEffectApprovalRequired": true
+  },
+  "composition": {
+    "canBeCalledBy": [
+      "ralph-loop-v1"
+    ],
+    "canCall": []
+  }
+}
