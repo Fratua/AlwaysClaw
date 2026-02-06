@@ -1,134 +1,334 @@
 {
+  "$schema": "../schema/degraded-mode-policy.schema.json",
   "version": "1.0.0",
-  "description": "Degraded mode policy for AlwaysClaw (master plan sections 35, 44)",
-  "triggerConditions": {
-    "repeatedCrashThreshold": {
-      "count": 5,
-      "windowMinutes": 15,
-      "description": "5 crashes within a 15-minute window triggers degraded mode entry"
+  "generatedFrom": "OPENCLAW_WIN10_GPT52_MASTERPLAN.md sections 28, 35, 44",
+  "generatedAt": "2026-02-06T00:00:00Z",
+  "description": "Defines the policy for entering, operating within, and exiting degraded mode. Degraded mode preserves read-only assistant capability and communication channels while disabling high-risk operations until a human operator acknowledges and resolves the issue.",
+  "triggerConditions": [
+    {
+      "conditionId": "crash-threshold-exceeded",
+      "description": "Any core (critical=true) service exceeds 5 restarts within 15 minutes.",
+      "threshold": {
+        "maxRestarts": 5,
+        "windowMinutes": 15
+      },
+      "scope": "per-component",
+      "severity": "P1"
     },
-    "healthCheckConsecutiveFailures": {
-      "count": 3,
-      "description": "3 consecutive health check failures on any critical component triggers degraded mode"
+    {
+      "conditionId": "wsl2-unrecoverable",
+      "description": "WSL2 distribution cannot be started after 3 consecutive attempts.",
+      "threshold": {
+        "maxAttempts": 3
+      },
+      "severity": "P1"
     },
-    "memoryExhaustion": {
-      "heapUsagePercent": 95,
-      "description": "When heap memory usage exceeds 95%, enter degraded mode to prevent OOM"
+    {
+      "conditionId": "all-critical-down",
+      "description": "Health probe detects all critical service endpoints are unreachable simultaneously.",
+      "severity": "P1"
     },
-    "diskSpaceCritical": {
-      "freeSpacePercent": 5,
-      "paths": [
-        "C:\\AlwaysClaw\\state",
-        "/home/alwaysclaw/state"
-      ],
-      "description": "When free disk space on state partitions drops below 5%, enter degraded mode"
+    {
+      "conditionId": "error-budget-exhausted",
+      "description": "Any SLO error budget reaches 0% remaining.",
+      "severity": "P2"
+    },
+    {
+      "conditionId": "security-incident-detected",
+      "description": "Incident containment loop detects a confirmed security breach requiring immediate lockdown.",
+      "severity": "P1"
+    },
+    {
+      "conditionId": "manual-trigger",
+      "description": "Operator manually triggers degraded mode via kill switch or API command.",
+      "severity": "P2"
     }
-  },
-  "behavior": {
-    "tier2ToolsDisabled": true,
-    "readOnlyPreserved": true,
-    "communicationChannelsActive": [
-      "heartbeat",
-      "incident-notifications"
+  ],
+  "tier2ToolDisablement": {
+    "description": "All tier-2 (irreversible/high-risk) tools are immediately disabled upon entering degraded mode.",
+    "disabledToolTiers": [
+      "tier-2"
     ],
-    "autonomousLoopsSuspended": true,
-    "manualTriggersOnly": true,
-    "description": "In degraded mode: tier-2 (irreversible/high-risk) tools are disabled, read-only operations continue, only heartbeat and incident notification channels remain active, all autonomous loops are suspended, and only manually triggered operations are permitted"
-  },
-  "incidentEvent": {
-    "format": {
-      "type": "degraded-mode-entry",
-      "severity": "critical|warning",
-      "timestamp": "ISO-8601",
-      "component": "component-name",
-      "description": "Human-readable description of what triggered degraded mode",
-      "triggeredBy": "trigger-condition-id",
-      "metadata": {
-        "crashCount": "number",
-        "failedChecks": "number",
-        "lastHealthCheckResult": "object",
-        "systemMetrics": {
-          "heapUsagePercent": "number",
-          "diskFreePercent": "number",
-          "uptimeSeconds": "number"
-        }
-      }
-    },
-    "destinations": [
-      {
-        "type": "log",
-        "path": "C:\\AlwaysClaw\\state\\logs\\incidents"
-      },
-      {
-        "type": "notification",
-        "channel": "heartbeat",
-        "urgency": "immediate"
-      }
+    "disabledCapabilities": [
+      "host-command-execution",
+      "browser-form-submission",
+      "browser-purchases",
+      "browser-account-changes",
+      "file-deletion",
+      "service-modification",
+      "network-exposure-changes",
+      "package-installs",
+      "registry-modifications",
+      "startup-persistence-changes",
+      "credential-store-access"
     ],
-    "severityClassification": {
-      "critical": "Full component failure or data integrity risk",
-      "warning": "Partial degradation or approaching resource limits"
-    }
-  },
-  "reElevation": {
-    "requireHumanAck": true,
-    "cooldownMinutes": 30,
-    "verificationChecks": [
-      {
-        "name": "all-critical-components-healthy",
-        "description": "Every component marked critical in watchdog-policy must pass health check"
-      },
-      {
-        "name": "crash-rate-below-threshold",
-        "description": "No crashes in the last cooldown window"
-      },
-      {
-        "name": "resource-levels-normal",
-        "description": "Memory and disk usage back within normal operating ranges"
-      },
-      {
-        "name": "no-open-circuit-breakers",
-        "description": "All circuit breakers must be in closed state"
-      }
-    ],
-    "procedure": [
-      "1. Operator acknowledges incident via CLI or web UI",
-      "2. System runs all verification checks",
-      "3. If all checks pass, tier-2 tools re-enabled",
-      "4. Autonomous loops re-enabled with reduced cadence for first 30 minutes",
-      "5. Full cadence restored after monitoring window shows stability"
+    "preservedCapabilities": [
+      "tier-0-read-only-tools",
+      "memory-read",
+      "config-read",
+      "log-read",
+      "health-status-query"
     ]
   },
-  "componentMatrix": {
-    "gateway": {
-      "degradedBehavior": "Queue new commands; serve cached responses for read-only requests; reject all write operations",
-      "fallbackEndpoint": null,
-      "autoRestart": true,
-      "isolateOnFailure": false
+  "readOnlyPreservation": {
+    "description": "In degraded mode, the system operates in read-only assistant mode. It can answer questions, retrieve information, and report status but cannot execute side effects.",
+    "allowedOperations": [
+      "read-memory",
+      "read-config",
+      "read-logs",
+      "read-state",
+      "search-memory",
+      "query-health-status",
+      "list-cron-jobs",
+      "list-active-sessions",
+      "describe-system-state"
+    ],
+    "blockedOperations": [
+      "write-memory",
+      "modify-config",
+      "execute-tools",
+      "start-loops",
+      "modify-cron-jobs",
+      "send-outbound-messages",
+      "browser-actions",
+      "host-commands"
+    ]
+  },
+  "commsPreservation": {
+    "description": "Communication channels remain active in degraded mode so operators and users can interact with the system for diagnostics and recovery.",
+    "preservedChannels": [
+      {
+        "channelId": "gmail-inbound",
+        "mode": "receive-only",
+        "description": "Continue receiving Gmail messages. Outbound sending is blocked unless operator explicitly approves."
+      },
+      {
+        "channelId": "twilio-sms-inbound",
+        "mode": "receive-only",
+        "description": "Continue receiving SMS. Outbound SMS is blocked."
+      },
+      {
+        "channelId": "local-cli",
+        "mode": "full",
+        "description": "Local CLI remains fully operational for diagnostics and operator commands."
+      },
+      {
+        "channelId": "local-web-ui",
+        "mode": "read-only",
+        "description": "Web UI displays status and logs but does not accept action commands."
+      },
+      {
+        "channelId": "incident-event-bus",
+        "mode": "emit-only",
+        "description": "Incident events continue to be emitted for observability."
+      }
+    ]
+  },
+  "incidentEventFormat": {
+    "description": "Format for incident events emitted when entering or operating in degraded mode.",
+    "schema": {
+      "eventId": "string (UUID v4)",
+      "eventType": "enum: degraded-mode-entered | degraded-mode-component-status | degraded-mode-recovery-attempt | degraded-mode-exited",
+      "timestamp": "string (ISO 8601 UTC)",
+      "severity": "enum: P1 | P2 | P3 | P4",
+      "triggerCondition": "string (conditionId from triggerConditions)",
+      "affectedComponents": "array of string (serviceId values)",
+      "systemState": {
+        "activeServices": "array of string",
+        "failedServices": "array of string",
+        "degradedServices": "array of string",
+        "wsl2Status": "enum: running | stopped | unknown",
+        "sidecarStatus": "object mapping sidecarId to status"
+      },
+      "message": "string (human-readable description)",
+      "operatorAckRequired": "boolean",
+      "operatorAckReceived": "boolean",
+      "operatorAckTimestamp": "string (ISO 8601 UTC) or null",
+      "correlationId": "string (links related events)"
     },
-    "loopd": {
-      "degradedBehavior": "Suspend all loop executions; preserve loop state checkpoints; allow manual loop trigger only",
-      "fallbackEndpoint": null,
-      "autoRestart": true,
-      "isolateOnFailure": true
-    },
-    "tools": {
-      "degradedBehavior": "Disable tier-2 tools immediately; tier-0 read-only tools remain active; tier-1 tools require explicit confirmation",
-      "fallbackEndpoint": null,
-      "autoRestart": true,
-      "isolateOnFailure": true
-    },
-    "voice": {
-      "degradedBehavior": "Terminate active voice streams gracefully; disable new call initiation; preserve last transcript state",
-      "fallbackEndpoint": null,
-      "autoRestart": true,
-      "isolateOnFailure": true
-    },
-    "watchdog-scheduler": {
-      "degradedBehavior": "Halt all scheduled task dispatching; keep liveness probes active via Windows Task Scheduler fallback; emit incident event",
-      "fallbackEndpoint": null,
-      "autoRestart": true,
-      "isolateOnFailure": false
+    "exampleEvent": {
+      "eventId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "eventType": "degraded-mode-entered",
+      "timestamp": "2026-02-06T14:30:00Z",
+      "severity": "P1",
+      "triggerCondition": "crash-threshold-exceeded",
+      "affectedComponents": [
+        "alwaysclaw-loopd"
+      ],
+      "systemState": {
+        "activeServices": [
+          "alwaysclaw-gateway",
+          "alwaysclaw-tools",
+          "alwaysclaw-scheduler",
+          "alwaysclaw-memory"
+        ],
+        "failedServices": [
+          "alwaysclaw-loopd"
+        ],
+        "degradedServices": [],
+        "wsl2Status": "running",
+        "sidecarStatus": {
+          "powershell-bridge": "running",
+          "desktop-automation": "running",
+          "browser-control": "running"
+        }
+      },
+      "message": "Loop kernel service exceeded crash threshold (5 restarts in 15 min). Entering degraded mode. Tier-2 tools disabled. Awaiting operator acknowledgment.",
+      "operatorAckRequired": true,
+      "operatorAckReceived": false,
+      "operatorAckTimestamp": null,
+      "correlationId": "incident-20260206-1430-loopd"
     }
+  },
+  "humanAcknowledgment": {
+    "description": "Before the system can exit degraded mode and re-elevate capabilities, a human operator must explicitly acknowledge the incident and approve re-elevation.",
+    "ackMethods": [
+      {
+        "method": "cli-command",
+        "command": "alwaysclaw ops ack-degraded --incident-id <eventId>",
+        "description": "Operator runs CLI command to acknowledge and approve re-elevation."
+      },
+      {
+        "method": "web-ui-button",
+        "description": "Operator clicks 'Acknowledge and Restore' in the operations dashboard."
+      },
+      {
+        "method": "gmail-reply",
+        "description": "Operator replies 'ACK' to the incident notification email. Validated by sender identity.",
+        "senderValidation": "must match configured operator email address"
+      }
+    ],
+    "ackRequirements": {
+      "mustInclude": [
+        "operator-identity",
+        "incident-event-id",
+        "confirmation-of-root-cause-review"
+      ],
+      "timeoutHours": 24,
+      "onTimeout": "Remain in degraded mode. Send escalation reminder every 4 hours."
+    },
+    "reElevationSequence": [
+      {
+        "step": 1,
+        "action": "Verify root cause has been addressed (operator confirms)",
+        "automated": false
+      },
+      {
+        "step": 2,
+        "action": "Run full health check on all components",
+        "automated": true
+      },
+      {
+        "step": 3,
+        "action": "Re-enable tier-1 tools (reversible write tools)",
+        "automated": true
+      },
+      {
+        "step": 4,
+        "action": "Run smoke test suite",
+        "automated": true
+      },
+      {
+        "step": 5,
+        "action": "Re-enable tier-2 tools if smoke tests pass",
+        "automated": true,
+        "requiresHealthyStatus": true
+      },
+      {
+        "step": 6,
+        "action": "Re-enable autonomous loops (self-driven, self-learning)",
+        "automated": false,
+        "requiresOperatorApproval": true
+      },
+      {
+        "step": 7,
+        "action": "Emit degraded-mode-exited event",
+        "automated": true
+      }
+    ]
+  },
+  "componentDegradationMatrix": {
+    "description": "Defines per-component behavior when a specific component fails, independent of full degraded mode.",
+    "matrix": [
+      {
+        "failedComponent": "alwaysclaw-gateway",
+        "impact": "total",
+        "description": "Gateway is the single control plane. Total system failure.",
+        "immediateAction": "Attempt restart with priority. If unrecoverable, enter full degraded mode.",
+        "preservedCapability": "Windows Task Scheduler watchdog continues probing.",
+        "userImpact": "All interactions unavailable until gateway recovers."
+      },
+      {
+        "failedComponent": "alwaysclaw-loopd",
+        "impact": "partial",
+        "description": "Loop kernel down. Automated loops stop but command processing continues.",
+        "immediateAction": "Restart loopd. Disable loop-dependent cron jobs. Gateway continues serving.",
+        "preservedCapability": "Direct command processing, memory read/write, communication channels.",
+        "userImpact": "Automated tasks halt. Manual interaction continues normally."
+      },
+      {
+        "failedComponent": "alwaysclaw-tools",
+        "impact": "partial",
+        "description": "Tool execution service down. Cannot execute file, browser, or system tools.",
+        "immediateAction": "Restart tools service. Queue pending tool requests.",
+        "preservedCapability": "Conversational interaction, memory, scheduling.",
+        "userImpact": "Cannot execute actions requiring tools. Conversational mode only."
+      },
+      {
+        "failedComponent": "alwaysclaw-voice",
+        "impact": "minimal",
+        "description": "Voice service down. STT/TTS and call handling unavailable.",
+        "immediateAction": "Restart voice service. Route interactions to text channels.",
+        "preservedCapability": "All text-based interactions, tools, loops, scheduling.",
+        "userImpact": "Voice/call features unavailable. Text channels fully operational."
+      },
+      {
+        "failedComponent": "alwaysclaw-scheduler",
+        "impact": "partial",
+        "description": "Scheduler down. Cron jobs and heartbeat synthesis stop.",
+        "immediateAction": "Restart scheduler. Windows Task Scheduler watchdog covers basic liveness.",
+        "preservedCapability": "On-demand command processing, tools, memory.",
+        "userImpact": "Automated scheduled tasks halt. Manual interaction continues."
+      },
+      {
+        "failedComponent": "alwaysclaw-memory",
+        "impact": "partial",
+        "description": "Memory service down. Cannot read/write memory or perform vector retrieval.",
+        "immediateAction": "Restart memory service. Serve from cache if available.",
+        "preservedCapability": "Command processing without memory context, tools, scheduling.",
+        "userImpact": "Responses lack historical context. Core functionality continues."
+      },
+      {
+        "failedComponent": "powershell-bridge",
+        "impact": "minimal",
+        "description": "Windows PowerShell sidecar down. Cannot execute privileged host commands.",
+        "immediateAction": "Restart sidecar. Queue pending host commands.",
+        "preservedCapability": "All WSL2-based services continue. Browser and voice unaffected.",
+        "userImpact": "Windows-specific privileged operations unavailable."
+      },
+      {
+        "failedComponent": "browser-control",
+        "impact": "minimal",
+        "description": "Browser control sidecar down. Cannot execute browser automation.",
+        "immediateAction": "Restart sidecar. Notify user of browser unavailability.",
+        "preservedCapability": "All non-browser services continue normally.",
+        "userImpact": "Browser automation unavailable. All other features operational."
+      }
+    ]
+  },
+  "killSwitch": {
+    "description": "Emergency kill switch to immediately enter degraded mode or fully stop the system.",
+    "commands": {
+      "degradedMode": "alwaysclaw ops enter-degraded --reason <description>",
+      "fullStop": "alwaysclaw ops kill --confirm",
+      "perIntegration": {
+        "gmail": "alwaysclaw ops kill-integration gmail",
+        "twilio": "alwaysclaw ops kill-integration twilio",
+        "browser": "alwaysclaw ops kill-integration browser",
+        "voice": "alwaysclaw ops kill-integration voice",
+        "loops": "alwaysclaw ops kill-integration loops"
+      }
+    },
+    "accessControl": "operator-only (validated by pairing identity)"
   }
 }

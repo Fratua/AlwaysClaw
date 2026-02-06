@@ -1,141 +1,235 @@
 {
+  "$schema": "../schema/slo-targets.schema.json",
   "version": "1.0.0",
-  "description": "AlwaysClaw Service Level Objectives derived from master plan section 20",
+  "generatedFrom": "OPENCLAW_WIN10_GPT52_MASTERPLAN.md sections 20, 35",
+  "generatedAt": "2026-02-06T00:00:00Z",
   "slos": [
     {
-      "id": "command-success-rate",
+      "sloId": "command-success-rate",
       "displayName": "Command Success Rate",
-      "description": "Percentage of tier-0 and tier-1 tool commands that complete successfully without error",
-      "target": 0.990,
-      "scope": "tier0-and-tier1-tools",
-      "window": {
-        "duration": "30d",
-        "type": "rolling"
-      },
-      "metric": {
-        "numerator": "successful_command_completions",
-        "denominator": "total_command_invocations",
-        "excludeFilters": [
-          "user-cancelled",
+      "description": "Percentage of tier-0 and tier-1 tool commands that complete successfully without error or timeout.",
+      "metric": "command_success_total / command_attempt_total",
+      "target": 0.99,
+      "unit": "ratio",
+      "window": "30d",
+      "windowType": "rolling",
+      "scope": [
+        "tier-0-tools",
+        "tier-1-tools"
+      ],
+      "measurement": {
+        "numerator": "count of commands with status=success",
+        "denominator": "count of all command attempts (excluding cancelled-by-user)",
+        "excludes": [
+          "cancelled-by-user",
           "approval-timeout"
         ]
       },
-      "burnRateThresholds": [
-        {
-          "windowDuration": "1h",
-          "threshold": 14.4,
-          "severity": "critical",
-          "action": "page-immediate"
-        },
-        {
-          "windowDuration": "6h",
-          "threshold": 6.0,
-          "severity": "warning",
-          "action": "alert-and-reduce-cadence"
-        },
-        {
-          "windowDuration": "24h",
-          "threshold": 3.0,
-          "severity": "info",
-          "action": "log-and-review"
-        }
+      "burnRate": {
+        "thresholds": [
+          {
+            "windowHours": 1,
+            "maxBurnRate": 14.4,
+            "severity": "P1",
+            "action": "page-on-call-immediately"
+          },
+          {
+            "windowHours": 6,
+            "maxBurnRate": 6,
+            "severity": "P2",
+            "action": "alert-and-investigate"
+          },
+          {
+            "windowHours": 24,
+            "maxBurnRate": 3,
+            "severity": "P3",
+            "action": "create-investigation-ticket"
+          }
+        ],
+        "calculation": "burn_rate = (error_rate_in_window / (1 - target)) where target = 0.990"
+      },
+      "alertChannels": [
+        "incident-event-bus",
+        "gmail-notification",
+        "dashboard"
       ]
     },
     {
-      "id": "median-loop-latency",
+      "sloId": "median-loop-latency",
       "displayName": "Median Loop Latency",
-      "description": "p50 latency for standard loop executions must remain under 30 seconds",
+      "description": "p50 latency for standard task loops must remain under 30 seconds over a 24-hour rolling window.",
+      "metric": "loop_duration_seconds_p50",
       "target": 30,
       "unit": "seconds",
       "percentile": "p50",
-      "scope": "standard-loop-executions",
-      "window": {
-        "duration": "24h",
-        "type": "rolling"
+      "window": "24h",
+      "windowType": "rolling",
+      "scope": [
+        "standard-task-loops"
+      ],
+      "excludedLoops": [
+        "ralph-loop",
+        "planning-loop",
+        "meta-cognition-loop",
+        "chaos-drill-loop",
+        "dr-restore-validation"
+      ],
+      "measurement": {
+        "source": "loop_execution_duration histogram",
+        "aggregation": "p50 across all qualifying loop runs in window"
       },
-      "metric": {
-        "measurement": "loop_execution_duration_seconds",
-        "aggregation": "percentile_50",
-        "excludeFilters": [
-          "xhigh-thinking-loops",
-          "approval-wait-time"
-        ]
-      }
+      "breachPolicy": {
+        "severity": "P3",
+        "action": "trigger-latency-regression-scan",
+        "escalateAfterHours": 4,
+        "escalationSeverity": "P2"
+      },
+      "alertChannels": [
+        "incident-event-bus",
+        "dashboard"
+      ]
     },
     {
-      "id": "cron-execution-reliability",
+      "sloId": "cron-execution-reliability",
       "displayName": "Cron Execution Reliability",
-      "description": "Percentage of scheduled cron jobs that execute within their expected window",
+      "description": "Percentage of scheduled cron jobs that execute within their scheduled window without failure.",
+      "metric": "cron_jobs_succeeded / cron_jobs_scheduled",
       "target": 0.995,
-      "scope": "all-scheduled-cron-jobs",
-      "window": {
-        "duration": "7d",
-        "type": "rolling"
-      },
-      "metric": {
-        "numerator": "cron_jobs_executed_on_time",
-        "denominator": "cron_jobs_scheduled",
-        "toleranceSeconds": 60,
-        "excludeFilters": [
-          "manually-paused",
-          "quiet-hours-deferred"
+      "unit": "ratio",
+      "window": "7d",
+      "windowType": "rolling",
+      "scope": [
+        "all-scheduled-cron-jobs"
+      ],
+      "measurement": {
+        "numerator": "count of cron jobs that started and completed within scheduled window",
+        "denominator": "count of all cron jobs that were due to execute",
+        "excludes": [
+          "manually-disabled-jobs"
         ]
-      }
+      },
+      "burnRate": {
+        "thresholds": [
+          {
+            "windowHours": 1,
+            "maxBurnRate": 14.4,
+            "severity": "P1",
+            "action": "page-on-call-immediately"
+          },
+          {
+            "windowHours": 6,
+            "maxBurnRate": 6,
+            "severity": "P2",
+            "action": "alert-and-investigate"
+          },
+          {
+            "windowHours": 24,
+            "maxBurnRate": 3,
+            "severity": "P3",
+            "action": "create-investigation-ticket"
+          }
+        ],
+        "calculation": "burn_rate = (miss_rate_in_window / (1 - target)) where target = 0.995"
+      },
+      "alertChannels": [
+        "incident-event-bus",
+        "gmail-notification",
+        "dashboard"
+      ]
     },
     {
-      "id": "mean-time-to-recovery",
-      "displayName": "Mean Time to Recovery",
-      "description": "Average time from single-process failure detection to service restoration",
+      "sloId": "mean-time-to-recovery",
+      "displayName": "Mean Time To Recovery (MTTR)",
+      "description": "Average time from single-process failure detection to full service restoration must not exceed 300 seconds (5 minutes).",
+      "metric": "mean(recovery_time_seconds)",
       "target": 300,
       "unit": "seconds",
-      "scope": "single-process-failures",
-      "window": {
-        "duration": "30d",
-        "type": "rolling"
+      "window": "30d",
+      "windowType": "rolling",
+      "scope": [
+        "single-process-failures"
+      ],
+      "measurement": {
+        "start": "timestamp of failure detection by health probe or watchdog",
+        "end": "timestamp of first successful health check after recovery",
+        "aggregation": "arithmetic mean of all recovery events in window"
       },
-      "metric": {
-        "measurement": "recovery_duration_seconds",
-        "aggregation": "mean",
-        "startEvent": "failure_detected",
-        "endEvent": "health_check_passed",
-        "excludeFilters": [
-          "multi-component-cascading-failure",
-          "manual-intervention-required"
-        ]
-      }
+      "breachPolicy": {
+        "severity": "P2",
+        "action": "trigger-incident-review",
+        "requirePostmortem": true
+      },
+      "alertChannels": [
+        "incident-event-bus",
+        "gmail-notification",
+        "dashboard"
+      ]
     }
   ],
   "errorBudgetPolicy": {
-    "onExhausted": {
-      "action": "freeze",
-      "description": "When error budget is exhausted, freeze all non-critical deployments and autonomous loop executions until budget recovers",
-      "freezeScope": [
-        "self-updating-loops",
-        "self-upgrading-loops",
-        "autonomous-task-execution",
-        "non-critical-config-changes"
-      ],
-      "exemptScope": [
-        "health-probes",
-        "watchdog-checks",
-        "incident-response",
-        "security-patches"
+    "description": "Governs behavior when error budget is consumed or approaching exhaustion.",
+    "budgetCalculation": {
+      "formula": "error_budget_remaining = 1 - (observed_error_rate / allowed_error_rate)",
+      "example": "For command-success-rate: allowed_error_rate = 1 - 0.990 = 0.01. If observed_error_rate = 0.008, budget_remaining = 1 - (0.008/0.01) = 0.20 (20%)"
+    },
+    "warningThreshold": 0.25,
+    "onBudgetWarning": {
+      "trigger": "error_budget_remaining <= 0.25 (25% remaining)",
+      "actions": [
+        "Freeze non-critical deployments and configuration changes",
+        "Disable tier-B (advanced autonomy) loops",
+        "Increase monitoring frequency: latency and error checks from hourly to every 15 minutes",
+        "Send budget warning notification to operator via Gmail and dashboard",
+        "Activate conservative thinking-level policy (cap at high, disable xhigh for non-critical loops)",
+        "Log budget warning event with current burn rates and projected exhaustion time"
       ]
     },
-    "onWarning": {
-      "action": "reduce-cadence",
-      "threshold": 0.25,
-      "description": "When remaining error budget drops below 25%, reduce non-critical cadences to preserve budget",
-      "cadenceReductions": {
-        "every30min": "hourly",
-        "hourly": "every4h",
-        "daily": "skip-non-essential"
-      }
+    "onBudgetExhausted": {
+      "trigger": "error_budget_remaining <= 0.0 (fully exhausted)",
+      "actions": [
+        "Immediately halt all self-driven, self-updating, and self-upgrading loops",
+        "Disable all tier-2 tool execution",
+        "Enter degraded mode with read-only + communications preservation",
+        "Emit P1 incident event requiring human acknowledgment",
+        "Block all configuration changes until budget recovers above warning threshold",
+        "Generate and send incident summary with root cause candidates to operator",
+        "Require explicit operator approval before re-enabling any frozen capability"
+      ]
     },
-    "reporting": {
-      "dailySummary": true,
-      "weeklyBurnDown": true,
-      "alertOnBurnRateExceeded": true
+    "budgetRecoveryPolicy": {
+      "minRecoveryThreshold": 0.5,
+      "description": "Frozen capabilities remain locked until budget recovers to at least 50% remaining. Operator must explicitly approve re-enablement.",
+      "reEnablementOrder": [
+        "tier-B monitoring loops",
+        "self-learning loops (safe tier)",
+        "self-driven loops (moderate tier, approval-gated)",
+        "self-updating loops (high tier, approval-required)",
+        "self-upgrading loops (high tier, approval-required)"
+      ]
     }
+  },
+  "dashboardRequirements": {
+    "panels": [
+      {
+        "panelId": "slo-overview",
+        "description": "Real-time SLO status with burn rate indicators and budget remaining gauges."
+      },
+      {
+        "panelId": "error-budget-tracker",
+        "description": "Rolling error budget consumption graph per SLO with warning/exhaustion thresholds marked."
+      },
+      {
+        "panelId": "loop-latency-heatmap",
+        "description": "Heatmap of loop execution latencies by loop type over trailing 24h."
+      },
+      {
+        "panelId": "cron-reliability-timeline",
+        "description": "Timeline showing scheduled vs actual cron executions with miss markers."
+      },
+      {
+        "panelId": "recovery-events",
+        "description": "Table of recent recovery events with duration, component, and root cause tags."
+      }
+    ]
   }
 }

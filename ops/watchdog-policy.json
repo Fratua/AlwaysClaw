@@ -1,156 +1,277 @@
 {
+  "$schema": "../schema/watchdog-policy.schema.json",
   "version": "1.0.0",
-  "description": "Watchdog liveness and restart policy for AlwaysClaw services (master plan sections 28, 35)",
+  "generatedFrom": "OPENCLAW_WIN10_GPT52_MASTERPLAN.md sections 7, 16, 28, 35, 44",
+  "generatedAt": "2026-02-06T00:00:00Z",
   "livenessCheck": {
-    "intervalMs": 300000,
-    "intervalHuman": "5 minutes",
-    "timeoutMs": 10000,
-    "description": "Watchdog verifies heartbeat freshness and process liveness every 5 minutes"
-  },
-  "maxRestartAttempts": 5,
-  "restartWindow": {
-    "durationMs": 900000,
-    "durationHuman": "15 minutes",
-    "description": "Maximum 5 restart attempts within a 15-minute sliding window before entering degraded mode"
-  },
-  "restartStrategy": {
-    "type": "exponential-backoff",
-    "initialDelayMs": 1000,
-    "maxDelayMs": 60000,
-    "multiplier": 2,
-    "jitterEnabled": true,
-    "jitterMaxMs": 500
-  },
-  "circuitBreaker": {
-    "enabled": true,
-    "failureThreshold": 5,
-    "resetTimeoutMs": 900000,
-    "resetTimeoutHuman": "15 minutes",
-    "halfOpenMaxAttempts": 1,
-    "description": "After 5 failures, circuit opens for 15 minutes. A single successful health check closes the circuit."
-  },
-  "components": [
-    {
-      "name": "wsl2",
-      "displayName": "WSL2 Runtime",
-      "healthCheck": {
-        "method": "command",
-        "command": "wsl -l --running",
-        "expectedResponse": "Ubuntu",
-        "timeoutMs": 5000
-      },
-      "restartCommand": "wsl --shutdown && timeout /t 3 && wsl -d Ubuntu -- systemctl start alwaysclaw-gateway",
-      "dependsOn": [],
-      "critical": true,
-      "description": "WSL2 Ubuntu distro hosting the core runtime stack"
-    },
-    {
-      "name": "gateway",
-      "displayName": "AlwaysClaw Gateway",
-      "healthCheck": {
-        "method": "http",
-        "endpoint": "http://localhost:3100/health",
-        "expectedStatusCode": 200,
-        "expectedBody": { "status": "ok" },
-        "timeoutMs": 5000
-      },
-      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-gateway",
-      "dependsOn": ["wsl2"],
-      "critical": true,
-      "description": "Central control plane handling RPC, event bus, and routing"
-    },
-    {
-      "name": "loopd",
-      "displayName": "Loop Kernel Daemon",
-      "healthCheck": {
-        "method": "http",
-        "endpoint": "http://localhost:3101/health",
-        "expectedStatusCode": 200,
-        "expectedBody": { "status": "ok" },
-        "timeoutMs": 5000
-      },
-      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-loopd",
-      "dependsOn": ["gateway"],
-      "critical": true,
-      "description": "Loop execution engine running all scheduled and event-driven loops"
-    },
-    {
-      "name": "tools",
-      "displayName": "Tool Execution Service",
-      "healthCheck": {
-        "method": "http",
-        "endpoint": "http://localhost:3102/health",
-        "expectedStatusCode": 200,
-        "expectedBody": { "status": "ok" },
-        "timeoutMs": 5000
-      },
-      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-tools",
-      "dependsOn": ["gateway"],
-      "critical": true,
-      "description": "Tool registry and execution runtime for all tool tiers"
-    },
-    {
-      "name": "voice",
-      "displayName": "Voice Service",
-      "healthCheck": {
-        "method": "http",
-        "endpoint": "http://localhost:3103/health",
-        "expectedStatusCode": 200,
-        "expectedBody": { "status": "ok" },
-        "timeoutMs": 8000
-      },
-      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-voice",
-      "dependsOn": ["gateway", "tools"],
-      "critical": false,
-      "description": "STT/TTS and voice call orchestration service"
-    },
-    {
-      "name": "watchdog-scheduler",
-      "displayName": "Watchdog and Scheduler Service",
-      "healthCheck": {
-        "method": "http",
-        "endpoint": "http://localhost:3104/health",
-        "expectedStatusCode": 200,
-        "expectedBody": { "status": "ok" },
-        "timeoutMs": 5000
-      },
-      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-scheduler",
-      "dependsOn": ["gateway"],
-      "critical": true,
-      "description": "Cron scheduler, heartbeat runner, and watchdog coordination"
+    "interval": "5m",
+    "intervalSeconds": 300,
+    "description": "Watchdog runs every 5 minutes to verify process liveness, heartbeat freshness, and service responsiveness.",
+    "executor": "Windows Task Scheduler -> WSL2 watchdog.sh",
+    "failureDetection": {
+      "methods": [
+        "process-pid-check",
+        "http-health-endpoint",
+        "heartbeat-freshness",
+        "tcp-port-probe"
+      ],
+      "heartbeatStalenessThreshold": "10m",
+      "healthEndpointTimeout": 5
     }
-  ],
-  "degradedModeEntry": {
-    "conditions": [
-      "restart-attempts-exhausted",
-      "circuit-breaker-open",
-      "critical-component-unrecoverable"
+  },
+  "restartPolicy": {
+    "strategy": "exponential-backoff-with-circuit-break",
+    "maxRestartsPerComponent": 5,
+    "restartWindowMinutes": 15,
+    "backoff": {
+      "initialDelaySeconds": 2,
+      "multiplier": 2,
+      "maxDelaySeconds": 60,
+      "jitterPercent": 10
+    },
+    "circuitBreak": {
+      "trigger": "maxRestartsPerComponent reached within restartWindowMinutes",
+      "action": "enter-degraded-mode",
+      "cooldownMinutes": 30,
+      "requireHumanAck": true
+    },
+    "description": "On component failure, restart with exponential backoff (2s, 4s, 8s, 16s, 32s). After 5 failures in 15 min, circuit-break and enter degraded mode."
+  },
+  "wsl2ProcessVerification": {
+    "description": "Verify that the WSL2 Ubuntu distribution is running and core processes are alive inside it.",
+    "checks": [
+      {
+        "checkId": "wsl2-distro-running",
+        "displayName": "WSL2 Distribution Running",
+        "command": "wsl.exe -l --running",
+        "expectedOutput": "Ubuntu",
+        "failureAction": "restart-wsl2",
+        "restartCommand": "wsl.exe -d Ubuntu --exec /opt/alwaysclaw/bin/boot.sh",
+        "critical": true
+      },
+      {
+        "checkId": "wsl2-systemd-active",
+        "displayName": "WSL2 Systemd Active",
+        "command": "wsl.exe -d Ubuntu -- systemctl is-system-running",
+        "expectedOutput": "running",
+        "alternativeAcceptable": "degraded",
+        "failureAction": "log-warning-and-retry",
+        "critical": false
+      }
+    ]
+  },
+  "coreServiceVerification": {
+    "description": "Verify each core AlwaysClaw service is running and responsive.",
+    "services": [
+      {
+        "serviceId": "alwaysclaw-gateway",
+        "displayName": "Gateway Control Plane",
+        "processName": "alwaysclaw-gateway",
+        "healthEndpoint": "http://localhost:3100/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3100,
+        "critical": true,
+        "restartCommand": "wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-gateway",
+        "dependsOn": []
+      },
+      {
+        "serviceId": "alwaysclaw-loopd",
+        "displayName": "Loop Kernel Service",
+        "processName": "alwaysclaw-loopd",
+        "healthEndpoint": "http://localhost:3101/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3101,
+        "critical": true,
+        "restartCommand": "wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-loopd",
+        "dependsOn": [
+          "alwaysclaw-gateway"
+        ]
+      },
+      {
+        "serviceId": "alwaysclaw-tools",
+        "displayName": "Tool Execution Service",
+        "processName": "alwaysclaw-tools",
+        "healthEndpoint": "http://localhost:3102/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3102,
+        "critical": true,
+        "restartCommand": "wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-tools",
+        "dependsOn": [
+          "alwaysclaw-gateway"
+        ]
+      },
+      {
+        "serviceId": "alwaysclaw-scheduler",
+        "displayName": "Watchdog + Scheduler Service",
+        "processName": "alwaysclaw-scheduler",
+        "healthEndpoint": "http://localhost:3103/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3103,
+        "critical": true,
+        "restartCommand": "wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-scheduler",
+        "dependsOn": [
+          "alwaysclaw-gateway"
+        ]
+      },
+      {
+        "serviceId": "alwaysclaw-voice",
+        "displayName": "Voice Service",
+        "processName": "alwaysclaw-voice",
+        "healthEndpoint": "http://localhost:3104/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3104,
+        "critical": false,
+        "restartCommand": "wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-voice",
+        "dependsOn": [
+          "alwaysclaw-gateway"
+        ]
+      },
+      {
+        "serviceId": "alwaysclaw-memory",
+        "displayName": "Memory and Vector Store",
+        "processName": "alwaysclaw-memory",
+        "healthEndpoint": "http://localhost:3105/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3105,
+        "critical": true,
+        "restartCommand": "wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-memory",
+        "dependsOn": [
+          "alwaysclaw-gateway"
+        ]
+      }
+    ]
+  },
+  "sidecarVerification": {
+    "description": "Verify Windows host sidecars for privileged operations are running and accessible.",
+    "sidecars": [
+      {
+        "sidecarId": "powershell-bridge",
+        "displayName": "PowerShell Execution Bridge",
+        "processName": "alwaysclaw-ps-bridge.exe",
+        "healthEndpoint": "http://localhost:3200/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3200,
+        "critical": false,
+        "restartCommand": "powershell.exe -Command \"Start-Process 'C:\\AlwaysClaw\\bin\\alwaysclaw-ps-bridge.exe' -WindowStyle Hidden\"",
+        "securityNote": "Sidecar treated as privileged tool requiring explicit approval for execution."
+      },
+      {
+        "sidecarId": "desktop-automation",
+        "displayName": "Desktop Automation Sidecar",
+        "processName": "alwaysclaw-desktop.exe",
+        "healthEndpoint": "http://localhost:3201/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 5,
+        "tcpPort": 3201,
+        "critical": false,
+        "restartCommand": "powershell.exe -Command \"Start-Process 'C:\\AlwaysClaw\\bin\\alwaysclaw-desktop.exe' -WindowStyle Hidden\"",
+        "securityNote": "Desktop automation runs under restricted policy; UI actions require approval gate."
+      },
+      {
+        "sidecarId": "browser-control",
+        "displayName": "Browser Control (Playwright/CDP)",
+        "processName": "alwaysclaw-browser.exe",
+        "healthEndpoint": "http://localhost:3202/health",
+        "expectedResponse": {
+          "status": "ok"
+        },
+        "healthTimeout": 10,
+        "tcpPort": 3202,
+        "critical": false,
+        "restartCommand": "powershell.exe -Command \"Start-Process 'C:\\AlwaysClaw\\bin\\alwaysclaw-browser.exe' -WindowStyle Hidden\"",
+        "securityNote": "Browser runs in isolated managed profile. Never share cookies across trust tiers."
+      }
+    ]
+  },
+  "degradedModeTransition": {
+    "triggerConditions": [
+      "Any core service (critical=true) fails restartPolicy.maxRestartsPerComponent within restartPolicy.restartWindowMinutes",
+      "WSL2 distribution cannot be started after 3 attempts",
+      "Health probe detects all critical endpoints down simultaneously"
     ],
-    "behavior": {
-      "disableTier2Tools": true,
-      "keepReadOnlyAlive": true,
-      "keepCommunicationAlive": true,
-      "suspendAutonomousLoops": true,
-      "emitIncidentEvent": true,
-      "requireHumanAckBeforeReElevation": true
-    },
-    "description": "When restart attempts are exhausted or circuit breaker opens, system enters degraded mode with reduced capabilities until operator acknowledges and resolves the issue"
+    "transitionAction": "Apply degraded-mode-policy.json",
+    "notificationChannels": [
+      "gmail-notification",
+      "incident-event-bus",
+      "dashboard-alert"
+    ],
+    "autoRecovery": false,
+    "requireHumanAck": true
   },
-  "windowsTaskScheduler": {
-    "bootTask": {
-      "name": "AlwaysClaw-Boot",
-      "trigger": "at-logon",
-      "command": "wsl -d Ubuntu -- systemctl start alwaysclaw-gateway alwaysclaw-loopd alwaysclaw-tools alwaysclaw-voice alwaysclaw-scheduler"
-    },
-    "watchdogTask": {
-      "name": "AlwaysClaw-Watchdog",
-      "trigger": "every-5-minutes",
-      "command": "powershell -ExecutionPolicy Bypass -File C:\\AlwaysClaw\\scripts\\watchdog.ps1"
-    },
-    "dailyMaintenance": {
-      "name": "AlwaysClaw-DailyMaintenance",
-      "trigger": "daily-at-0300",
-      "command": "powershell -ExecutionPolicy Bypass -File C:\\AlwaysClaw\\scripts\\daily-maintenance.ps1"
-    }
+  "startupSequence": {
+    "description": "Ordered component startup sequence to respect dependencies.",
+    "order": [
+      {
+        "step": 1,
+        "action": "Verify WSL2 distro is running",
+        "timeout": 30
+      },
+      {
+        "step": 2,
+        "action": "Start alwaysclaw-gateway",
+        "timeout": 15,
+        "waitForHealthy": true
+      },
+      {
+        "step": 3,
+        "action": "Start alwaysclaw-memory, alwaysclaw-scheduler, alwaysclaw-tools (parallel)",
+        "timeout": 20,
+        "waitForHealthy": true
+      },
+      {
+        "step": 4,
+        "action": "Start alwaysclaw-loopd",
+        "timeout": 15,
+        "waitForHealthy": true
+      },
+      {
+        "step": 5,
+        "action": "Start alwaysclaw-voice",
+        "timeout": 15,
+        "waitForHealthy": true
+      },
+      {
+        "step": 6,
+        "action": "Start Windows sidecars (parallel)",
+        "timeout": 20,
+        "waitForHealthy": true
+      },
+      {
+        "step": 7,
+        "action": "Run full health check and emit startup-complete event",
+        "timeout": 10
+      }
+    ]
+  },
+  "auditTrail": {
+    "logAllRestarts": true,
+    "logAllHealthChecks": false,
+    "logFailedHealthChecks": true,
+    "logDegradedModeTransitions": true,
+    "logPath": "C:\\AlwaysClaw\\state\\logs\\watchdog",
+    "retentionDays": 90
   }
 }

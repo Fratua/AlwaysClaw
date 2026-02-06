@@ -1,441 +1,668 @@
 # AlwaysClaw Operations Runbook
 
 Version: 1.0.0
-Last updated: 2026-02-06
-Owner: Operations Team
+Generated from: OPENCLAW_WIN10_GPT52_MASTERPLAN.md sections 7, 8, 16, 17, 20, 28, 29, 35, 44, 62
+Date: 2026-02-06
 
 ---
 
-## 1. Boot and Recovery Sequence
+## 1. Overview
 
-The AlwaysClaw system runs on a hybrid runtime: core services in WSL2 (Ubuntu) and Windows sidecars for privileged host operations. The boot sequence must follow a strict dependency order to ensure all components start correctly.
+AlwaysClaw is a Windows 10-focused, always-on personal AI system running a hybrid WSL2 + Windows sidecar architecture. This runbook covers boot procedures, recovery sequences, daily/weekly/monthly operations, and troubleshooting for every major component.
 
-### 1.1 Full Boot Sequence
+### Architecture Summary
 
-**Step 1: Verify WSL2 Availability**
+The system consists of:
 
-Before starting any services, confirm WSL2 is operational.
+- **WSL2 Core Plane (Ubuntu):** Gateway, loop kernel (loopd), tool execution, scheduler, memory/vector store.
+- **Windows Host Sidecars:** PowerShell bridge, desktop automation, browser control (Playwright/CDP).
+- **Windows Task Scheduler:** Bootstrap at startup, 5-minute watchdog, daily maintenance.
+- **External Integrations:** Gmail (Pub/Sub push), Twilio (SMS + Voice), OpenAI GPT-5.2.
 
+### Key Paths
+
+| Purpose | Path |
+|---|---|
+| Configuration | `C:\AlwaysClaw\state\config\alwaysclaw.json` |
+| Agent workspaces | `C:\AlwaysClaw\state\agents\<agentId>\workspace\` |
+| Sessions | `C:\AlwaysClaw\state\agents\<agentId>\sessions\` |
+| Cron jobs | `C:\AlwaysClaw\state\cron\jobs.json` |
+| Logs | `C:\AlwaysClaw\state\logs\` |
+| Auth/secrets | `C:\AlwaysClaw\state\auth\` |
+| Memory (vector) | `C:\AlwaysClaw\state\memory\vector\` |
+| Forensics | `C:\AlwaysClaw\state\forensics\` |
+| Incidents | `C:\AlwaysClaw\state\incidents\` |
+| Watchdog logs | `C:\AlwaysClaw\state\logs\watchdog\` |
+| Metrics | `C:\AlwaysClaw\state\logs\metrics\` |
+
+---
+
+## 2. Boot and Recovery Sequence
+
+### 2.1 Normal Boot (System Startup)
+
+The Windows Task Scheduler job `AlwaysClaw-Bootstrap` triggers at system startup and executes the following sequence:
+
+**Step 1 - Verify WSL2 availability:**
 ```powershell
-# Check WSL2 is installed and Ubuntu is available
-wsl --status
-wsl -l -v
-
-# Expected output: Ubuntu distro listed with VERSION 2
-# If WSL2 is not running, start it:
-wsl -d Ubuntu -- echo "WSL2 ready"
+wsl.exe -l --running
 ```
-
-If WSL2 fails to start, see Troubleshooting section 6.1.
-
-**Step 2: Start Core Services (in WSL2)**
-
-Services must start in dependency order: gateway first, then downstream services.
-
-```bash
-# Inside WSL2
-wsl -d Ubuntu -- bash -c "
-  systemctl start alwaysclaw-gateway &&
-  sleep 2 &&
-  systemctl start alwaysclaw-loopd &&
-  systemctl start alwaysclaw-tools &&
-  systemctl start alwaysclaw-scheduler
-"
-```
-
-Wait for each service to report healthy before proceeding. The gateway must be reachable before loopd, tools, or scheduler can register.
-
-**Step 3: Start Sidecar Services**
-
-Start Windows host sidecars that provide privileged operations.
-
+Expected: `Ubuntu` appears in the list. If not:
 ```powershell
-# Start the Windows host bridge
-Start-Service AlwaysClawHostBridge
-
-# Start the voice service (if voice is enabled)
-wsl -d Ubuntu -- systemctl start alwaysclaw-voice
+wsl.exe -d Ubuntu
 ```
 
-**Step 4: Run Health Checks**
-
-Verify all components are healthy before declaring the system operational.
-
+**Step 2 - Verify systemd is active inside WSL2:**
+```bash
+wsl.exe -d Ubuntu -- systemctl is-system-running
+```
+Expected: `running`. Acceptable: `degraded` (some non-critical units may be slow). If `offline` or not responding, restart WSL2:
 ```powershell
-# Run comprehensive health check
-wsl -d Ubuntu -- curl -s http://localhost:3100/health | ConvertFrom-Json
-
-# Check individual components
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/components/health
+wsl.exe --shutdown
+wsl.exe -d Ubuntu
 ```
 
-Expected: all components report `"status": "ok"`. If any component reports unhealthy, consult the troubleshooting guides below.
+**Step 3 - Start core stack (ordered):**
 
-**Step 5: Heartbeat Registration**
+The boot script at `/opt/alwaysclaw/bin/boot.sh` starts services in dependency order:
 
-Once all components are healthy, register the system heartbeat to signal operational readiness.
+1. `alwaysclaw-gateway` (port 3100) - must be healthy before others start.
+2. `alwaysclaw-memory` (port 3105), `alwaysclaw-scheduler` (port 3103), `alwaysclaw-tools` (port 3102) - started in parallel.
+3. `alwaysclaw-loopd` (port 3101) - depends on gateway and tools.
+4. `alwaysclaw-voice` (port 3104) - started last, non-critical.
 
-```bash
-wsl -d Ubuntu -- curl -s -X POST http://localhost:3100/api/heartbeat/register
+**Step 4 - Start Windows sidecars:**
+```powershell
+Start-Process "C:\AlwaysClaw\bin\alwaysclaw-ps-bridge.exe" -WindowStyle Hidden
+Start-Process "C:\AlwaysClaw\bin\alwaysclaw-desktop.exe" -WindowStyle Hidden
+Start-Process "C:\AlwaysClaw\bin\alwaysclaw-browser.exe" -WindowStyle Hidden
 ```
 
-The heartbeat synthesis loop will take over from here, running every 30 minutes as defined in `ops/schedules.json`.
-
-### 1.2 Automated Boot via Windows Task Scheduler
-
-A Windows Task Scheduler task (`AlwaysClaw-Boot`) runs at logon and executes the full boot sequence. If the system was not shut down cleanly, the watchdog task (`AlwaysClaw-Watchdog`) runs every 5 minutes and will detect missing services and restart them.
-
-### 1.3 Recovery from Unclean Shutdown
-
-If the system was terminated unexpectedly:
-
-1. Check for stale PID files: `wsl -d Ubuntu -- ls /var/run/alwaysclaw/`
-2. Remove stale PID files if present
-3. Check for incomplete loop checkpoints: `wsl -d Ubuntu -- curl -s http://localhost:3101/api/loops/stale-checkpoints`
-4. Resume or discard stale checkpoints as appropriate
-5. Run the full boot sequence (steps 1-5 above)
-6. Verify no data corruption in state directory
-
----
-
-## 2. Daily Operations
-
-These tasks run automatically via the daily cadence in `ops/schedules.json` (cron: `0 8 * * *`). Operators should verify they completed successfully.
-
-### 2.1 Log Compaction
-
-The log-compaction loop (`log-compaction-loop-v1`) archives logs older than 7 days and compresses them.
-
-Manual verification:
+**Step 5 - Run full health check:**
 ```bash
-wsl -d Ubuntu -- ls -la /home/alwaysclaw/state/logs/archive/
-wsl -d Ubuntu -- du -sh /home/alwaysclaw/state/logs/
+alwaysclaw ops health-check
+```
+Expected: All components report healthy. If any component is unhealthy, the watchdog will attempt recovery.
+
+**Step 6 - Emit startup-complete event:**
+The system emits a `system-boot-complete` event on the incident event bus and logs the startup time.
+
+### 2.2 Recovery After Crash
+
+When the 5-minute watchdog detects a failed component:
+
+1. Watchdog identifies which component(s) are unhealthy via health endpoint probes.
+2. For each unhealthy component, it attempts restart using systemctl (WSL2) or process start (Windows).
+3. Restart uses exponential backoff: 2s, 4s, 8s, 16s, 32s delay between attempts.
+4. If a component exceeds 5 restarts within 15 minutes, the restart governor triggers degraded mode.
+5. Degraded mode disables tier-2 tools and autonomous loops while preserving read-only assistant mode.
+6. Recovery from degraded mode requires human acknowledgment (see incident runbook).
+
+### 2.3 Recovery After WSL2 Failure
+
+If WSL2 itself becomes unresponsive:
+
+1. From Windows PowerShell (admin):
+```powershell
+wsl.exe --shutdown
+Start-Sleep -Seconds 5
+wsl.exe -d Ubuntu
 ```
 
-If log directory exceeds 500MB, investigate retention policy or increase compaction frequency.
+2. If WSL2 will not start, check:
+   - Windows hypervisor is enabled: `bcdedit /enum | findstr hypervisor`
+   - WSL2 feature is installed: `dism.exe /online /get-featureinfo /featurename:Microsoft-Windows-Subsystem-Linux`
+   - Sufficient disk space on the WSL2 virtual disk.
 
-### 2.2 Memory Hygiene
+3. After WSL2 is confirmed running, execute the normal boot sequence (Section 2.1, Steps 3-6).
 
-The memory-hygiene tasks (`memory-compact-loop-v1` and `adaptive-memory-decay-loop-v1`) consolidate and prune memory entries.
+### 2.4 Recovery After Full System Stop
 
-Manual verification:
-```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/memory/stats
+If the system was stopped with `alwaysclaw ops kill --confirm`:
+
+1. Re-enable Task Scheduler jobs:
+```powershell
+schtasks /change /tn AlwaysClaw-Watchdog /enable
+schtasks /change /tn AlwaysClaw-Bootstrap /enable
 ```
 
-Check that `totalEntries` is within expected bounds and `lastCompactionAt` is within the last 24 hours.
-
-### 2.3 Connector Health Verification
-
-Verify all active integrations are healthy.
-
-```bash
-# Gmail
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/gmail/status
-# Verify: watchActive=true, tokenValid=true, lastSyncAge < 30 minutes
-
-# Twilio
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/twilio/status
-# Verify: webhookEnabled=true, signatureValidation=true
-
-# Browser
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/browser/status
-# Verify: profileHealthy=true
+2. Run bootstrap manually:
+```powershell
+schtasks /run /tn AlwaysClaw-Bootstrap
 ```
 
-### 2.4 SLO Dashboard Check
-
-Review the daily SLO burn rate report generated by `slo-burn-rate-alert-loop-v1`.
-
+3. Verify all components:
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/slo/report/daily
-```
-
-Key metrics to verify:
-- Command success rate >= 99.0%
-- Median loop latency <= 30s
-- Cron execution reliability >= 99.5%
-- MTTR <= 5 minutes
-
-If any SLO is approaching its burn rate threshold, investigate and address before the budget is exhausted. See `ops/slo-targets.json` for threshold details.
-
-### 2.5 State Snapshot
-
-The state-snapshot loop (`state-snapshot-loop-v1`) takes a daily snapshot of all critical state for backup purposes.
-
-Manual verification:
-```bash
-wsl -d Ubuntu -- ls -la /home/alwaysclaw/state/snapshots/
-# Verify: today's snapshot exists and file size is reasonable
+alwaysclaw ops health-check
+alwaysclaw ops status
 ```
 
 ---
 
-## 3. Weekly Operations
+## 3. Daily Operations
 
-These tasks run automatically on Mondays at 10:00 via the weekly cadence (`0 10 * * 1`).
+The daily operations cycle runs automatically at 07:00 ET (after quiet hours end). The following jobs execute as part of the daily cadence:
 
-### 3.1 Security Audit Execution
+### 3.1 Planning Loop (07:00 ET)
 
-The security audit loops (`secrets-scanner-loop-v1` and `auth-verification-loop-v1`) scan for exposed secrets and verify authentication integrity.
+**What it does:** Runs the Planning Loop (L13) to reprioritize the backlog, score tasks by cost/risk/confidence, and produce an ordered execution plan for the day.
 
-Review audit results:
+**Verify it ran:**
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/security/audit/latest
+alwaysclaw ops job-status planning-loop --last-run
 ```
 
-Action items from the audit should be triaged immediately:
-- **Critical**: Exposed secrets or broken auth -- fix within 1 hour
-- **Warning**: Weak configurations or expiring tokens -- fix within 24 hours
-- **Info**: Best practice recommendations -- add to backlog
-
-### 3.2 Backup Integrity Verification
-
-The `backup-integrity-checker-loop-v1` verifies that backup snapshots can be restored.
-
+**If it did not run:** Check scheduler health. Manually trigger:
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/backup/integrity/latest
+alwaysclaw ops run-job planning-loop
 ```
 
-Verify:
-- Latest backup exists and is not corrupted
-- Restore test completed successfully
-- Backup age is within the last 24 hours
+### 3.2 Memory Hygiene
 
-### 3.3 Dependency Updates Review
+**What it does:** Consolidates duplicate memory entries, decays stale memories, verifies vector index integrity, and compacts memory files.
 
-The `dependency-scanner-loop-v1` checks for known vulnerabilities in dependencies.
-
+**Verify:**
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/dependencies/scan/latest
+alwaysclaw ops job-status memory-hygiene --last-run
 ```
 
-Review any flagged vulnerabilities. Security-critical updates should be applied within 48 hours via the upgrade proposal workflow.
-
-### 3.4 Chaos Drill
-
-The `chaos-drill-runner-loop-v1` runs a controlled failure injection to verify resilience.
-
-After the drill completes, review results:
+**Manual trigger:**
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/chaos/drill/latest
+alwaysclaw ops run-job memory-hygiene
 ```
 
-Verify:
-- System recovered within MTTR target (5 minutes)
-- No data loss during recovery
-- Degraded mode entered and exited correctly
-- All SLOs maintained during the drill
+### 3.3 Gmail Watch Verification
 
-### 3.5 Strategy Renewal
+**What it does:** Checks Gmail watch expiration. Renews if within 24 hours of expiry. Gmail watches have a maximum lifetime of 7 days; daily renewal is recommended.
 
-The `ralph-loop-v1` conducts a strategic review of system priorities and generates a 7-day action plan.
-
+**Verify:**
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/strategy/latest
+alwaysclaw ops gmail-watch-status
 ```
 
-Review the generated plan and approve or adjust priorities as needed.
+Expected: Watch expiration is at least 24 hours in the future.
+
+**Manual renewal:**
+```bash
+alwaysclaw ops renew-gmail-watch
+```
+
+### 3.4 Log Compaction
+
+**What it does:** Compacts structured JSON logs older than 7 days. Archives to compressed storage. Verifies log integrity checksums.
+
+**Verify:**
+```bash
+alwaysclaw ops job-status log-compaction --last-run
+```
+
+### 3.5 Context Compilation Check
+
+**What it does:** Audits context packing efficiency, token budget utilization, retrieval hit rates, and compaction effectiveness.
+
+**Review results:**
+```bash
+alwaysclaw ops job-status context-compile --last-run --details
+```
 
 ---
 
-## 4. Monthly Operations
+## 4. Weekly Operations
 
-These tasks run on the 1st of each month at 10:00 (`0 10 1 * *`).
+The weekly operations cycle runs Sundays at 09:00 ET.
 
-### 4.1 Disaster Recovery Simulation
+### 4.1 Security Audit
 
-The `dr-restore-validator-loop-v1` performs a full DR simulation.
+**What it does:** Full security audit covering policy drift, credential hygiene, webhook validation status, sandbox configuration integrity, and prompt injection pattern review.
 
-Procedure:
-1. The loop creates a temporary restore environment
-2. Restores the latest backup into the temporary environment
-3. Runs health checks and data integrity verification against the restore
-4. Compares restored state against live state
-5. Tears down the temporary environment
-6. Produces a DR readiness report
-
-Review the report:
+**Review results:**
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/dr/validation/latest
+alwaysclaw ops job-status security-audit --last-run --details
 ```
 
-If DR simulation fails, treat it as a P2 incident and resolve before the next monthly cycle.
-
-### 4.2 Failover Test
-
-Test the degraded mode entry and exit flow:
-1. Simulate a critical component failure
-2. Verify degraded mode activates correctly
-3. Verify tier-2 tools are disabled
-4. Verify read-only and communication channels remain active
-5. Simulate recovery and verify re-elevation works
-6. Document results
-
-### 4.3 Capacity Review
-
-The `capacity-planner-loop-v1` analyzes resource usage trends.
-
+**Manual trigger:**
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/capacity/report/latest
+alwaysclaw ops run-job security-audit
 ```
 
-Review:
-- Disk usage trends (state directory, logs, snapshots)
-- Memory usage trends
-- API rate limit utilization (Gmail, Twilio)
-- Token consumption trends
+**Key things to check in audit output:**
+- Any credential rotation overdue.
+- Any webhook signature validation misconfigurations.
+- Any sandbox policy deviations from baseline.
+- Any new prompt injection patterns detected.
 
-If any resource is projected to exhaust within 30 days, take action.
+### 4.2 Upgrade Proposals
 
-### 4.4 Governance Dashboard Update
+**What it does:** Reviews available dependency, runtime, and plugin upgrades. Produces proposal documents with rollback plans. Proposals require human approval before execution.
 
-The `governance-dashboard-updater-loop-v1` refreshes the governance dashboard with current metrics.
-
+**Review proposals:**
 ```bash
-wsl -d Ubuntu -- curl -s http://localhost:3100/api/governance/dashboard
+alwaysclaw ops list-proposals --type upgrade
 ```
 
-Review: loop execution compliance, approval matrix adherence, policy drift indicators.
+**Approve a proposal:**
+```bash
+alwaysclaw ops approve-proposal <proposal-id>
+```
+
+### 4.3 Chaos Drill
+
+**What it does:** Injects controlled failures (process kill, state corruption, webhook timeout, queue flood, memory pressure) and verifies that the system recovers within SLO targets.
+
+**Review drill report:**
+```bash
+alwaysclaw ops job-status chaos-drill --last-run --details
+```
+
+**Important:** If the chaos drill reveals recovery gaps, create corrective action tickets immediately.
+
+### 4.4 Strategy Renewal (Ralph Loop)
+
+**What it does:** Runs the Ralph macro-cycle (rapid assess, learn, plan, act, reflect, harden) using xhigh thinking. Produces a prioritized strategy graph and 7-day action plan.
+
+**Review output:**
+```bash
+alwaysclaw ops job-status strategy-renewal --last-run --details
+```
 
 ---
 
-## 5. Emergency Procedures Quick Reference
+## 5. Monthly Operations
 
-| Emergency | First Action | Kill Switch | Recovery |
-|-----------|-------------|-------------|----------|
-| Full system down | Check WSL2 status | N/A | Full boot sequence (sec 1.1) |
-| Gateway unresponsive | Check gateway logs | Restart gateway | `systemctl restart alwaysclaw-gateway` |
-| Gmail compromise | Gmail kill switch | Stop watch + revoke token | Re-authenticate + re-create watch |
-| Twilio compromise | Twilio kill switch | Disable webhook | Rotate API keys + re-enable |
-| Browser hijack | Browser kill switch | Close all profiles | Clear cookies + restart |
-| Voice leak | Voice kill switch | Terminate streams | Restart voice service |
-| Credential exposed | Rotate immediately | Per-credential kill switch | See incident-runbook.md sec 3 |
-| Disk space critical | Clear log archives | Automatic degraded mode | Compact + archive old state |
-| Memory exhaustion | Restart affected service | Automatic degraded mode | Investigate memory leak |
-| Loop stuck | Cancel stuck loop | N/A | `POST /api/loops/{id}/cancel` |
-| Cron jobs not running | Check scheduler health | N/A | `systemctl restart alwaysclaw-scheduler` |
+Monthly operations run on the 1st of each month at 10:00 ET.
+
+### 5.1 Disaster Recovery Restore Validation
+
+**What it does:** Full DR simulation. Restores from latest backup, verifies state integrity, runs smoke tests, validates recovery time meets the 5-minute MTTR SLO.
+
+**Review results:**
+```bash
+alwaysclaw ops job-status dr-restore-validation --last-run --details
+```
+
+**If DR validation fails:**
+1. Review which step failed (restore, integrity, smoke test, timing).
+2. Create P2 ticket for remediation.
+3. Schedule re-run within 1 week after fix.
+
+### 5.2 Architecture Drift Review
+
+**What it does:** Deep comparison of running configuration against canonical schema. Flags deviations and proposes corrections.
+
+**Review drift report:**
+```bash
+alwaysclaw ops job-status architecture-drift-review --last-run --details
+```
 
 ---
 
 ## 6. Troubleshooting Guides
 
-### 6.1 WSL2 Will Not Start
+### 6.1 Gateway (alwaysclaw-gateway)
 
-Symptoms: `wsl -l --running` returns empty or errors.
+**Symptoms: Gateway not responding on port 3100.**
 
-Steps:
-1. Check Windows features: `dism.exe /online /get-featureinfo /featurename:Microsoft-Windows-Subsystem-Linux`
-2. Verify Virtual Machine Platform is enabled: `dism.exe /online /get-featureinfo /featurename:VirtualMachinePlatform`
-3. If features are disabled, enable them and reboot:
-   ```powershell
-   dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-   dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
-   ```
-4. If features are enabled but WSL2 still fails:
-   - Run `wsl --update` to update the WSL2 kernel
-   - Run `wsl --shutdown` then retry
-   - Check Event Viewer for Hyper-V errors
-5. If the Ubuntu distro is corrupted:
-   - Export any recoverable state first
-   - Unregister and reinstall: `wsl --unregister Ubuntu && wsl --install -d Ubuntu`
-   - Restore state from the latest backup snapshot
+1. Check process status:
+```bash
+wsl.exe -d Ubuntu -- systemctl status alwaysclaw-gateway
+```
 
-### 6.2 Gateway Unresponsive
+2. Check logs:
+```bash
+wsl.exe -d Ubuntu -- journalctl -u alwaysclaw-gateway --since "10 min ago" --no-pager
+```
 
-Symptoms: `curl http://localhost:3100/health` times out or returns an error.
+3. Common causes:
+   - Port 3100 already in use: `wsl.exe -d Ubuntu -- ss -tlnp | grep 3100`
+   - Configuration error: validate `alwaysclaw.json` against schema.
+   - Out of memory: check `wsl.exe -d Ubuntu -- free -m`
 
-Steps:
-1. Check if the process is running: `wsl -d Ubuntu -- systemctl status alwaysclaw-gateway`
-2. Check gateway logs: `wsl -d Ubuntu -- journalctl -u alwaysclaw-gateway --since "10 minutes ago"`
-3. Check port availability: `wsl -d Ubuntu -- ss -tlnp | grep 3100`
-4. If port is in use by another process, kill it and restart
-5. If OOM killed: check `dmesg` for OOM messages, increase memory limits in `.wslconfig`
-6. If config is corrupted: restore `alwaysclaw.json` from latest snapshot and restart
+4. Restart:
+```bash
+wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-gateway
+```
 
-### 6.3 Loop Stuck in Preflight
+### 6.2 Loop Kernel (alwaysclaw-loopd)
 
-Symptoms: Loop status shows `preflight` for more than 5 minutes.
+**Symptoms: Automated tasks not executing, loops stuck in queued/preparing state.**
 
-Steps:
-1. Check loop state: `wsl -d Ubuntu -- curl -s http://localhost:3101/api/loops/{loopId}/state`
-2. Check if entry criteria are satisfied
-3. Check if required context files are accessible
-4. Check if a dependency loop is blocked or failed
-5. If stuck due to a missing resource: provide the resource or skip the preflight check
-6. Force cancel if unrecoverable: `wsl -d Ubuntu -- curl -s -X POST http://localhost:3101/api/loops/{loopId}/cancel`
-7. The loop will retry at its next scheduled cadence
+1. Check process and health:
+```bash
+wsl.exe -d Ubuntu -- systemctl status alwaysclaw-loopd
+wsl.exe -d Ubuntu -- curl -s http://localhost:3101/health
+```
 
-### 6.4 Memory Compaction Failure
+2. Check loop queue:
+```bash
+alwaysclaw ops loop-queue --status
+```
 
-Symptoms: Memory stats show `lastCompactionAt` is stale, or memory entries growing unbounded.
+3. Common causes:
+   - Gateway dependency not met: verify gateway is healthy first.
+   - Loop contract violation: check loop contract JSON for the stuck loop.
+   - Tool budget exceeded: review recent loop execution history.
 
-Steps:
-1. Check compaction loop status: `wsl -d Ubuntu -- curl -s http://localhost:3101/api/loops/memory-compact-loop-v1/state`
-2. Check disk space on state partition: `wsl -d Ubuntu -- df -h /home/alwaysclaw/state/`
-3. If disk is full: run emergency log compaction first
-4. Check for corrupted memory files: `wsl -d Ubuntu -- alwaysclaw memory validate`
-5. If corruption found: restore memory from the latest state snapshot
-6. Manually trigger compaction: `wsl -d Ubuntu -- curl -s -X POST http://localhost:3101/api/loops/memory-compact-loop-v1/trigger`
+4. Restart:
+```bash
+wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-loopd
+```
 
-### 6.5 Gmail Watch Expired
+### 6.3 Scheduler (alwaysclaw-scheduler)
 
-Symptoms: Gmail status shows `watchActive: false` or `watchExpiration` is in the past.
+**Symptoms: Cron jobs not firing, heartbeat synthesis not running.**
 
-Steps:
-1. Check Gmail status: `wsl -d Ubuntu -- curl -s http://localhost:3100/api/gmail/status`
-2. Verify OAuth token is still valid: check `tokenValid` field
-3. If token expired: re-authenticate (see Secret Rotation in incident-runbook.md)
-4. If token valid but watch expired: re-create watch:
-   ```bash
-   wsl -d Ubuntu -- curl -s -X POST http://localhost:3100/api/gmail/watch/start
-   ```
-5. Verify watch is active and run a manual history sync to catch up on missed messages:
-   ```bash
-   wsl -d Ubuntu -- curl -s -X POST http://localhost:3100/api/gmail/sync/full
-   ```
-6. If `history.list` returns 404: the historyId is stale, and the full sync (step 5) will reset the baseline
+1. Check status:
+```bash
+wsl.exe -d Ubuntu -- systemctl status alwaysclaw-scheduler
+```
 
-### 6.6 Twilio Webhook Failures
+2. Verify cron job state:
+```bash
+alwaysclaw ops cron-list
+```
+Check `lastRunAt` and `nextRunAt` for each job.
 
-Symptoms: Inbound SMS or voice calls are not being processed.
+3. Common causes:
+   - Stale job state: `jobs.json` may be corrupted. Backup and regenerate.
+   - Timezone mismatch: verify `timezone` in `schedules.json` matches system.
+   - Gateway dependency: scheduler needs gateway for event emission.
 
-Steps:
-1. Check Twilio status: `wsl -d Ubuntu -- curl -s http://localhost:3100/api/twilio/status`
-2. Verify webhook URL is reachable from the internet (check tunnel/ngrok/reverse proxy)
-3. Check signature validation: ensure the auth token in config matches the Twilio account
-4. Review Twilio Console debugger for failed webhook deliveries
-5. Check for lowercase header variant: WebSocket handshakes use `x-twilio-signature` (lowercase)
-6. If webhook URL changed: update it in Twilio Console
-7. Test with a manual webhook: `wsl -d Ubuntu -- curl -s -X POST http://localhost:3100/api/twilio/test-webhook`
+4. Restart:
+```bash
+wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-scheduler
+```
+
+### 6.4 Memory Service (alwaysclaw-memory)
+
+**Symptoms: Responses lack context, memory search returns empty, vector index errors.**
+
+1. Check status:
+```bash
+wsl.exe -d Ubuntu -- systemctl status alwaysclaw-memory
+wsl.exe -d Ubuntu -- curl -s http://localhost:3105/health
+```
+
+2. Verify vector index:
+```bash
+alwaysclaw ops memory-index-status
+```
+
+3. Common causes:
+   - Corrupted vector index: rebuild with `alwaysclaw ops memory-reindex`.
+   - Disk full: check `wsl.exe -d Ubuntu -- df -h`.
+   - Memory file permissions: verify `C:\AlwaysClaw\state\memory\` is writable.
+
+4. Restart:
+```bash
+wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-memory
+```
+
+### 6.5 Gmail Integration
+
+**Symptoms: Not receiving push notifications, emails not being processed.**
+
+1. Check watch status:
+```bash
+alwaysclaw ops gmail-watch-status
+```
+
+2. If watch expired:
+```bash
+alwaysclaw ops renew-gmail-watch
+```
+
+3. Check history ID:
+```bash
+alwaysclaw ops gmail-history-status
+```
+
+4. If history ID is stale (404 from history.list):
+```bash
+alwaysclaw ops gmail-full-resync
+```
+
+5. Common causes:
+   - Watch expired (max 7 days). Daily renewal job may have failed.
+   - OAuth token expired. Re-authenticate: `alwaysclaw secrets refresh gmail-oauth`.
+   - Pub/Sub subscription misconfigured. Verify push endpoint and JWT validation.
+   - Rate limiting: Gmail limits push notifications to 1 event/sec per user.
+
+### 6.6 Twilio Integration (SMS/Voice)
+
+**Symptoms: Not receiving inbound SMS/calls, outbound messages failing.**
+
+1. Check webhook validation:
+```bash
+alwaysclaw ops twilio-status
+```
+
+2. For signature validation failures:
+   - Verify auth token matches Twilio console.
+   - Check that webhook URL matches exactly (case-sensitive).
+   - For WebSocket: verify lowercase `x-twilio-signature` header handling.
+
+3. For outbound failures:
+   - Check Twilio account balance and rate limits.
+   - Verify phone numbers are correctly configured.
+   - Check delivery status callbacks: `alwaysclaw ops twilio-delivery-log`.
+
+4. Common causes:
+   - Auth token rotated on Twilio side but not updated locally.
+   - Webhook URL changed (e.g., tunnel URL expired).
+   - Account suspended or rate-limited.
+
+### 6.7 Browser Control
+
+**Symptoms: Browser automation failing, screenshots not captured, DOM verification errors.**
+
+1. Check sidecar status:
+```bash
+alwaysclaw ops status browser
+```
+
+2. Check managed profile integrity:
+```bash
+alwaysclaw ops browser-profile-status
+```
+
+3. Common causes:
+   - Browser process leaked: kill stale browser processes and restart sidecar.
+   - Profile corruption: reset managed profile with `alwaysclaw ops browser-reset-profile`.
+   - CDP connection lost: restart browser sidecar.
+   - Prompt injection detected: review scanner loop output.
+
+4. Restart:
+```powershell
+Stop-Process -Name "alwaysclaw-browser" -Force
+Start-Process "C:\AlwaysClaw\bin\alwaysclaw-browser.exe" -WindowStyle Hidden
+```
+
+### 6.8 Voice Service
+
+**Symptoms: STT/TTS not working, voice calls failing, talk loop unresponsive.**
+
+1. Check service status:
+```bash
+wsl.exe -d Ubuntu -- systemctl status alwaysclaw-voice
+wsl.exe -d Ubuntu -- curl -s http://localhost:3104/health
+```
+
+2. Common causes:
+   - Audio device not available (Windows host audio service).
+   - Twilio voice webhook misconfiguration.
+   - STT/TTS API key expired or rate-limited.
+   - Barge-in state machine stuck: restart voice service.
+
+3. Restart:
+```bash
+wsl.exe -d Ubuntu -- systemctl restart alwaysclaw-voice
+```
+
+### 6.9 Windows Task Scheduler Issues
+
+**Symptoms: Watchdog not running, bootstrap not triggering at startup.**
+
+1. Check task status:
+```powershell
+schtasks /query /tn AlwaysClaw-Watchdog /fo LIST /v
+schtasks /query /tn AlwaysClaw-Bootstrap /fo LIST /v
+schtasks /query /tn AlwaysClaw-DailyMaintenance /fo LIST /v
+```
+
+2. Common causes:
+   - Task disabled: re-enable with `schtasks /change /tn <name> /enable`.
+   - Task running under wrong user: verify `Run As User` is SYSTEM.
+   - WSL2 not accessible from scheduled task: verify WSL2 distro is installed.
+
+3. Recreate tasks if missing (use commands from `schedules.json` windowsTaskSchedulerJobs).
+
+### 6.10 Disk Space Issues
+
+**Symptoms: Services failing to write logs, memory service errors, backup failures.**
+
+1. Check disk space:
+```powershell
+Get-PSDrive C | Select-Object Used, Free
+```
+
+Inside WSL2:
+```bash
+wsl.exe -d Ubuntu -- df -h
+```
+
+2. Emergency cleanup:
+   - Run log compaction immediately: `alwaysclaw ops run-job log-compaction`
+   - Clear old forensics packages: review and delete from `C:\AlwaysClaw\state\forensics\`
+   - Clear old archived logs: review `C:\AlwaysClaw\state\logs\archive\`
+   - Compact WSL2 virtual disk if needed.
+
+### 6.11 Configuration Issues
+
+**Symptoms: Services starting with wrong settings, unexpected behavior changes.**
+
+1. Validate configuration:
+```bash
+alwaysclaw config validate
+```
+
+2. Compare running config to schema:
+```bash
+alwaysclaw config diff --baseline
+```
+
+3. If config is corrupted, restore from backup:
+```bash
+alwaysclaw config restore --from-backup
+```
+
+4. After any config change, restart affected services:
+```bash
+alwaysclaw ops restart --scope <affected-service>
+```
 
 ---
 
-## 7. Configuration File Reference
+## 7. Monitoring and Observability
 
-| File | Purpose | Location |
-|------|---------|----------|
-| `ops/schedules.json` | 24/7 operations schedule with all cadence tiers | Worktree: `ops/` |
-| `ops/slo-targets.json` | SLO definitions and error budget policy | Worktree: `ops/` |
-| `ops/watchdog-policy.json` | Liveness checks, restart strategy, circuit breaker | Worktree: `ops/` |
-| `ops/degraded-mode-policy.json` | Degraded mode triggers, behavior, re-elevation | Worktree: `ops/` |
-| `ops/incident-runbook.md` | Incident response procedures | Worktree: `ops/` |
-| `alwaysclaw.json` | Main system configuration | `C:\AlwaysClaw\state\config\` |
-| `jobs.json` | Persistent cron job definitions | `C:\AlwaysClaw\state\cron\` |
+### 7.1 Health Check Commands
+
+```bash
+# Full system health
+alwaysclaw ops health-check
+
+# Per-component health
+alwaysclaw ops health-check --component gateway
+alwaysclaw ops health-check --component loopd
+alwaysclaw ops health-check --component tools
+alwaysclaw ops health-check --component scheduler
+alwaysclaw ops health-check --component memory
+alwaysclaw ops health-check --component voice
+
+# Integration health
+alwaysclaw ops status gmail
+alwaysclaw ops status twilio
+alwaysclaw ops status browser
+alwaysclaw ops status voice
+```
+
+### 7.2 SLO Monitoring
+
+```bash
+# Current SLO status
+alwaysclaw ops slo-status
+
+# Error budget remaining
+alwaysclaw ops slo-budget
+
+# Burn rate for specific SLO
+alwaysclaw ops slo-burn-rate --slo command-success-rate
+```
+
+### 7.3 Log Locations
+
+| Log Type | Path |
+|---|---|
+| Gateway | WSL2: `/opt/alwaysclaw/logs/gateway/` |
+| Loop kernel | WSL2: `/opt/alwaysclaw/logs/loopd/` |
+| Scheduler | WSL2: `/opt/alwaysclaw/logs/scheduler/` |
+| Watchdog | `C:\AlwaysClaw\state\logs\watchdog\` |
+| Metrics (hourly) | `C:\AlwaysClaw\state\logs\metrics\hourly\` |
+| Incidents | `C:\AlwaysClaw\state\incidents\` |
+| Forensics | `C:\AlwaysClaw\state\forensics\` |
+
+All logs use structured JSON format with event IDs and correlation IDs for tracing.
+
+### 7.4 Key Alerts
+
+The system generates alerts for the following conditions:
+
+| Alert | Severity | Trigger |
+|---|---|---|
+| Missed heartbeat | P2 | No heartbeat for 2 consecutive cycles (60+ min) |
+| Repeated crash loop | P1 | 5+ restarts in 15 min |
+| Privileged tool spike | P2 | Unusual volume of tier-2 tool requests |
+| SLO burn rate high | P1-P3 | Burn rate exceeds threshold (see slo-targets.json) |
+| Error budget warning | P2 | Budget at 25% remaining |
+| Error budget exhausted | P1 | Budget at 0% |
+| Gmail watch expiring | P3 | Watch expires within 12 hours |
+| Webhook validation failure | P2 | Unsigned/invalid signature detected |
+| Degraded mode entered | P1 | System entered degraded mode |
 
 ---
 
-## 8. Operational Contacts and Escalation
+## 8. Quiet Hours Policy
 
-- **Primary operator**: System owner (configured in `USER.md`)
-- **Heartbeat channel**: Receives all automated health notifications
-- **Incident channel**: Receives P1/P2 incident notifications
-- **Escalation**: If automated recovery fails after 3 attempts, operator is notified with full forensics package
+Quiet hours run from 23:00 to 07:00 ET.
+
+During quiet hours:
+- **Suppressed:** heartbeat-synthesis, autonomy-opportunity-scan, queue-pressure-check, latency-regression-scan, metrics-aggregation.
+- **Always active:** health-probe, watchdog-check, restart-governor.
+
+This reduces noise and resource consumption during overnight hours while maintaining safety-critical monitoring. Degraded mode transitions and P1 alerts still fire during quiet hours.
 
 ---
 
-## 9. Version History
+## 9. Emergency Contacts and Escalation
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0.0 | 2026-02-06 | Initial runbook covering boot, daily/weekly/monthly ops, troubleshooting, and emergency procedures |
+| Role | Contact Method | Response Time |
+|---|---|---|
+| Primary Operator | Gmail + Dashboard | 5 min (P1), 30 min (P2) |
+| System (automated) | Event bus + Watchdog | Immediate |
+
+The system will page the operator via Gmail for all P1 and P2 incidents. For P1 incidents during quiet hours, the Gmail notification bypasses quiet-hours suppression.
+
+---
+
+## 10. Change Management
+
+All configuration changes to the AlwaysClaw system must follow this process:
+
+1. **Propose:** Create change proposal via Self-Updating Loop or manual request.
+2. **Review:** Review change impact, especially on SLOs and security posture.
+3. **Approve:** Operator approves the change.
+4. **Apply:** Deploy change to running configuration.
+5. **Verify:** Run health check and relevant regression tests.
+6. **Monitor:** Watch SLO burn rates for 1 hour after change.
+7. **Rollback:** If issues detected, rollback to previous configuration.
+
+Configuration changes during error budget warning or exhaustion are blocked unless they are specifically to address the SLO breach.
