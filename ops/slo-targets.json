@@ -1,0 +1,141 @@
+{
+  "version": "1.0.0",
+  "description": "AlwaysClaw Service Level Objectives derived from master plan section 20",
+  "slos": [
+    {
+      "id": "command-success-rate",
+      "displayName": "Command Success Rate",
+      "description": "Percentage of tier-0 and tier-1 tool commands that complete successfully without error",
+      "target": 0.990,
+      "scope": "tier0-and-tier1-tools",
+      "window": {
+        "duration": "30d",
+        "type": "rolling"
+      },
+      "metric": {
+        "numerator": "successful_command_completions",
+        "denominator": "total_command_invocations",
+        "excludeFilters": [
+          "user-cancelled",
+          "approval-timeout"
+        ]
+      },
+      "burnRateThresholds": [
+        {
+          "windowDuration": "1h",
+          "threshold": 14.4,
+          "severity": "critical",
+          "action": "page-immediate"
+        },
+        {
+          "windowDuration": "6h",
+          "threshold": 6.0,
+          "severity": "warning",
+          "action": "alert-and-reduce-cadence"
+        },
+        {
+          "windowDuration": "24h",
+          "threshold": 3.0,
+          "severity": "info",
+          "action": "log-and-review"
+        }
+      ]
+    },
+    {
+      "id": "median-loop-latency",
+      "displayName": "Median Loop Latency",
+      "description": "p50 latency for standard loop executions must remain under 30 seconds",
+      "target": 30,
+      "unit": "seconds",
+      "percentile": "p50",
+      "scope": "standard-loop-executions",
+      "window": {
+        "duration": "24h",
+        "type": "rolling"
+      },
+      "metric": {
+        "measurement": "loop_execution_duration_seconds",
+        "aggregation": "percentile_50",
+        "excludeFilters": [
+          "xhigh-thinking-loops",
+          "approval-wait-time"
+        ]
+      }
+    },
+    {
+      "id": "cron-execution-reliability",
+      "displayName": "Cron Execution Reliability",
+      "description": "Percentage of scheduled cron jobs that execute within their expected window",
+      "target": 0.995,
+      "scope": "all-scheduled-cron-jobs",
+      "window": {
+        "duration": "7d",
+        "type": "rolling"
+      },
+      "metric": {
+        "numerator": "cron_jobs_executed_on_time",
+        "denominator": "cron_jobs_scheduled",
+        "toleranceSeconds": 60,
+        "excludeFilters": [
+          "manually-paused",
+          "quiet-hours-deferred"
+        ]
+      }
+    },
+    {
+      "id": "mean-time-to-recovery",
+      "displayName": "Mean Time to Recovery",
+      "description": "Average time from single-process failure detection to service restoration",
+      "target": 300,
+      "unit": "seconds",
+      "scope": "single-process-failures",
+      "window": {
+        "duration": "30d",
+        "type": "rolling"
+      },
+      "metric": {
+        "measurement": "recovery_duration_seconds",
+        "aggregation": "mean",
+        "startEvent": "failure_detected",
+        "endEvent": "health_check_passed",
+        "excludeFilters": [
+          "multi-component-cascading-failure",
+          "manual-intervention-required"
+        ]
+      }
+    }
+  ],
+  "errorBudgetPolicy": {
+    "onExhausted": {
+      "action": "freeze",
+      "description": "When error budget is exhausted, freeze all non-critical deployments and autonomous loop executions until budget recovers",
+      "freezeScope": [
+        "self-updating-loops",
+        "self-upgrading-loops",
+        "autonomous-task-execution",
+        "non-critical-config-changes"
+      ],
+      "exemptScope": [
+        "health-probes",
+        "watchdog-checks",
+        "incident-response",
+        "security-patches"
+      ]
+    },
+    "onWarning": {
+      "action": "reduce-cadence",
+      "threshold": 0.25,
+      "description": "When remaining error budget drops below 25%, reduce non-critical cadences to preserve budget",
+      "cadenceReductions": {
+        "every30min": "hourly",
+        "hourly": "every4h",
+        "daily": "skip-non-essential"
+      }
+    },
+    "reporting": {
+      "dailySummary": true,
+      "weeklyBurnDown": true,
+      "alertOnBurnRateExceeded": true
+    }
+  }
+}

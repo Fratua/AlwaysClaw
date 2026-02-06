@@ -1,0 +1,134 @@
+{
+  "version": "1.0.0",
+  "description": "Degraded mode policy for AlwaysClaw (master plan sections 35, 44)",
+  "triggerConditions": {
+    "repeatedCrashThreshold": {
+      "count": 5,
+      "windowMinutes": 15,
+      "description": "5 crashes within a 15-minute window triggers degraded mode entry"
+    },
+    "healthCheckConsecutiveFailures": {
+      "count": 3,
+      "description": "3 consecutive health check failures on any critical component triggers degraded mode"
+    },
+    "memoryExhaustion": {
+      "heapUsagePercent": 95,
+      "description": "When heap memory usage exceeds 95%, enter degraded mode to prevent OOM"
+    },
+    "diskSpaceCritical": {
+      "freeSpacePercent": 5,
+      "paths": [
+        "C:\\AlwaysClaw\\state",
+        "/home/alwaysclaw/state"
+      ],
+      "description": "When free disk space on state partitions drops below 5%, enter degraded mode"
+    }
+  },
+  "behavior": {
+    "tier2ToolsDisabled": true,
+    "readOnlyPreserved": true,
+    "communicationChannelsActive": [
+      "heartbeat",
+      "incident-notifications"
+    ],
+    "autonomousLoopsSuspended": true,
+    "manualTriggersOnly": true,
+    "description": "In degraded mode: tier-2 (irreversible/high-risk) tools are disabled, read-only operations continue, only heartbeat and incident notification channels remain active, all autonomous loops are suspended, and only manually triggered operations are permitted"
+  },
+  "incidentEvent": {
+    "format": {
+      "type": "degraded-mode-entry",
+      "severity": "critical|warning",
+      "timestamp": "ISO-8601",
+      "component": "component-name",
+      "description": "Human-readable description of what triggered degraded mode",
+      "triggeredBy": "trigger-condition-id",
+      "metadata": {
+        "crashCount": "number",
+        "failedChecks": "number",
+        "lastHealthCheckResult": "object",
+        "systemMetrics": {
+          "heapUsagePercent": "number",
+          "diskFreePercent": "number",
+          "uptimeSeconds": "number"
+        }
+      }
+    },
+    "destinations": [
+      {
+        "type": "log",
+        "path": "C:\\AlwaysClaw\\state\\logs\\incidents"
+      },
+      {
+        "type": "notification",
+        "channel": "heartbeat",
+        "urgency": "immediate"
+      }
+    ],
+    "severityClassification": {
+      "critical": "Full component failure or data integrity risk",
+      "warning": "Partial degradation or approaching resource limits"
+    }
+  },
+  "reElevation": {
+    "requireHumanAck": true,
+    "cooldownMinutes": 30,
+    "verificationChecks": [
+      {
+        "name": "all-critical-components-healthy",
+        "description": "Every component marked critical in watchdog-policy must pass health check"
+      },
+      {
+        "name": "crash-rate-below-threshold",
+        "description": "No crashes in the last cooldown window"
+      },
+      {
+        "name": "resource-levels-normal",
+        "description": "Memory and disk usage back within normal operating ranges"
+      },
+      {
+        "name": "no-open-circuit-breakers",
+        "description": "All circuit breakers must be in closed state"
+      }
+    ],
+    "procedure": [
+      "1. Operator acknowledges incident via CLI or web UI",
+      "2. System runs all verification checks",
+      "3. If all checks pass, tier-2 tools re-enabled",
+      "4. Autonomous loops re-enabled with reduced cadence for first 30 minutes",
+      "5. Full cadence restored after monitoring window shows stability"
+    ]
+  },
+  "componentMatrix": {
+    "gateway": {
+      "degradedBehavior": "Queue new commands; serve cached responses for read-only requests; reject all write operations",
+      "fallbackEndpoint": null,
+      "autoRestart": true,
+      "isolateOnFailure": false
+    },
+    "loopd": {
+      "degradedBehavior": "Suspend all loop executions; preserve loop state checkpoints; allow manual loop trigger only",
+      "fallbackEndpoint": null,
+      "autoRestart": true,
+      "isolateOnFailure": true
+    },
+    "tools": {
+      "degradedBehavior": "Disable tier-2 tools immediately; tier-0 read-only tools remain active; tier-1 tools require explicit confirmation",
+      "fallbackEndpoint": null,
+      "autoRestart": true,
+      "isolateOnFailure": true
+    },
+    "voice": {
+      "degradedBehavior": "Terminate active voice streams gracefully; disable new call initiation; preserve last transcript state",
+      "fallbackEndpoint": null,
+      "autoRestart": true,
+      "isolateOnFailure": true
+    },
+    "watchdog-scheduler": {
+      "degradedBehavior": "Halt all scheduled task dispatching; keep liveness probes active via Windows Task Scheduler fallback; emit incident event",
+      "fallbackEndpoint": null,
+      "autoRestart": true,
+      "isolateOnFailure": false
+    }
+  }
+}

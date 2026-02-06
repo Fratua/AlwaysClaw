@@ -1,0 +1,255 @@
+{
+  "version": "1.0.0",
+  "timezone": "America/New_York",
+  "cadences": {
+    "every5min": {
+      "cron": "*/5 * * * *",
+      "description": "High-frequency liveness and recovery checks",
+      "tasks": [
+        {
+          "name": "health-probe",
+          "loopId": "health-probing-loop-v1",
+          "sessionMode": "main",
+          "priority": "critical",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "watchdog-check",
+          "loopId": "watchdog-recovery-loop-v1",
+          "sessionMode": "main",
+          "priority": "critical",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "restart-governor",
+          "loopId": "restart-governor-loop-v1",
+          "sessionMode": "main",
+          "priority": "critical",
+          "suppressionBehavior": "never-suppress"
+        }
+      ]
+    },
+    "every30min": {
+      "cron": "*/30 * * * *",
+      "description": "Heartbeat synthesis and autonomy opportunity scanning",
+      "tasks": [
+        {
+          "name": "heartbeat-synthesis",
+          "loopId": "heartbeat-synthesis-loop-v1",
+          "sessionMode": "main",
+          "priority": "high",
+          "suppressionBehavior": "suppress-on-heartbeat-ok"
+        },
+        {
+          "name": "autonomy-opportunity-scan",
+          "loopId": "self-driven-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "condition": "idle-window-available",
+          "suppressionBehavior": "suppress-during-quiet-hours"
+        }
+      ]
+    },
+    "hourly": {
+      "cron": "0 * * * *",
+      "description": "Queue pressure, latency, metrics, and rate limit checks",
+      "tasks": [
+        {
+          "name": "queue-pressure-check",
+          "loopId": "queue-pressure-monitor-loop-v1",
+          "sessionMode": "main",
+          "priority": "high",
+          "suppressionBehavior": "suppress-during-quiet-hours"
+        },
+        {
+          "name": "latency-regression-check",
+          "loopId": "latency-regression-detector-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "suppress-during-quiet-hours"
+        },
+        {
+          "name": "metrics-export",
+          "loopId": "metrics-collector-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "suppress-during-quiet-hours"
+        },
+        {
+          "name": "rate-limit-adjustment",
+          "loopId": "rate-limiter-loop-v1",
+          "sessionMode": "main",
+          "priority": "medium",
+          "suppressionBehavior": "suppress-during-quiet-hours"
+        }
+      ]
+    },
+    "daily": {
+      "cron": "0 8 * * *",
+      "description": "Daily planning, hygiene, verification, and reporting tasks",
+      "tasks": [
+        {
+          "name": "planning-session",
+          "loopId": "planning-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "high",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "memory-hygiene",
+          "loopId": "memory-compact-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "high",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "memory-decay-cleanup",
+          "loopId": "adaptive-memory-decay-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "gmail-watch-verify",
+          "loopId": "gmail-watch-renewal-loop-v1",
+          "sessionMode": "main",
+          "priority": "high",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "log-compaction",
+          "loopId": "log-compaction-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "state-snapshot",
+          "loopId": "state-snapshot-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "high",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "cron-reliability-audit",
+          "loopId": "cron-reliability-auditor-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "slo-report",
+          "loopId": "slo-burn-rate-alert-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "high",
+          "suppressionBehavior": "never-suppress"
+        }
+      ]
+    },
+    "weekly": {
+      "cron": "0 10 * * 1",
+      "description": "Weekly security, upgrade, chaos, strategy, and integrity tasks",
+      "tasks": [
+        {
+          "name": "security-audit",
+          "loopId": "secrets-scanner-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "critical",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "auth-verification",
+          "loopId": "auth-verification-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "critical",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "upgrade-proposals",
+          "loopId": "upgrade-proposal-generator-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "chaos-drill",
+          "loopId": "chaos-drill-runner-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "strategy-renewal",
+          "loopId": "ralph-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "high",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "backup-integrity",
+          "loopId": "backup-integrity-checker-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "high",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "dependency-scan",
+          "loopId": "dependency-scanner-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        }
+      ]
+    },
+    "monthly": {
+      "cron": "0 10 1 * *",
+      "description": "Monthly DR validation, architecture review, capacity, and governance",
+      "tasks": [
+        {
+          "name": "dr-restore-validation",
+          "loopId": "dr-restore-validator-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "critical",
+          "suppressionBehavior": "never-suppress"
+        },
+        {
+          "name": "architecture-drift-review",
+          "loopId": "architecture-drift-reviewer-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "capacity-planning",
+          "loopId": "capacity-planner-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "medium",
+          "suppressionBehavior": "defer-to-next-window"
+        },
+        {
+          "name": "governance-dashboard-update",
+          "loopId": "governance-dashboard-updater-loop-v1",
+          "sessionMode": "isolated",
+          "priority": "low",
+          "suppressionBehavior": "defer-to-next-window"
+        }
+      ]
+    }
+  },
+  "quietHours": {
+    "enabled": true,
+    "start": "23:00",
+    "end": "07:00",
+    "suppressedCadences": [
+      "every30min",
+      "hourly",
+      "daily",
+      "weekly",
+      "monthly"
+    ],
+    "alwaysActive": [
+      "every5min"
+    ],
+    "description": "During quiet hours only critical health/watchdog/restart tasks execute. All other cadences are deferred until the next active window."
+  }
+}

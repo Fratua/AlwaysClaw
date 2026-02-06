@@ -1,0 +1,156 @@
+{
+  "version": "1.0.0",
+  "description": "Watchdog liveness and restart policy for AlwaysClaw services (master plan sections 28, 35)",
+  "livenessCheck": {
+    "intervalMs": 300000,
+    "intervalHuman": "5 minutes",
+    "timeoutMs": 10000,
+    "description": "Watchdog verifies heartbeat freshness and process liveness every 5 minutes"
+  },
+  "maxRestartAttempts": 5,
+  "restartWindow": {
+    "durationMs": 900000,
+    "durationHuman": "15 minutes",
+    "description": "Maximum 5 restart attempts within a 15-minute sliding window before entering degraded mode"
+  },
+  "restartStrategy": {
+    "type": "exponential-backoff",
+    "initialDelayMs": 1000,
+    "maxDelayMs": 60000,
+    "multiplier": 2,
+    "jitterEnabled": true,
+    "jitterMaxMs": 500
+  },
+  "circuitBreaker": {
+    "enabled": true,
+    "failureThreshold": 5,
+    "resetTimeoutMs": 900000,
+    "resetTimeoutHuman": "15 minutes",
+    "halfOpenMaxAttempts": 1,
+    "description": "After 5 failures, circuit opens for 15 minutes. A single successful health check closes the circuit."
+  },
+  "components": [
+    {
+      "name": "wsl2",
+      "displayName": "WSL2 Runtime",
+      "healthCheck": {
+        "method": "command",
+        "command": "wsl -l --running",
+        "expectedResponse": "Ubuntu",
+        "timeoutMs": 5000
+      },
+      "restartCommand": "wsl --shutdown && timeout /t 3 && wsl -d Ubuntu -- systemctl start alwaysclaw-gateway",
+      "dependsOn": [],
+      "critical": true,
+      "description": "WSL2 Ubuntu distro hosting the core runtime stack"
+    },
+    {
+      "name": "gateway",
+      "displayName": "AlwaysClaw Gateway",
+      "healthCheck": {
+        "method": "http",
+        "endpoint": "http://localhost:3100/health",
+        "expectedStatusCode": 200,
+        "expectedBody": { "status": "ok" },
+        "timeoutMs": 5000
+      },
+      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-gateway",
+      "dependsOn": ["wsl2"],
+      "critical": true,
+      "description": "Central control plane handling RPC, event bus, and routing"
+    },
+    {
+      "name": "loopd",
+      "displayName": "Loop Kernel Daemon",
+      "healthCheck": {
+        "method": "http",
+        "endpoint": "http://localhost:3101/health",
+        "expectedStatusCode": 200,
+        "expectedBody": { "status": "ok" },
+        "timeoutMs": 5000
+      },
+      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-loopd",
+      "dependsOn": ["gateway"],
+      "critical": true,
+      "description": "Loop execution engine running all scheduled and event-driven loops"
+    },
+    {
+      "name": "tools",
+      "displayName": "Tool Execution Service",
+      "healthCheck": {
+        "method": "http",
+        "endpoint": "http://localhost:3102/health",
+        "expectedStatusCode": 200,
+        "expectedBody": { "status": "ok" },
+        "timeoutMs": 5000
+      },
+      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-tools",
+      "dependsOn": ["gateway"],
+      "critical": true,
+      "description": "Tool registry and execution runtime for all tool tiers"
+    },
+    {
+      "name": "voice",
+      "displayName": "Voice Service",
+      "healthCheck": {
+        "method": "http",
+        "endpoint": "http://localhost:3103/health",
+        "expectedStatusCode": 200,
+        "expectedBody": { "status": "ok" },
+        "timeoutMs": 8000
+      },
+      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-voice",
+      "dependsOn": ["gateway", "tools"],
+      "critical": false,
+      "description": "STT/TTS and voice call orchestration service"
+    },
+    {
+      "name": "watchdog-scheduler",
+      "displayName": "Watchdog and Scheduler Service",
+      "healthCheck": {
+        "method": "http",
+        "endpoint": "http://localhost:3104/health",
+        "expectedStatusCode": 200,
+        "expectedBody": { "status": "ok" },
+        "timeoutMs": 5000
+      },
+      "restartCommand": "wsl -d Ubuntu -- systemctl restart alwaysclaw-scheduler",
+      "dependsOn": ["gateway"],
+      "critical": true,
+      "description": "Cron scheduler, heartbeat runner, and watchdog coordination"
+    }
+  ],
+  "degradedModeEntry": {
+    "conditions": [
+      "restart-attempts-exhausted",
+      "circuit-breaker-open",
+      "critical-component-unrecoverable"
+    ],
+    "behavior": {
+      "disableTier2Tools": true,
+      "keepReadOnlyAlive": true,
+      "keepCommunicationAlive": true,
+      "suspendAutonomousLoops": true,
+      "emitIncidentEvent": true,
+      "requireHumanAckBeforeReElevation": true
+    },
+    "description": "When restart attempts are exhausted or circuit breaker opens, system enters degraded mode with reduced capabilities until operator acknowledges and resolves the issue"
+  },
+  "windowsTaskScheduler": {
+    "bootTask": {
+      "name": "AlwaysClaw-Boot",
+      "trigger": "at-logon",
+      "command": "wsl -d Ubuntu -- systemctl start alwaysclaw-gateway alwaysclaw-loopd alwaysclaw-tools alwaysclaw-voice alwaysclaw-scheduler"
+    },
+    "watchdogTask": {
+      "name": "AlwaysClaw-Watchdog",
+      "trigger": "every-5-minutes",
+      "command": "powershell -ExecutionPolicy Bypass -File C:\\AlwaysClaw\\scripts\\watchdog.ps1"
+    },
+    "dailyMaintenance": {
+      "name": "AlwaysClaw-DailyMaintenance",
+      "trigger": "daily-at-0300",
+      "command": "powershell -ExecutionPolicy Bypass -File C:\\AlwaysClaw\\scripts\\daily-maintenance.ps1"
+    }
+  }
+}
