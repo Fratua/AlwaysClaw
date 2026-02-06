@@ -1,0 +1,66 @@
+{
+  "version": "1.0.0",
+  "description": "Session key strategy policy defining how sessions are scoped, keyed, and mapped to queue lanes.",
+  "strategies": {
+    "main": {
+      "description": "Single shared session for all DM interactions with the owner. All messages share conversational context.",
+      "keyDerivation": "static:main",
+      "useCase": "Primary owner DM channel where continuity across all messages is desired.",
+      "default": true
+    },
+    "per-peer": {
+      "description": "One session per unique sender. Isolates conversations between different users.",
+      "keyDerivation": "peer:{senderId}",
+      "useCase": "Multi-user DM scenarios where each user should have independent context.",
+      "default": false
+    },
+    "per-channel-peer": {
+      "description": "One session per sender per channel. Isolates conversations by both user identity and channel origin.",
+      "keyDerivation": "channel:{channelId}:peer:{senderId}",
+      "useCase": "Group chats and multi-channel deployments where context must not leak between channels.",
+      "default": false
+    },
+    "per-account-channel-peer": {
+      "description": "One session per account, channel, and sender triple. Maximum isolation for multi-tenant deployments.",
+      "keyDerivation": "account:{accountId}:channel:{channelId}:peer:{senderId}",
+      "useCase": "Multi-account setups where complete tenant isolation is required across all dimensions.",
+      "default": false
+    }
+  },
+  "defaults": {
+    "dmScope": "main",
+    "groupScope": "per-channel",
+    "mentionGating": {
+      "enabled": true,
+      "description": "In group contexts, the agent only responds when explicitly mentioned unless the sender is on the allowlist.",
+      "allowlistOverride": true,
+      "allowlistSource": "config.channelAllowlist"
+    }
+  },
+  "queueLaneMapping": {
+    "main": {
+      "description": "Primary lane for owner and direct agent interactions.",
+      "concurrency": 4,
+      "priority": "normal",
+      "fairnessPolicy": "round-robin"
+    },
+    "subagent": {
+      "description": "Lane for sub-agent and delegated task execution.",
+      "concurrency": 8,
+      "priority": "normal",
+      "fairnessPolicy": "round-robin"
+    },
+    "session:*": {
+      "description": "Per-session lanes for isolated cron jobs and background tasks. Wildcard matches session:{id}.",
+      "concurrency": 1,
+      "priority": "low",
+      "fairnessPolicy": "fifo"
+    }
+  },
+  "presencePolicy": {
+    "ttlSeconds": 300,
+    "maxEntries": 200,
+    "pruneOnExpiry": true,
+    "description": "Presence entries are ephemeral. Entries older than TTL are pruned. Max 200 concurrent entries."
+  }
+}
