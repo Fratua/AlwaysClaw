@@ -58,7 +58,7 @@
   ],
   "rollbackPlan": "Revert to previous state and emit error event.",
   "fallbackLoopChain": [
-    "retry-orchestration-loop-v1"
+    "dead-letter-recovery-loop-v1"
   ],
   "terminationPolicy": "retry_then_escalate",
   "writebacks": {

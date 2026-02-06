@@ -60,7 +60,7 @@
   ],
   "rollbackPlan": "Log failure and defer to next scheduled run.",
   "fallbackLoopChain": [
-    "watchdog-recovery-loop-v1"
+    "incident-containment-loop-v1"
   ],
   "terminationPolicy": "safe_stop_and_report",
   "writebacks": {

@@ -67,9 +67,7 @@
     "at_least_two_viable_options_identified"
   ],
   "rollbackPlan": "Discard hypothesis set and signal discovery failure to caller.",
-  "fallbackLoopChain": [
-    "research-loop-v1"
-  ],
+  "fallbackLoopChain": [],
   "terminationPolicy": "safe_stop_and_report",
   "writebacks": {
     "memory": true,
@@ -106,8 +104,6 @@
       "research-loop-v1",
       "planning-loop-v1"
     ],
-    "canCall": [
-      "research-loop-v1"
-    ]
+    "canCall": []
   }
 }

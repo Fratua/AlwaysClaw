@@ -6,7 +6,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, statSync, readdirSync } from 'node:fs';
+import { existsSync, statSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = process.cwd();
@@ -73,7 +73,6 @@ describe('Schema File', () => {
   it('schema/loop.contract.schema.json should be non-empty valid JSON', () => {
     const abs = resolve(ROOT, 'schema', 'loop.contract.schema.json');
     assert.ok(existsSync(abs), 'Schema file must exist');
-    const { readFileSync } = await import('node:fs');
     const raw = readFileSync(abs, 'utf-8');
     assert.ok(raw.trim().length > 0, 'Schema file should not be empty');
     const parsed = JSON.parse(raw);
@@ -85,7 +84,6 @@ describe('Registry File', () => {
   it('loops/registry.json should be non-empty valid JSON', () => {
     const abs = resolve(ROOT, 'loops', 'registry.json');
     assert.ok(existsSync(abs), 'Registry file must exist');
-    const { readFileSync } = await import('node:fs');
     const raw = readFileSync(abs, 'utf-8');
     assert.ok(raw.trim().length > 0, 'Registry file should not be empty');
     const parsed = JSON.parse(raw);
@@ -97,7 +95,6 @@ describe('Ops Files', () => {
   it('ops/schedules.json should be valid JSON', () => {
     const abs = resolve(ROOT, 'ops', 'schedules.json');
     assert.ok(existsSync(abs), 'schedules.json must exist');
-    const { readFileSync } = await import('node:fs');
     const data = JSON.parse(readFileSync(abs, 'utf-8'));
     assert.ok(typeof data === 'object', 'schedules.json should parse as object');
   });
@@ -105,7 +102,6 @@ describe('Ops Files', () => {
   it('ops/slo-targets.json should be valid JSON', () => {
     const abs = resolve(ROOT, 'ops', 'slo-targets.json');
     assert.ok(existsSync(abs), 'slo-targets.json must exist');
-    const { readFileSync } = await import('node:fs');
     const data = JSON.parse(readFileSync(abs, 'utf-8'));
     assert.ok(typeof data === 'object', 'slo-targets.json should parse as object');
   });
@@ -113,7 +109,6 @@ describe('Ops Files', () => {
   it('ops/incident-runbook.md should exist and be non-empty', () => {
     const abs = resolve(ROOT, 'ops', 'incident-runbook.md');
     assert.ok(existsSync(abs), 'incident-runbook.md must exist');
-    const { readFileSync } = await import('node:fs');
     const raw = readFileSync(abs, 'utf-8');
     assert.ok(raw.trim().length > 0, 'incident-runbook.md should not be empty');
   });

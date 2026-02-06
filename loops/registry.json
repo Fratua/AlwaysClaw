@@ -1,7 +1,7 @@
 {
   "$schema": "../schema/loop.contract.schema.json",
   "version": "1.0.0",
-  "generatedAt": "2026-02-06T18:27:55.076Z",
+  "generatedAt": "2026-02-06T18:47:08.526Z",
   "counts": {
     "total": 105,
     "core": 15,
@@ -58,9 +58,7 @@
       "loopClass": "core",
       "riskTier": "safe",
       "triggerClass": "event-triggered",
-      "dependencyEdges": [
-        "research-loop-v1"
-      ],
+      "dependencyEdges": [],
       "contractFile": "loops/contracts/discovery-loop-v1.json"
     },
     {
@@ -320,7 +318,7 @@
       "riskTier": "safe",
       "triggerClass": "always-on",
       "dependencyEdges": [
-        "retry-orchestration-loop-v1"
+        "dead-letter-recovery-loop-v1"
       ],
       "contractFile": "loops/contracts/retry-orchestration-loop-v1.json"
     },
@@ -1015,7 +1013,7 @@
       "riskTier": "safe",
       "triggerClass": "scheduled",
       "dependencyEdges": [
-        "watchdog-recovery-loop-v1"
+        "incident-containment-loop-v1"
       ],
       "contractFile": "loops/contracts/restart-governor-loop-v1.json"
     },

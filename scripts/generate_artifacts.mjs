@@ -112,13 +112,13 @@ const CORE_LOOPS = [
     approvalRequired: false, maxSteps: 24, maxDurationSec: 720, riskTier: 'safe',
     successCriteria: ['ranked_hypothesis_set_emitted', 'risk_cost_matrix_generated', 'at_least_two_viable_options_identified'],
     rollbackPlan: 'Discard hypothesis set and signal discovery failure to caller.',
-    fallbackLoopChain: ['research-loop-v1'],
+    fallbackLoopChain: [],
     terminationPolicy: 'safe_stop_and_report',
     writebacks: { memory: true, logs: true, actionArtifacts: true, auditTrail: false },
     outputContract: { summaryRequired: true, confidenceRequired: true, evidenceRequired: true, actionsRequired: false, nextRequired: true },
     loopLifecycleStates: FULL_LIFECYCLE,
     guardrails: { confidenceThreshold: 0.5, toolFailureBudget: 5, sideEffectApprovalRequired: false },
-    composition: { canBeCalledBy: ['ralph-loop-v1','research-loop-v1','planning-loop-v1'], canCall: ['research-loop-v1'] }
+    composition: { canBeCalledBy: ['ralph-loop-v1','research-loop-v1','planning-loop-v1'], canCall: [] }
   },
   {
     num: 4, id: 'bug-finder-loop-v1', displayName: 'Bug Finder Loop',
@@ -951,12 +951,14 @@ function getFallbackChain(num, category) {
   // Some specific overrides
   const specific = {
     22: ['dead-letter-recovery-loop-v1'],
+    23: ['dead-letter-recovery-loop-v1'],
     24: [],
     29: ['incident-containment-loop-v1'],
     33: [],
     50: ['gmail-history-delta-sync-loop-v1'],
     73: [],
     77: ['restart-governor-loop-v1'],
+    78: ['incident-containment-loop-v1'],
     88: ['chaos-drill-loop-v1'],
     103: [],
   };
