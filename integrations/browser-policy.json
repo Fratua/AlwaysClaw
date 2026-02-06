@@ -1,0 +1,431 @@
+{
+  "version": "1.0.0",
+  "provider": "playwright-cdp",
+  "description": "Complete browser control operational policy for AlwaysClaw integration layer",
+  "profileIsolation": {
+    "policy": "one-managed-profile-per-high-privilege-agent",
+    "cookieIsolation": {
+      "enforced": true,
+      "description": "Never share cookies across trust tiers",
+      "isolationBoundary": "agent-trust-tier",
+      "crossTierCookieSharing": "forbidden"
+    },
+    "profileDirectoryStructure": {
+      "basePath": "state/browser/profiles",
+      "perAgentPath": "state/browser/profiles/{agentId}",
+      "userData": "state/browser/profiles/{agentId}/user-data",
+      "cache": "state/browser/profiles/{agentId}/cache",
+      "downloads": "state/browser/profiles/{agentId}/downloads",
+      "screenshots": "state/browser/profiles/{agentId}/screenshots",
+      "artifacts": "state/browser/profiles/{agentId}/artifacts"
+    },
+    "cleanupPolicy": {
+      "onSessionEnd": "clear-session-storage-preserve-cookies-if-configured",
+      "onAgentDecommission": "full-profile-wipe",
+      "orphanedProfileTtlDays": 7,
+      "orphanedProfileAction": "archive-then-delete",
+      "cacheCleanupCadence": "daily",
+      "downloadRetentionDays": 30
+    },
+    "defaultProfileSettings": {
+      "browserType": "chromium",
+      "headless": true,
+      "viewport": { "width": 1280, "height": 720 },
+      "userAgent": "AlwaysClaw-ManagedBrowser/1.0",
+      "locale": "en-US",
+      "timezoneId": "America/New_York",
+      "geolocation": null,
+      "permissions": ["clipboard-read"],
+      "bypassCSP": false,
+      "ignoreHTTPSErrors": false,
+      "javaScriptEnabled": true
+    }
+  },
+  "operationGating": {
+    "defaultAllowed": [
+      "navigation",
+      "screenshot",
+      "dom-read",
+      "text-extraction",
+      "page-wait",
+      "element-query",
+      "accessibility-tree-read",
+      "cookie-read",
+      "url-read",
+      "console-log-read",
+      "network-request-read"
+    ],
+    "gatedOperations": {
+      "formSubmission": {
+        "gate": "tier1-approval",
+        "description": "Submitting forms on websites",
+        "approvalRequired": true,
+        "approvalTimeout": "5m",
+        "approvalEscalation": "timeout-then-deny",
+        "exceptions": ["search-forms", "filter-forms"],
+        "auditLog": true
+      },
+      "fileDownload": {
+        "gate": "tier1-approval",
+        "description": "Downloading files from websites",
+        "approvalRequired": true,
+        "quarantinePath": "state/browser/quarantine/{agentId}",
+        "maxFileSizeMb": 100,
+        "allowedMimeTypes": ["application/pdf", "text/plain", "image/*", "application/json"],
+        "blockedMimeTypes": ["application/x-executable", "application/x-msdownload"],
+        "scanBeforeRelease": true,
+        "auditLog": true
+      },
+      "purchase": {
+        "gate": "tier2-approval",
+        "description": "Making purchases or financial transactions",
+        "approvalRequired": true,
+        "approvalTimeout": "10m",
+        "approvalEscalation": "timeout-then-deny",
+        "requireScreenshotBeforeConfirm": true,
+        "requireDomDigestBeforeConfirm": true,
+        "auditLog": true,
+        "rollbackSupported": false
+      },
+      "accountModification": {
+        "gate": "tier2-approval",
+        "description": "Changing account settings, passwords, or profile information",
+        "approvalRequired": true,
+        "approvalTimeout": "10m",
+        "approvalEscalation": "timeout-then-deny",
+        "requireScreenshotBeforeConfirm": true,
+        "auditLog": true,
+        "rollbackSupported": false
+      },
+      "javascriptEvaluation": {
+        "gate": "tier1-approval",
+        "description": "Executing arbitrary JavaScript in page context",
+        "approvalRequired": true,
+        "sandboxEval": true,
+        "maxExecutionTimeMs": 5000,
+        "blockedApis": ["fetch-to-external", "XMLHttpRequest-to-external", "WebSocket-to-external"],
+        "auditLog": true
+      },
+      "loginAuthentication": {
+        "gate": "tier2-approval",
+        "description": "Logging into websites or services",
+        "approvalRequired": true,
+        "credentialSource": "encrypted-vault-only",
+        "neverExposeInDom": true,
+        "neverLogCredentials": true,
+        "auditLog": true
+      },
+      "navigationToSensitiveDomains": {
+        "gate": "tier1-approval",
+        "description": "Navigating to banking, government, or healthcare sites",
+        "approvalRequired": true,
+        "sensitiveDomainPatterns": [
+          "*.bank.*", "*.gov", "*.gov.*",
+          "*.healthcare.*", "*.medical.*",
+          "accounts.google.com", "login.microsoftonline.com"
+        ],
+        "auditLog": true
+      }
+    }
+  },
+  "artifactVerification": {
+    "requiredArtifacts": {
+      "screenshot": {
+        "captureOn": ["before-action", "after-action", "on-error"],
+        "format": "png",
+        "maxResolution": { "width": 1920, "height": 1080 },
+        "compressionQuality": 85,
+        "storagePath": "state/browser/profiles/{agentId}/screenshots/{timestamp}.png",
+        "retentionDays": 30
+      },
+      "domDigest": {
+        "captureOn": ["before-action", "after-action"],
+        "method": "sha256-of-serialized-dom",
+        "includeFields": ["outerHTML-hash", "visible-text-hash", "form-values-hash"],
+        "storagePath": "state/browser/profiles/{agentId}/artifacts/{timestamp}-dom.json",
+        "retentionDays": 30
+      },
+      "actionTranscript": {
+        "captureOn": ["every-action"],
+        "fields": [
+          "timestamp", "actionType", "targetSelector",
+          "targetText", "inputValue", "resultStatus",
+          "screenshotRef", "domDigestRef"
+        ],
+        "storagePath": "state/browser/profiles/{agentId}/artifacts/{sessionId}-transcript.jsonl",
+        "retentionDays": 90,
+        "redactSensitiveInputs": true
+      }
+    },
+    "storagePolicy": {
+      "encryptionAtRest": true,
+      "encryptionAlgorithm": "aes-256-gcm",
+      "retentionDefault": 30,
+      "retentionMaxDays": 90,
+      "cleanupCadence": "daily",
+      "compressOlderThanDays": 7
+    },
+    "verificationLoop": {
+      "loopId": "browser-artifact-verification-loop-v1",
+      "cadence": "after-every-gated-action",
+      "checks": [
+        "screenshot-captured-and-stored",
+        "dom-digest-matches-expected-state",
+        "action-transcript-entry-logged",
+        "no-unexpected-navigation-detected",
+        "no-unauthorized-download-initiated"
+      ],
+      "onVerificationFailure": "halt-and-report-to-approval-queue"
+    }
+  },
+  "promptInjectionDefense": {
+    "scannerLoop": {
+      "loopId": "browser-prompt-injection-scanner-loop-v1",
+      "cadence": "before-every-action-on-untrusted-content",
+      "scanScope": ["visible-text", "hidden-text", "dom-attributes", "meta-tags", "script-content"]
+    },
+    "contentIsolation": {
+      "shadowDomInspection": {
+        "enabled": true,
+        "scanClosedShadowRoots": false,
+        "scanOpenShadowRoots": true
+      },
+      "hiddenTextDetection": {
+        "enabled": true,
+        "methods": [
+          "zero-size-elements",
+          "off-screen-elements",
+          "opacity-zero-elements",
+          "color-matching-background",
+          "font-size-zero",
+          "display-none-with-content",
+          "aria-hidden-with-content",
+          "css-clip-hidden"
+        ]
+      },
+      "iframeIsolation": {
+        "crossOriginBlocked": true,
+        "sameOriginScanned": true,
+        "maxNestingDepth": 3
+      }
+    },
+    "suspiciousPatterns": {
+      "instructionLikeContent": {
+        "patterns": [
+          "ignore previous instructions",
+          "you are now",
+          "system prompt",
+          "override",
+          "admin mode",
+          "developer mode",
+          "execute the following",
+          "run this command",
+          "disregard safety"
+        ],
+        "matchType": "case-insensitive-substring",
+        "confidenceThreshold": 0.7
+      },
+      "authorityClaims": {
+        "patterns": [
+          "I am the administrator",
+          "authorized by",
+          "Anthropic staff",
+          "OpenAI staff",
+          "system message",
+          "emergency protocol"
+        ],
+        "matchType": "case-insensitive-substring",
+        "confidenceThreshold": 0.8
+      },
+      "urgencyLanguage": {
+        "patterns": [
+          "immediately",
+          "urgent action required",
+          "time sensitive",
+          "act now",
+          "before it expires",
+          "last chance"
+        ],
+        "matchType": "case-insensitive-substring",
+        "confidenceThreshold": 0.6
+      },
+      "encodedInstructions": {
+        "methods": [
+          "base64-detection",
+          "url-encoded-detection",
+          "unicode-homoglyph-detection",
+          "whitespace-steganography-detection"
+        ]
+      }
+    },
+    "responsePolicy": {
+      "onSuspiciousContent": "halt-and-report-to-user",
+      "onConfirmedInjection": "halt-close-tab-and-alert",
+      "reportFormat": {
+        "fields": ["url", "detectedPattern", "confidenceScore", "contentSnippet", "timestamp"],
+        "redactSensitive": true
+      },
+      "neverExecuteInstructions": true,
+      "neverAutoSubmitForms": true,
+      "neverAutoClickLinks": true
+    }
+  },
+  "perAgentAccessLevels": {
+    "ownerTrustedAgent": {
+      "description": "Full browser access with tier2 gates on purchases and account changes",
+      "allowedOperations": "all",
+      "gatedOperations": ["purchase", "accountModification", "loginAuthentication"],
+      "sensitiveDomainsBlocked": false,
+      "javascriptEvaluationAllowed": true,
+      "fileDownloadAllowed": true,
+      "maxConcurrentTabs": 10,
+      "maxSessionDurationMinutes": 120
+    },
+    "specialistAgent": {
+      "description": "Navigation and read-only operations for data gathering",
+      "allowedOperations": [
+        "navigation", "screenshot", "dom-read",
+        "text-extraction", "page-wait", "element-query",
+        "accessibility-tree-read", "cookie-read", "url-read"
+      ],
+      "gatedOperations": ["formSubmission"],
+      "sensitiveDomainsBlocked": true,
+      "javascriptEvaluationAllowed": false,
+      "fileDownloadAllowed": false,
+      "maxConcurrentTabs": 5,
+      "maxSessionDurationMinutes": 60
+    },
+    "publicFacingAgent": {
+      "description": "Read-only access with no navigation to sensitive domains",
+      "allowedOperations": [
+        "screenshot", "dom-read", "text-extraction",
+        "page-wait", "element-query", "url-read"
+      ],
+      "gatedOperations": [],
+      "navigationAllowed": false,
+      "sensitiveDomainsBlocked": true,
+      "javascriptEvaluationAllowed": false,
+      "fileDownloadAllowed": false,
+      "maxConcurrentTabs": 3,
+      "maxSessionDurationMinutes": 30
+    }
+  },
+  "sessionLifecycle": {
+    "creation": {
+      "method": "on-demand-with-pre-warmed-pool",
+      "preWarmedPoolSize": 2,
+      "preWarmedPoolRefreshCadence": "every-30-minutes",
+      "launchTimeout": 30000,
+      "contextOptions": {
+        "acceptDownloads": false,
+        "bypassCSP": false,
+        "ignoreHTTPSErrors": false,
+        "javaScriptEnabled": true
+      }
+    },
+    "timeout": {
+      "idleTimeoutMinutes": 15,
+      "maxSessionDurationMinutes": 120,
+      "navigationTimeoutMs": 30000,
+      "actionTimeoutMs": 10000,
+      "pageLoadTimeoutMs": 60000,
+      "onIdleTimeout": "save-state-and-close",
+      "onMaxDuration": "force-close-and-log"
+    },
+    "cleanup": {
+      "onSessionEnd": [
+        "close-all-tabs",
+        "clear-session-storage",
+        "preserve-cookies-if-configured",
+        "flush-artifact-buffer",
+        "release-profile-lock"
+      ],
+      "onError": [
+        "capture-error-screenshot",
+        "capture-error-dom-digest",
+        "log-error-to-transcript",
+        "close-all-tabs",
+        "release-profile-lock"
+      ],
+      "orphanedSessionDetection": {
+        "enabled": true,
+        "checkCadence": "every-5-minutes",
+        "maxOrphanAgeMinutes": 30,
+        "onOrphanDetected": "force-close-and-alert"
+      }
+    }
+  },
+  "relatedLoops": [
+    "browser-session-lifecycle-loop-v1",
+    "browser-workflow-executor-loop-v1",
+    "browser-artifact-verification-loop-v1",
+    "browser-prompt-injection-scanner-loop-v1"
+  ],
+  "errorHandling": {
+    "onTimeout": {
+      "action": "capture-artifacts-and-retry-once",
+      "maxRetries": 1,
+      "onFinalFailure": "log-and-report-to-user"
+    },
+    "onCrash": {
+      "action": "restart-browser-context",
+      "maxRestarts": 3,
+      "restartBackoffMs": 5000,
+      "onMaxRestartsExceeded": "disable-browser-and-alert-owner",
+      "preserveArtifacts": true
+    },
+    "onNavigationFailure": {
+      "action": "retry-with-backoff",
+      "maxRetries": 2,
+      "retryBackoffMs": 2000,
+      "onFinalFailure": "log-and-report-navigation-error",
+      "commonCauses": ["dns-resolution", "ssl-error", "connection-refused", "timeout"]
+    },
+    "onElementNotFound": {
+      "action": "wait-and-retry",
+      "maxWaitMs": 10000,
+      "retryIntervalMs": 1000,
+      "onFinalFailure": "capture-screenshot-and-report"
+    },
+    "onUnexpectedDialog": {
+      "action": "dismiss-and-log",
+      "captureDialogText": true,
+      "scanForInjection": true
+    },
+    "alerting": {
+      "consecutiveFailureThreshold": 3,
+      "alertChannel": "incident-containment-loop",
+      "includeErrorContext": true,
+      "includeScreenshot": true,
+      "redactSensitiveFields": ["credentials", "cookies", "localStorage"]
+    }
+  },
+  "observability": {
+    "metrics": [
+      "browser.sessions.created",
+      "browser.sessions.closed",
+      "browser.sessions.crashed",
+      "browser.sessions.timed_out",
+      "browser.actions.total",
+      "browser.actions.by_type",
+      "browser.actions.gated_approved",
+      "browser.actions.gated_denied",
+      "browser.artifacts.screenshots_captured",
+      "browser.artifacts.dom_digests_captured",
+      "browser.injection.scans_total",
+      "browser.injection.detections",
+      "browser.errors.by_type",
+      "browser.navigation.total",
+      "browser.navigation.failures"
+    ],
+    "tracing": {
+      "spanNamePrefix": "browser",
+      "captureUrl": true,
+      "captureActionType": true,
+      "captureSelector": true,
+      "redactFormInputs": true,
+      "redactCookies": true,
+      "includeScreenshotRef": true
+    }
+  }
+}
