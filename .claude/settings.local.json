@@ -1,17 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git --version:*)",
-      "Bash(git -C \"C:\\\\Users\\\\Fratu\\\\Desktop\\\\AlwaysClaw\" status)",
-      "Bash(wsl:*)",
-      "Bash(node:*)",
-      "Bash(test:*)",
-      "Bash(dir:*)",
-      "Bash(git config:*)",
-      "Bash(echo:*)",
-      "Bash(git worktree:*)",
-      "Bash(python -c:*)",
-      "Bash(git init:*)",
+      "WebSearch",
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git rm:*)",
