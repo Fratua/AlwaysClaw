@@ -18,6 +18,7 @@ Usage:
 """
 
 import gc
+import logging
 import os
 import sys
 import time
@@ -28,6 +29,8 @@ import asyncio
 import threading
 import psutil
 from typing import Dict, List, Optional, Callable, Any, TypeVar, Generic
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from collections import OrderedDict, defaultdict, deque
 from enum import Enum
@@ -541,7 +544,8 @@ class L1Cache:
         with self._lock:
             try:
                 size = len(pickle.dumps(value))
-            except:
+            except Exception as e:
+                logger.debug(f"Could not determine serialized size, using default: {e}")
                 size = 1024
             
             while (self._size + size > self.max_size or len(self._cache) >= self.max_items):
@@ -729,8 +733,8 @@ class ResourceMonitor:
             for callback in self._callbacks:
                 try:
                     callback(alert)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Alert callback failed: {e}")
     
     def _collect_metrics(self) -> Dict[str, float]:
         return {

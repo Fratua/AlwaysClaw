@@ -333,10 +333,11 @@ class TOTPMFAHandler:
                 )
                 if element:
                     return element
-            except:
+            except Exception as e:
+                logger.warning(f"MFA browser op failed: {e}")
                 continue
         return None
-    
+
     async def _submit_code(self, page) -> bool:
         """Submit the MFA code."""
         for selector in self.SUBMIT_SELECTORS:
@@ -345,15 +346,16 @@ class TOTPMFAHandler:
                 if button and await button.is_visible():
                     await button.click()
                     return True
-            except:
+            except Exception as e:
+                logger.warning(f"MFA browser op failed: {e}")
                 continue
-        
+
         # Try form submission
         try:
             await page.keyboard.press('Enter')
             return True
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"MFA browser op failed: {e}")
         
         return False
     
@@ -387,17 +389,17 @@ class TOTPMFAHandler:
                     element = await page.query_selector(selector)
                     if element and await element.is_visible():
                         return True
-                except:
-                    pass
-            
+                except Exception as e:
+                    logger.warning(f"MFA browser op failed: {e}")
+
             # Check for error
             for selector in error_selectors:
                 try:
                     element = await page.query_selector(selector)
                     if element and await element.is_visible():
                         return False
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"MFA browser op failed: {e}")
             
             await asyncio.sleep(0.5)
         
@@ -516,11 +518,11 @@ class SMSOTPHandler:
                     logger.debug("Triggered SMS code send")
                     await asyncio.sleep(2)  # Wait for SMS to be sent
                     return True
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"MFA browser op failed: {e}")
+
         return False
-    
+
     async def _wait_for_sms_code(
         self,
         phone_number: str,
@@ -601,11 +603,11 @@ class SMSOTPHandler:
                 element = await page.wait_for_selector(selector, timeout=2000)
                 if element:
                     return element
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"MFA browser op failed: {e}")
+
         return None
-    
+
     async def _submit_code(self, page) -> bool:
         """Submit the code."""
         selectors = [
@@ -613,18 +615,18 @@ class SMSOTPHandler:
             'button:has-text("Verify")',
             'button:has-text("Submit")',
         ]
-        
+
         for selector in selectors:
             try:
                 button = await page.query_selector(selector)
                 if button:
                     await button.click()
                     return True
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"MFA browser op failed: {e}")
+
         return False
-    
+
     async def _wait_for_verification(self, page, timeout: int = 30) -> bool:
         """Wait for verification to complete."""
         await asyncio.sleep(2)
@@ -766,29 +768,29 @@ class BackupCodeHandler:
                 element = await page.wait_for_selector(selector, timeout=2000)
                 if element:
                     return element
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"MFA browser op failed: {e}")
+
         return None
-    
+
     async def _submit_code(self, page) -> bool:
         """Submit the code."""
         selectors = [
             'button[type="submit"]',
             'button:has-text("Verify")',
         ]
-        
+
         for selector in selectors:
             try:
                 button = await page.query_selector(selector)
                 if button:
                     await button.click()
                     return True
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"MFA browser op failed: {e}")
+
         return False
-    
+
     async def _wait_for_verification(self, page, timeout: int = 30) -> bool:
         """Wait for verification."""
         await asyncio.sleep(2)
@@ -867,16 +869,16 @@ class MFAHandler:
                     if element and await element.is_visible():
                         logger.debug(f"Detected MFA type: {mfa_type.name}")
                         return mfa_type
-                except:
-                    pass
-        
+                except Exception as e:
+                    logger.warning(f"MFA browser op failed: {e}")
+
         # Default to TOTP if input field found
         try:
             code_input = await page.query_selector('input[type="number"], input[type="tel"]')
             if code_input:
                 return MFAType.TOTP
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"MFA browser op failed: {e}")
         
         return MFAType.UNKNOWN
     

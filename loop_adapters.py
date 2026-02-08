@@ -29,8 +29,12 @@ def _get_llm():
     return _llm_client
 
 
+_LOOP_TIMEOUT = 300  # 5 minutes max per loop cycle
+
+
 def _run_async(coro):
-    """Run an async coroutine synchronously (bridge handlers are sync)."""
+    """Run an async coroutine synchronously (bridge handlers are sync).
+    Both paths enforce a 300-second timeout to prevent hung loops."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -39,10 +43,10 @@ def _run_async(coro):
     if loop and loop.is_running():
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result(timeout=300)
+            future = pool.submit(asyncio.run, asyncio.wait_for(coro, timeout=_LOOP_TIMEOUT))
+            return future.result(timeout=_LOOP_TIMEOUT + 5)
     else:
-        return asyncio.run(coro)
+        return asyncio.run(asyncio.wait_for(coro, timeout=_LOOP_TIMEOUT))
 
 
 # ── Individual loop adapters ──────────────────────────────────────────
@@ -215,6 +219,18 @@ def _get_context_engineering_loop():
     return _loop_instances['context_engineering']
 
 
+def _get_debugging_loop():
+    if 'debugging' not in _loop_instances:
+        try:
+            from debugging_loop import DebuggingLoop
+            _loop_instances['debugging'] = DebuggingLoop(llm_client=_get_llm() if _llm_client else None)
+            logger.info("DebuggingLoop initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize DebuggingLoop: {e}")
+            raise
+    return _loop_instances['debugging']
+
+
 def _get_web_monitor_loop():
     if 'web_monitor' not in _loop_instances:
         try:
@@ -278,9 +294,28 @@ def run_planning_cycle(**context) -> Dict:
 
 
 def run_e2e_cycle(**context) -> Dict:
-    return _safe_run('e2e', _get_e2e_loop,
-                     lambda loop: {"status": "ready", "engine": "E2EWorkflowEngine",
-                                   "pending_workflows": len(getattr(loop, '_workflows', {}))})
+    def _run_e2e(loop):
+        pending = len(getattr(loop, '_running_workflows', {}))
+        # Process any pending workflows
+        if hasattr(loop, 'state_backend'):
+            try:
+                workflows = _run_async(loop.state_backend.list_workflows(limit=10))
+                active = [w for w in workflows if w.status.value in ('pending', 'running')]
+                return {
+                    "status": "ready",
+                    "engine": "E2EWorkflowEngine",
+                    "running_workflows": pending,
+                    "active_workflows": len(active),
+                    "total_workflows": len(workflows),
+                }
+            except Exception as e:
+                logger.debug(f"E2E state query: {e}")
+        return {
+            "status": "ready",
+            "engine": "E2EWorkflowEngine",
+            "running_workflows": pending,
+        }
+    return _safe_run('e2e', _get_e2e_loop, _run_e2e)
 
 
 def run_exploration_cycle(**context) -> Dict:
@@ -343,6 +378,11 @@ def run_context_engineering_cycle(**context) -> Dict:
                      else {"status": "completed", "note": "single-cycle not available"})
 
 
+def run_debugging_cycle(**context) -> Dict:
+    return _safe_run('debugging', _get_debugging_loop,
+                     lambda loop: _run_async(loop.run_single_cycle(context)))
+
+
 def run_web_monitor_cycle(**context) -> Dict:
     return _safe_run('web_monitor', _get_web_monitor_loop,
                      lambda loop: _run_async(loop.run_single_cycle(context)) if hasattr(loop, 'run_single_cycle')
@@ -375,6 +415,7 @@ def get_loop_handlers(llm_client=None) -> Dict[str, Callable]:
         'loop.self_driven.run_cycle': run_self_driven_cycle,
         'loop.cpel.run_cycle': run_cpel_cycle,
         'loop.context_engineering.run_cycle': run_context_engineering_cycle,
+        'loop.debugging.run_cycle': run_debugging_cycle,
         'loop.web_monitor.run_cycle': run_web_monitor_cycle,
     }
 

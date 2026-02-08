@@ -900,8 +900,8 @@ class SystemSupervisor:
                         return True
                     return False
                 win32api.SetConsoleCtrlHandler(console_handler, True)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to set console ctrl handler: {e}")
                 
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)

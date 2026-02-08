@@ -2,7 +2,21 @@
 OpenClaw Windows 10 AI Agent - Agent Loop Configurations
 =========================================================
 
-Configuration for the 15 hardcoded agentic loops with resource allocation.
+This file contains TWO distinct sets of loop configurations:
+
+1. OPERATIONAL SERVICE LOOPS (Node.js side)
+   - Run inside the Node.js daemon (service.js / agent-loop-worker)
+   - Handle heartbeat, Gmail sync, browser monitoring, TTS/STT, etc.
+   - Defined in AGENT_LOOP_CONFIGS below
+
+2. COGNITIVE LOOPS (Python side)
+   - Run inside the Python bridge via loop_adapters.py
+   - 15 AI reasoning loops: ralph, research, planning, e2e, exploration,
+     discovery, bug_finder, self_learning, meta_cognition, self_upgrading,
+     self_updating, self_driven, cpel, context_engineering, web_monitor
+   - Defined in COGNITIVE_LOOP_CONFIGS below
+   - Triggered via JSON-RPC: loop.<name>.run_cycle
+
 Each loop has defined priority, interval, and CPU/memory limits.
 """
 
@@ -348,15 +362,192 @@ def print_resource_allocation():
     print("=" * 60)
 
 # ============================================================================
+# COGNITIVE LOOP CONFIGURATIONS (Python-side, via loop_adapters.py)
+# ============================================================================
+# These are the 15 AI reasoning loops that run inside the Python bridge.
+# They are triggered via JSON-RPC calls from the Node.js daemon:
+#   method: "loop.<name>.run_cycle"
+# The adapter module (loop_adapters.py) maps each name to its loop class.
+
+COGNITIVE_LOOP_CONFIGS = {
+    'ralph': {
+        'priority': TaskPriority.HIGH,
+        'interval': 30.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Ralph conversational agent loop',
+        'module': 'ralph_loop_implementation',
+        'class': 'RalphLoop',
+        'enabled': True,
+    },
+    'research': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 60.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Research and information gathering loop',
+        'module': 'research_loop.research_loop',
+        'class': 'ResearchLoop',
+        'enabled': True,
+    },
+    'planning': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 60.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Goal decomposition and planning loop',
+        'module': 'planning_loop_implementation',
+        'class': 'AdvancedPlanningLoop',
+        'enabled': True,
+    },
+    'e2e': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 60.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'End-to-end workflow orchestration loop',
+        'module': 'e2e_loop_core',
+        'class': 'E2EWorkflowEngine',
+        'enabled': True,
+    },
+    'exploration': {
+        'priority': TaskPriority.LOW,
+        'interval': 120.0,
+        'cpu_limit': 8.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Curiosity-driven exploration loop',
+        'module': 'exploration_loop_implementation',
+        'class': 'ExplorationLoop',
+        'enabled': True,
+    },
+    'discovery': {
+        'priority': TaskPriority.LOW,
+        'interval': 120.0,
+        'cpu_limit': 8.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Knowledge and pattern discovery loop',
+        'module': 'discovery_loop_architecture',
+        'class': 'DiscoveryLoop',
+        'enabled': True,
+    },
+    'bug_finder': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 300.0,
+        'cpu_limit': 15.0,
+        'memory_limit': 256 * 1024 * 1024,
+        'description': 'ML-based predictive bug detection loop',
+        'module': 'bug_finder_loop',
+        'class': 'AdvancedBugFinderLoop',
+        'enabled': True,
+    },
+    'self_learning': {
+        'priority': TaskPriority.LOW,
+        'interval': 600.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Continuous self-learning and knowledge consolidation',
+        'module': 'self_learning_loop_implementation',
+        'class': 'SelfLearningLoop',
+        'enabled': True,
+    },
+    'meta_cognition': {
+        'priority': TaskPriority.LOW,
+        'interval': 300.0,
+        'cpu_limit': 8.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Self-reflective meta-cognition loop',
+        'module': 'meta_cognition_loop',
+        'class': 'MetaCognitionLoop',
+        'enabled': True,
+    },
+    'self_upgrading': {
+        'priority': TaskPriority.BACKGROUND,
+        'interval': 1800.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Self-upgrade orchestration loop',
+        'module': 'self_upgrading_loop',
+        'class': 'UpgradeOrchestrator',
+        'enabled': True,
+    },
+    'self_updating': {
+        'priority': TaskPriority.BACKGROUND,
+        'interval': 1800.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Self-updating code improvement loop',
+        'module': 'self_updating_loop.loop',
+        'class': 'SelfUpdatingLoop',
+        'enabled': True,
+    },
+    'self_driven': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 60.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Autonomous self-driven task loop',
+        'module': 'self_driven_loop.self_driven_loop',
+        'class': 'SelfDrivenLoop',
+        'enabled': True,
+    },
+    'cpel': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 30.0,
+        'cpu_limit': 8.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Context-prompt engineering loop',
+        'module': 'cpel_implementation',
+        'class': 'ContextPromptEngineeringLoop',
+        'enabled': True,
+    },
+    'context_engineering': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 60.0,
+        'cpu_limit': 8.0,
+        'memory_limit': 128 * 1024 * 1024,
+        'description': 'Context engineering and optimization loop',
+        'module': 'context_engineering_loop',
+        'class': 'ContextEngineeringLoop',
+        'enabled': True,
+    },
+    'web_monitor': {
+        'priority': TaskPriority.NORMAL,
+        'interval': 300.0,
+        'cpu_limit': 10.0,
+        'memory_limit': 256 * 1024 * 1024,
+        'description': 'Web monitoring and change detection loop',
+        'module': 'web_monitor_agent_loop',
+        'class': 'WebMonitoringAgentLoop',
+        'enabled': True,
+    },
+}
+
+
+def get_cognitive_loop_config(name: str) -> dict:
+    """Get configuration for a specific cognitive loop."""
+    return COGNITIVE_LOOP_CONFIGS.get(name, {})
+
+
+def get_all_cognitive_loops() -> dict:
+    """Get all cognitive loop configurations."""
+    return COGNITIVE_LOOP_CONFIGS
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
 if __name__ == "__main__":
     print_resource_allocation()
-    
-    print("\n📋 Agent Loops by Priority:")
+
+    print("\n--- Operational Service Loops (Node.js side) ---")
     for priority in TaskPriority:
         loops = get_loops_by_priority(priority)
-        print(f"\n{priority.name} ({len(loops)} loops):")
-        for name, config in loops.items():
-            print(f"  - {name}: {config['description']}")
+        if loops:
+            print(f"\n{priority.name} ({len(loops)} loops):")
+            for name, config in loops.items():
+                print(f"  - {name}: {config['description']}")
+
+    print("\n--- Cognitive Loops (Python side, via loop_adapters.py) ---")
+    for name, config in COGNITIVE_LOOP_CONFIGS.items():
+        print(f"  - loop.{name}.run_cycle: {config['description']}")

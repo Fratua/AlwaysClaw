@@ -509,7 +509,8 @@ class TaskBuilder:
         
         try:
             folder = self.scheduler.get_folder(folder_path)
-        except:
+        except Exception as e:
+            logger.debug(f"Folder '{folder_path}' not found, creating: {e}")
             # Create folder if it doesn't exist
             parts = folder_path.strip("\\").split("\\")
             current_path = "\\"
@@ -517,8 +518,8 @@ class TaskBuilder:
                 try:
                     parent = self.scheduler.get_folder(current_path)
                     parent.CreateFolder(part, None)
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Folder creation skipped (may already exist) at '{current_path}{part}': {e}")
                 current_path = current_path + part + "\\"
             folder = self.scheduler.get_folder(folder_path)
         
@@ -1203,8 +1204,8 @@ class TaskFolderManager:
             try:
                 root.CreateFolder("OpenClaw", None)
                 logger.info("Created folder: \\OpenClaw")
-            except:
-                logger.info("Folder already exists: \\OpenClaw")
+            except Exception as e:
+                logger.info(f"Folder already exists or error: \\OpenClaw ({e})")
             
             # Create subfolders
             for folder_name in self.FOLDER_STRUCTURE.keys():

@@ -36,6 +36,12 @@ class PythonBridge:
         self.llm_client = None
         self.memory_manager = None
         self.db_connection = None
+        self._gmail_client = None
+        self._gmail_import_failed = False
+        self._tts_orchestrator = None
+        self._tts_import_failed = False
+        self._twilio_manager = None
+        self._twilio_import_failed = False
         self._stopping = False
         self._register_builtin_handlers()
 
@@ -80,7 +86,7 @@ class PythonBridge:
             try:
                 from openai_client import OpenAIClient
                 self.llm_client = OpenAIClient.get_instance()
-                logger.info("OpenAI GPT-5.2 client initialized")
+                logger.info(f"OpenAI GPT-5.2 client initialized (model={self.llm_client.model})")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 raise
@@ -271,14 +277,64 @@ class PythonBridge:
         ).fetchone()["cnt"]
         return {"synced": True, "total_entries": count}
 
+    # ── Lazy client initializers ────────────────────────────────
+
+    def _get_gmail_client(self):
+        """Lazy-initialize and cache the Gmail client."""
+        if self._gmail_client is None and not self._gmail_import_failed:
+            try:
+                from gmail_client_implementation import GmailClient
+                self._gmail_client = GmailClient()
+                logger.info("Gmail client initialized")
+            except ImportError:
+                self._gmail_import_failed = True
+                logger.warning("gmail_client_implementation not available")
+                raise
+        if self._gmail_import_failed:
+            raise ImportError("Gmail client not available")
+        return self._gmail_client
+
+    def _get_tts_orchestrator(self):
+        """Lazy-initialize and cache the TTS orchestrator."""
+        if self._tts_orchestrator is None and not self._tts_import_failed:
+            try:
+                from tts_orchestrator import TTSOrchestrator
+                self._tts_orchestrator = TTSOrchestrator()
+                logger.info("TTS orchestrator initialized")
+            except ImportError:
+                self._tts_import_failed = True
+                logger.warning("tts_orchestrator not available")
+                raise
+        if self._tts_import_failed:
+            raise ImportError("TTS orchestrator not available")
+        return self._tts_orchestrator
+
+    def _get_twilio_manager(self):
+        """Lazy-initialize and cache the Twilio manager."""
+        if self._twilio_manager is None and not self._twilio_import_failed:
+            try:
+                from twilio_voice_integration import TwilioVoiceManager
+                self._twilio_manager = TwilioVoiceManager()
+                logger.info("Twilio manager initialized")
+            except ImportError:
+                self._twilio_import_failed = True
+                logger.warning("twilio_voice_integration not available")
+                raise
+        if self._twilio_import_failed:
+            raise ImportError("Twilio manager not available")
+        return self._twilio_manager
+
     # ── Gmail handlers ───────────────────────────────────────────
 
     def _handle_gmail_send(self, **params):
+        to_addr = params.get('to', '')
+        if not to_addr or '@' not in to_addr:
+            return {"sent": False, "error": f"Invalid recipient address: {to_addr!r}"}
         try:
             from gmail_client_implementation import GmailClient
-            client = GmailClient()
+            client = self._get_gmail_client()
             return client.messages.send_message(
-                to=params.get('to', ''),
+                to=to_addr,
                 subject=params.get('subject', ''),
                 body=params.get('body', ''),
             )
@@ -288,8 +344,7 @@ class PythonBridge:
 
     def _handle_gmail_read(self, **params):
         try:
-            from gmail_client_implementation import GmailClient
-            client = GmailClient()
+            client = self._get_gmail_client()
             return client.messages.list_messages(
                 max_results=params.get('max_results', 10),
                 query=params.get('query', 'is:unread'),
@@ -299,16 +354,14 @@ class PythonBridge:
 
     def _handle_gmail_search(self, **params):
         try:
-            from gmail_client_implementation import GmailClient
-            client = GmailClient()
+            client = self._get_gmail_client()
             return client.messages.list_messages(query=params.get('query', ''))
         except ImportError:
             return {"emails": [], "error": "Gmail client not available"}
 
     def _handle_gmail_context(self, **params):
         try:
-            from gmail_client_implementation import GmailClient
-            client = GmailClient()
+            client = self._get_gmail_client()
             messages = client.messages.list_messages(query='is:unread', max_results=100)
             unread_count = len(messages) if isinstance(messages, list) else messages.get('resultSizeEstimate', 0) if isinstance(messages, dict) else 0
             return {"unread": unread_count}
@@ -319,8 +372,7 @@ class PythonBridge:
 
     def _handle_gmail_process_batch(self, **params):
         try:
-            from gmail_client_implementation import GmailClient
-            client = GmailClient()
+            client = self._get_gmail_client()
             messages = client.messages.list_messages(
                 max_results=params.get('max_results', 50),
                 query=params.get('query', ''),
@@ -332,9 +384,11 @@ class PythonBridge:
     # ── Twilio handlers ──────────────────────────────────────────
 
     def _handle_twilio_call(self, **params):
+        to_num = params.get('to', '')
+        if not to_num:
+            return {"called": False, "error": "No 'to' number provided"}
         try:
-            from twilio_voice_integration import TwilioVoiceManager
-            manager = TwilioVoiceManager()
+            manager = self._get_twilio_manager()
             return manager.make_call(
                 to_number=params.get('to', ''),
                 twiml_url=params.get('twiml_url', ''),
@@ -346,9 +400,14 @@ class PythonBridge:
             return {"called": False, "error": str(e)}
 
     def _handle_twilio_sms(self, **params):
+        to_num = params.get('to', '')
+        body = params.get('body', '')
+        if not to_num:
+            return {"sent": False, "error": "No 'to' number provided"}
+        if not body:
+            return {"sent": False, "error": "No message body provided"}
         try:
-            from twilio_voice_integration import TwilioVoiceManager
-            manager = TwilioVoiceManager()
+            manager = self._get_twilio_manager()
             return manager.send_sms(
                 to=params.get('to', ''),
                 body=params.get('body', ''),
@@ -361,11 +420,15 @@ class PythonBridge:
     # ── TTS handlers ─────────────────────────────────────────────
 
     def _handle_tts_speak(self, **params):
+        text = params.get('text', '')
+        if not text:
+            return {"spoken": False, "error": "No text provided"}
+        if len(text) > 10000:
+            return {"spoken": False, "error": f"Text too long ({len(text)} chars, max 10000)"}
         try:
-            from tts_orchestrator import TTSOrchestrator
-            orchestrator = TTSOrchestrator()
+            orchestrator = self._get_tts_orchestrator()
             return orchestrator.speak(
-                text=params.get('text', ''),
+                text=text,
                 voice=params.get('voice'),
                 output_path=params.get('output_path'),
             )
@@ -442,9 +505,34 @@ class PythonBridge:
 
     # ── Main event loop ──────────────────────────────────────────
 
+    def _check_env_vars(self):
+        """Check required env vars at startup and log what's missing."""
+        env_features = {
+            'OPENAI_API_KEY': 'LLM completions (llm.complete, llm.generate, cognitive loops)',
+            'MEMORY_DB_PATH': 'Memory persistence (default: ./data/memory.db)',
+            'GMAIL_CREDENTIALS_PATH': 'Gmail integration (gmail.send, gmail.read, gmail.search)',
+            'TWILIO_ACCOUNT_SID': 'Twilio voice/SMS (twilio.call, twilio.sms)',
+            'TWILIO_AUTH_TOKEN': 'Twilio voice/SMS',
+            'AZURE_SPEECH_KEY': 'Speech-to-text (stt.transcribe)',
+            'AZURE_SPEECH_REGION': 'Speech-to-text',
+            'JWT_SECRET': 'JWT token validation (auth.validate)',
+        }
+        missing = []
+        for var, feature in env_features.items():
+            if not os.environ.get(var):
+                missing.append(f"  {var}: {feature}")
+        if missing:
+            logger.warning(
+                "Missing environment variables (features will be disabled):\n"
+                + "\n".join(missing)
+            )
+
     def run(self):
         """Main loop: read JSON-RPC requests from stdin, write responses to stdout."""
         logger.info("Python bridge starting...")
+
+        # Check env vars and report what's missing
+        self._check_env_vars()
 
         # Initialize shared resources
         try:

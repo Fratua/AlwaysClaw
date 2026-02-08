@@ -555,7 +555,8 @@ class TokenRotationManager:
         try:
             payload = jwt.decode(token, options={"verify_signature": False})
             return payload.get('jti', '')
-        except:
+        except (ValueError, KeyError) as e:
+            logger.warning(f"JWT JTI extraction failed: {e}")
             return ''
 
 

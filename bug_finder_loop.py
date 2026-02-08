@@ -236,50 +236,67 @@ class MLEnsembleDetector:
         self._initialize_models()
         
     def _initialize_models(self):
-        """Initialize all ML models"""
-        # Isolation Forest for unsupervised anomaly detection
-        self.models['isolation_forest'] = IsolationForest(
-            n_estimators=self.config.get('if_n_estimators', 200),
-            contamination=self.config.get('contamination', 0.05),
-            max_samples='auto',
-            random_state=42,
-            n_jobs=-1
-        )
-        
-        # One-Class SVM for novelty detection
-        self.models['one_class_svm'] = OneClassSVM(
-            kernel=self.config.get('svm_kernel', 'rbf'),
-            gamma='scale',
-            nu=self.config.get('svm_nu', 0.05)
-        )
-        
-        # XGBoost for supervised classification (if labels available)
-        self.models['xgboost'] = xgb.XGBClassifier(
-            n_estimators=self.config.get('xgb_n_estimators', 200),
-            max_depth=self.config.get('xgb_max_depth', 8),
-            learning_rate=self.config.get('xgb_learning_rate', 0.05),
-            subsample=0.8,
-            colsample_bytree=0.8,
-            objective='binary:logistic',
-            eval_metric='logloss',
-            random_state=42,
-            use_label_encoder=False
-        )
-        
+        """Initialize all ML models with graceful fallback for missing libraries."""
+        if HAS_SKLEARN:
+            # Isolation Forest for unsupervised anomaly detection
+            self.models['isolation_forest'] = IsolationForest(
+                n_estimators=self.config.get('if_n_estimators', 200),
+                contamination=self.config.get('contamination', 0.05),
+                max_samples='auto',
+                random_state=42,
+                n_jobs=-1
+            )
+
+            # One-Class SVM for novelty detection
+            self.models['one_class_svm'] = OneClassSVM(
+                kernel=self.config.get('svm_kernel', 'rbf'),
+                gamma='scale',
+                nu=self.config.get('svm_nu', 0.05)
+            )
+
+            # Scalers
+            self.scalers['standard'] = StandardScaler()
+        else:
+            logger.warning("scikit-learn not available: isolation_forest, one_class_svm, scaler disabled")
+            self.models['isolation_forest'] = None
+            self.models['one_class_svm'] = None
+            self.scalers['standard'] = None
+
+        if HAS_XGBOOST:
+            # XGBoost for supervised classification (if labels available)
+            self.models['xgboost'] = xgb.XGBClassifier(
+                n_estimators=self.config.get('xgb_n_estimators', 200),
+                max_depth=self.config.get('xgb_max_depth', 8),
+                learning_rate=self.config.get('xgb_learning_rate', 0.05),
+                subsample=0.8,
+                colsample_bytree=0.8,
+                objective='binary:logistic',
+                eval_metric='logloss',
+                random_state=42,
+                use_label_encoder=False
+            )
+        else:
+            logger.warning("xgboost not available: xgboost classifier disabled")
+            self.models['xgboost'] = None
+
         # LSTM Autoencoder will be built when data shape is known
         self.models['lstm_autoencoder'] = None
         self.lstm_sequence_length = self.config.get('sequence_length', 50)
-        
+        if not HAS_TENSORFLOW:
+            logger.warning("tensorflow not available: LSTM autoencoder disabled")
+
         # Prophet models per metric (initialized on demand)
         self.models['prophet'] = {}
+        if not HAS_PROPHET:
+            logger.warning("prophet not available: time-series forecasting disabled")
         
-        # Scalers
-        self.scalers['standard'] = StandardScaler()
-        
-    def build_lstm_model(self, n_features: int = 1) -> Model:
-        """Build LSTM autoencoder model"""
+    def build_lstm_model(self, n_features: int = 1):
+        """Build LSTM autoencoder model. Returns None if tensorflow is unavailable."""
+        if not HAS_TENSORFLOW:
+            logger.warning("Cannot build LSTM model: tensorflow not installed")
+            return None
         seq_len = self.lstm_sequence_length
-        
+
         model = Sequential([
             # Encoder
             LSTM(128, activation='relu', input_shape=(seq_len, n_features), 

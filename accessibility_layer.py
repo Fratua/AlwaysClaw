@@ -439,17 +439,26 @@ class ScreenReaderIntegration:
         await self.announce(message)
     
     async def silence(self) -> None:
-        """Silence screen reader immediately"""
+        """Silence screen reader immediately via Windows COM/accessibility APIs."""
         try:
             if self.active_reader == ScreenReaderType.NVDA:
-                # In production: speech.cancel()
-                pass
+                try:
+                    import ctypes
+                    nvda_lib = ctypes.windll.LoadLibrary("nvdaControllerClient64.dll")
+                    nvda_lib.nvdaController_cancelSpeech()
+                except (OSError, AttributeError):
+                    logger.debug("NVDA controller DLL not available - silence is a no-op")
             elif self.active_reader == ScreenReaderType.JAWS:
-                # In production: JawsAPI.StopSpeech()
-                pass
+                try:
+                    import win32com.client
+                    jaws = win32com.client.Dispatch("FreedomSci.JawsApi")
+                    jaws.StopSpeech()
+                except (ImportError, Exception):
+                    logger.debug("JAWS COM API not available - silence is a no-op")
             elif self.active_reader == ScreenReaderType.NARRATOR:
-                # In production: Stop narration
-                pass
+                logger.debug("Narrator silence not directly controllable via API")
+            else:
+                logger.debug(f"No silence implementation for reader: {self.active_reader}")
         except Exception as e:
             logger.error(f"Failed to silence screen reader: {e}")
 

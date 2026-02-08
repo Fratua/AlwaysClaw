@@ -1270,7 +1270,8 @@ class ABTestFramework:
                         pooled_se = ((stdev(control_values) ** 2 / len(control_values)) + 
                                     (stdev(variant_values) ** 2 / len(variant_values))) ** 0.5
                         t_stat = (variant_mean - control_mean) / pooled_se if pooled_se > 0 else 0
-                    except:
+                    except (ValueError, KeyError, TypeError) as e:
+                        logger.warning(f"A/B test statistics calculation failed: {e}")
                         t_stat = 0
                         
                     analysis[f"{variant.variant_id}_{metric}"] = {
@@ -1354,7 +1355,8 @@ class PromptVersionControl:
                 minor = 0
                 major += 1
             return f"{major}.{minor}.{patch}"
-        except:
+        except (ValueError, KeyError, TypeError) as e:
+            logger.warning(f"Version increment failed for '{current}': {e}")
             return "1.0.0"
             
     async def get_version(

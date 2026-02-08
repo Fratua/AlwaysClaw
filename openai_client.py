@@ -1,6 +1,7 @@
 """
 OpenAI Client - Thin wrapper around the OpenAI Python SDK for GPT-5.2.
 Shared singleton used by all Python loops and bridge handlers.
+Model defaults to gpt-5.2 but can be overridden via OPENAI_MODEL env var.
 """
 
 import os

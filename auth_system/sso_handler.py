@@ -273,8 +273,24 @@ class SAMLHandler:
             
             # Verify assertion signature if required
             if self.config.want_assertions_signed:
-                # In production, verify XML signature
-                pass
+                try:
+                    from signxml import XMLVerifier
+                    cert = getattr(self.config, 'idp_certificate', None) or getattr(self.config, 'x509_cert', None)
+                    if cert:
+                        XMLVerifier().verify(assertion, x509_cert=cert)
+                    else:
+                        logger.warning("SAML signature verification skipped: no IdP certificate configured")
+                except ImportError:
+                    logger.warning(
+                        "SAML signature verification unavailable: "
+                        "install signxml (pip install signxml) for production use"
+                    )
+                except Exception as sig_err:
+                    logger.error(f"SAML signature verification failed: {sig_err}")
+                    return SAMLAuthenticationResult(
+                        success=False,
+                        error=f"SAML signature verification failed: {sig_err}"
+                    )
             
             # Extract NameID (user identifier)
             name_id_elem = assertion.find('.//saml:NameID', SAML_NAMESPACES)

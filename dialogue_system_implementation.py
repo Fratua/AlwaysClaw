@@ -882,7 +882,27 @@ class ContextManager:
         return {}
         
     async def _persist_context(self, context: ConversationContext):
-        pass
+        """Persist conversation context to the memory database."""
+        try:
+            import sqlite3, os, json
+            db_path = os.environ.get('MEMORY_DB_PATH', './data/memory.db')
+            if not os.path.exists(db_path):
+                return
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """INSERT OR REPLACE INTO memory_entries
+                   (id, type, content, source_file, importance_score)
+                   VALUES (?, 'conversation_context', ?, 'dialogue_system', 0.6)""",
+                (f"ctx_{context.session_id}" if hasattr(context, 'session_id') else f"ctx_{id(context)}",
+                 json.dumps({
+                     'turns': context.turns[-20:] if hasattr(context, 'turns') else [],
+                     'metadata': context.metadata if hasattr(context, 'metadata') else {},
+                 }, default=str)),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Failed to persist context: {e}")
         
     def _deserialize_context(self, data: Dict) -> ConversationContext:
         return ConversationContext(**data)
@@ -1031,7 +1051,8 @@ Output JSON with: category, primary_intent, confidence, entities, urgency, senti
                 urgency=result.get('urgency', 1),
                 sentiment=result.get('sentiment', 'neutral')
             )
-        except:
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.debug(f"LLM classification fallback: {e}")
             return await self._base_classification(utterance)
             
     def _combine_intent_results(self, context_result: Intent, llm_result: Intent) -> Intent:
@@ -1422,10 +1443,32 @@ class ResponseTimingManager:
         return int((datetime.now() - self.request_start_time).total_seconds() * 1000)
         
     async def _deliver_acknowledgment(self, acknowledgment: str):
-        pass
-        
+        """Deliver an acknowledgment message via the bridge stdout protocol."""
+        try:
+            import sys, json
+            response = {
+                "jsonrpc": "2.0",
+                "method": "dialogue.acknowledgment",
+                "params": {"text": acknowledgment, "elapsed_ms": self._get_elapsed_ms()},
+            }
+            sys.stdout.write(json.dumps(response, default=str) + '\n')
+            sys.stdout.flush()
+        except Exception as e:
+            logger.warning(f"Failed to deliver acknowledgment: {e}")
+
     async def _deliver_chunk(self, chunk: str):
-        pass
+        """Deliver a streamed response chunk via the bridge stdout protocol."""
+        try:
+            import sys, json
+            response = {
+                "jsonrpc": "2.0",
+                "method": "dialogue.chunk",
+                "params": {"text": chunk, "elapsed_ms": self._get_elapsed_ms()},
+            }
+            sys.stdout.write(json.dumps(response, default=str) + '\n')
+            sys.stdout.flush()
+        except Exception as e:
+            logger.warning(f"Failed to deliver chunk: {e}")
 
 
 # ============================================================================

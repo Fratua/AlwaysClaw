@@ -5,11 +5,14 @@ Web-based dashboard for monitoring status and change visualization
 
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from dataclasses import asdict
+
+logger = logging.getLogger(__name__)
 
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
@@ -842,7 +845,8 @@ class DashboardAPI:
         for client in self.connected_clients:
             try:
                 await client.send_json(data)
-            except:
+            except Exception as e:
+                logger.warning(f"Dashboard error: {e}")
                 disconnected.append(client)
         
         # Remove disconnected clients

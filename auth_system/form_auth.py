@@ -185,9 +185,10 @@ class FormDetector:
             try:
                 if not await form.is_visible():
                     continue
-            except:
+            except Exception as e:
+                logger.warning(f"Form auth browser op failed: {e}")
                 continue
-            
+
             # Analyze form
             form_info = await self._analyze_form(page, form)
             
@@ -289,17 +290,17 @@ class FormDetector:
                 username_field = await page.query_selector(selector)
                 if username_field:
                     break
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"Form auth browser op failed: {e}")
+
         # Try to find submit button
         for selector in self.SUBMIT_SELECTORS:
             try:
                 submit_button = await page.query_selector(selector)
                 if submit_button:
                     break
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Form auth browser op failed: {e}")
         
         if username_field and submit_button:
             return LoginForm(
@@ -326,9 +327,11 @@ class FormDetector:
                     try:
                         if await field.is_visible():
                             return field
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Form auth browser op failed: {e}")
                         return field
-            except:
+            except Exception as e:
+                logger.warning(f"Form auth browser op failed: {e}")
                 continue
         return None
 
@@ -526,26 +529,26 @@ class LoginVerifier:
                     if element and await element.is_visible():
                         error_text = await element.text_content()
                         return False, error_text or "Login failed"
-                except:
-                    pass
-            
+                except Exception as e:
+                    logger.warning(f"Form auth browser op failed: {e}")
+
             # Check for success indicators
             for indicator in self.SUCCESS_INDICATORS:
                 try:
                     element = await page.query_selector(indicator)
                     if element and await element.is_visible():
                         return True, None
-                except:
-                    pass
-            
+                except Exception as e:
+                    logger.warning(f"Form auth browser op failed: {e}")
+
             # Check for MFA requirement
             for indicator in self.MFA_INDICATORS:
                 try:
                     element = await page.query_selector(indicator)
                     if element and await element.is_visible():
                         return False, "MFA_REQUIRED"
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Form auth browser op failed: {e}")
             
             # Check URL change
             current_url = page.url
@@ -561,9 +564,9 @@ class LoginVerifier:
             
             if session_cookies:
                 return True, None
-        except:
-            pass
-        
+        except Exception as e:
+            logger.warning(f"Form auth browser op failed: {e}")
+
         return False, "Could not verify login status"
     
     def _is_session_cookie(self, cookie: Dict) -> bool:
@@ -579,8 +582,8 @@ class LoginVerifier:
                 element = await page.query_selector(indicator)
                 if element and await element.is_visible():
                     return True
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Form auth browser op failed: {e}")
         return False
 
 
@@ -694,9 +697,9 @@ class FormAuthenticator:
         # Wait for navigation
         try:
             await page.wait_for_load_state('networkidle', timeout=timeout * 1000)
-        except:
-            pass
-        
+        except Exception as e:
+            logger.warning(f"Form auth browser op failed: {e}")
+
         # Check for MFA requirement
         if await self.login_verifier.check_mfa_required(page):
             if not wait_for_mfa:
@@ -755,9 +758,9 @@ class FormAuthenticator:
                 creds.use_count += 1
                 creds.last_used = datetime.now()
                 # Note: This would need a save method in the vault
-        except:
-            pass
-    
+        except (ValueError, KeyError) as e:
+            logger.warning(f"Form auth data parsing error: {e}")
+
     def _random_delay(self, min_delay: float, max_delay: float) -> float:
         """Generate random delay for human-like behavior."""
         import random

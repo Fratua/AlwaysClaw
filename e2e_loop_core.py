@@ -671,6 +671,230 @@ class InMemoryStateBackend(StateBackend):
         return workflows[offset:offset + limit]
 
 
+class SqliteStateBackend(StateBackend):
+    """SQLite-backed state persistence for production use."""
+
+    def __init__(self, db_path: str = None):
+        import sqlite3 as _sqlite3
+        import os as _os
+        self._db_path = db_path or _os.environ.get('MEMORY_DB_PATH', './data/memory.db')
+        db_dir = _os.path.dirname(self._db_path)
+        if db_dir and not _os.path.exists(db_dir):
+            _os.makedirs(db_dir, exist_ok=True)
+        self._conn = _sqlite3.connect(self._db_path)
+        self._conn.row_factory = _sqlite3.Row
+        self._ensure_tables()
+
+    def _ensure_tables(self):
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS e2e_workflows (
+                workflow_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'pending',
+                definition_json TEXT NOT NULL,
+                inputs_json TEXT NOT NULL DEFAULT '{}',
+                outputs_json TEXT NOT NULL DEFAULT '{}',
+                variables_json TEXT NOT NULL DEFAULT '{}',
+                task_states_json TEXT NOT NULL DEFAULT '{}',
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS e2e_checkpoints (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                checkpoint_type TEXT NOT NULL,
+                state_snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_e2e_cp_workflow
+                ON e2e_checkpoints(workflow_id);
+        """)
+        self._conn.commit()
+
+    def _serialize_workflow(self, state: WorkflowState) -> tuple:
+        return (
+            state.workflow_id,
+            state.status.value,
+            json.dumps(state.definition.to_dict()),
+            json.dumps(state.inputs),
+            json.dumps(state.outputs),
+            json.dumps(state.variables),
+            json.dumps({k: v.to_dict() for k, v in state.task_states.items()}),
+            state.error_message,
+            state.created_at.isoformat(),
+            state.updated_at.isoformat(),
+            state.completed_at.isoformat() if state.completed_at else None,
+        )
+
+    def _deserialize_workflow(self, row) -> WorkflowState:
+        def_data = json.loads(row['definition_json'])
+        tasks = []
+        for t in def_data.get('tasks', []):
+            tc_data = t.get('task_config', {}) or {}
+            rp_data = tc_data.get('retry_policy')
+            retry_policy = None
+            if rp_data:
+                retry_policy = RetryPolicy(
+                    max_attempts=rp_data.get('max_attempts', 3),
+                    strategy=RetryStrategy(rp_data.get('strategy', 'exponential')),
+                )
+            task_config = TaskConfig(
+                timeout=tc_data.get('timeout'),
+                retry_policy=retry_policy,
+                requires_approval=tc_data.get('requires_approval', False),
+            )
+            tasks.append(TaskDefinition(
+                id=t['id'], name=t['name'], type=t['type'],
+                description=t.get('description', ''),
+                config=t.get('config', {}),
+                depends_on=t.get('depends_on', []),
+                when=t.get('when'),
+                outputs=t.get('outputs', []),
+                task_config=task_config,
+            ))
+        definition = WorkflowDefinition(
+            id=def_data['id'], name=def_data['name'],
+            version=def_data['version'],
+            description=def_data.get('description', ''),
+            tasks=tasks,
+            inputs_schema=def_data.get('inputs_schema', {}),
+            outputs_schema=def_data.get('outputs_schema', {}),
+            variables=def_data.get('variables', {}),
+            max_concurrent=def_data.get('max_concurrent', 10),
+            default_timeout=def_data.get('default_timeout'),
+            checkpoint_interval=def_data.get('checkpoint_interval'),
+        )
+        ts_data = json.loads(row['task_states_json'])
+        task_states = {}
+        for tid, ts in ts_data.items():
+            task_states[tid] = TaskState(
+                task_id=ts['task_id'],
+                status=TaskStatus(ts['status']),
+                inputs=ts.get('inputs', {}),
+                outputs=ts.get('outputs', {}),
+                error_message=ts.get('error_message'),
+                retry_count=ts.get('retry_count', 0),
+            )
+        completed_at = None
+        if row['completed_at']:
+            completed_at = datetime.fromisoformat(row['completed_at'])
+        return WorkflowState(
+            workflow_id=row['workflow_id'],
+            definition=definition,
+            status=WorkflowStatus(row['status']),
+            inputs=json.loads(row['inputs_json']),
+            outputs=json.loads(row['outputs_json']),
+            variables=json.loads(row['variables_json']),
+            task_states=task_states,
+            created_at=datetime.fromisoformat(row['created_at']),
+            updated_at=datetime.fromisoformat(row['updated_at']),
+            completed_at=completed_at,
+            error_message=row['error_message'],
+        )
+
+    async def save_workflow_state(self, state: WorkflowState) -> None:
+        params = self._serialize_workflow(state)
+        self._conn.execute(
+            """INSERT OR REPLACE INTO e2e_workflows
+               (workflow_id, status, definition_json, inputs_json, outputs_json,
+                variables_json, task_states_json, error_message, created_at,
+                updated_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            params,
+        )
+        self._conn.commit()
+
+    async def load_workflow_state(self, workflow_id: str) -> Optional[WorkflowState]:
+        row = self._conn.execute(
+            "SELECT * FROM e2e_workflows WHERE workflow_id = ?",
+            (workflow_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return self._deserialize_workflow(row)
+
+    async def save_task_state(
+        self, workflow_id: str, task_id: str, task_state: TaskState
+    ) -> None:
+        row = self._conn.execute(
+            "SELECT task_states_json FROM e2e_workflows WHERE workflow_id = ?",
+            (workflow_id,),
+        ).fetchone()
+        if not row:
+            return
+        ts_data = json.loads(row['task_states_json'])
+        ts_data[task_id] = task_state.to_dict()
+        self._conn.execute(
+            "UPDATE e2e_workflows SET task_states_json = ?, updated_at = ? WHERE workflow_id = ?",
+            (json.dumps(ts_data), datetime.utcnow().isoformat(), workflow_id),
+        )
+        self._conn.commit()
+
+    async def save_checkpoint(self, checkpoint: Checkpoint) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO e2e_checkpoints
+               (id, workflow_id, checkpoint_type, state_snapshot_json, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                checkpoint.id,
+                checkpoint.workflow_id,
+                checkpoint.checkpoint_type.value,
+                json.dumps(checkpoint.state_snapshot),
+                checkpoint.created_at.isoformat(),
+            ),
+        )
+        self._conn.commit()
+
+    async def load_checkpoint(self, checkpoint_id: str) -> Optional[Checkpoint]:
+        row = self._conn.execute(
+            "SELECT * FROM e2e_checkpoints WHERE id = ?",
+            (checkpoint_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return Checkpoint(
+            id=row['id'],
+            workflow_id=row['workflow_id'],
+            checkpoint_type=CheckpointType(row['checkpoint_type']),
+            state_snapshot=json.loads(row['state_snapshot_json']),
+            created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    async def load_latest_checkpoint(self, workflow_id: str) -> Optional[Checkpoint]:
+        row = self._conn.execute(
+            "SELECT * FROM e2e_checkpoints WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 1",
+            (workflow_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return Checkpoint(
+            id=row['id'],
+            workflow_id=row['workflow_id'],
+            checkpoint_type=CheckpointType(row['checkpoint_type']),
+            state_snapshot=json.loads(row['state_snapshot_json']),
+            created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    async def list_workflows(
+        self,
+        status: Optional[WorkflowStatus] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[WorkflowState]:
+        if status:
+            rows = self._conn.execute(
+                "SELECT * FROM e2e_workflows WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                (status.value, limit, offset),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM e2e_workflows ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [self._deserialize_workflow(r) for r in rows]
+
+
 # ============================================================================
 # TASK EXECUTOR INTERFACE
 # ============================================================================

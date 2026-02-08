@@ -14,6 +14,7 @@ This module implements the core email workflow automation engine with:
 import asyncio
 import base64
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Set, Union
+
+logger = logging.getLogger(__name__)
 
 import jinja2
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -1028,7 +1031,8 @@ class ActionExecutor:
             template = jinja2.Template(f"{{{{ {condition} }}}}")
             result = template.render(**context.variables)
             return result.lower() in ('true', '1', 'yes')
-        except:
+        except (ValueError, KeyError) as e:
+            logger.warning(f"Condition evaluation failed for '{condition}': {e}")
             return False
     
     # Action Handlers
@@ -1254,10 +1258,22 @@ class EmailScheduler:
                 email.variables
             )
             
-            # Send to all recipients
+            # Send to all recipients via Gmail bridge
             for recipient in email.recipients:
-                # Implementation would call email API
-                pass
+                try:
+                    from gmail_client_implementation import GmailClient
+                    client = GmailClient()
+                    client.messages.send_message(
+                        to=recipient,
+                        subject=rendered.get('subject', ''),
+                        body=rendered.get('body', ''),
+                    )
+                except ImportError:
+                    logger.warning("Gmail client not available for scheduled email send")
+                    raise RuntimeError("Gmail client not available")
+                except Exception as send_err:
+                    logger.error(f"Failed to send scheduled email to {recipient}: {send_err}")
+                    raise
             
             email.status = ScheduleStatus.SENT
             
@@ -1550,11 +1566,27 @@ class SmartAutoResponder:
         
         # Check trigger conditions
         for condition in config.trigger_conditions:
-            # Evaluate condition
-            pass
+            if not self._evaluate_trigger_condition(condition, email):
+                return False
         
         return True
-    
+
+    def _evaluate_trigger_condition(self, condition, email) -> bool:
+        """Evaluate a single trigger condition against an email."""
+        try:
+            cond_type = condition.get('type', '') if isinstance(condition, dict) else getattr(condition, 'type', '')
+            value = condition.get('value', '') if isinstance(condition, dict) else getattr(condition, 'value', '')
+            if cond_type == 'subject_contains':
+                return value.lower() in email.subject.lower()
+            elif cond_type == 'from_contains':
+                return value.lower() in email.from_address.lower()
+            elif cond_type == 'body_contains':
+                body = getattr(email, 'body', '') or ''
+                return value.lower() in body.lower()
+            return True  # Unknown condition types pass by default
+        except Exception:
+            return True
+
     async def generate_response(
         self,
         email: EmailMessage,
@@ -1652,8 +1684,16 @@ class EmailWorkflowEngine:
         
         # Check auto-responder
         if self.auto_responder:
-            # Check each auto-responder config
-            pass
+            for config in (self.auto_responder if isinstance(self.auto_responder, list)
+                           else [self.auto_responder]):
+                try:
+                    if hasattr(config, 'should_respond') and config.should_respond(email):
+                        response = await self.auto_responder_engine.generate_response(email, config) \
+                            if hasattr(self, 'auto_responder_engine') else None
+                        if response:
+                            logger.info(f"Auto-response generated for {email.from_address}")
+                except Exception as e:
+                    logger.warning(f"Auto-responder error: {e}")
         
         return result
     

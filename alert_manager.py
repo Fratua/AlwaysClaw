@@ -5,6 +5,7 @@ Multi-channel notification system for web monitoring alerts
 
 import asyncio
 import json
+import logging
 import smtplib
 import os
 from datetime import datetime, timedelta
@@ -15,6 +16,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from enum import Enum
 import aiohttp
+
+logger = logging.getLogger(__name__)
 
 
 class SeverityLevel(Enum):
@@ -86,6 +89,25 @@ Time: {alert.detected_at.strftime('%Y-%m-%d %H:%M:%S')}
 Description:
 {alert.description}
 """
+
+
+class LogNotifier(BaseNotifier):
+    """Simple logging-based notifier that writes alerts to the application log.
+    Used as a fallback when no other notification channels are configured."""
+
+    def __init__(self, config: Dict):
+        super().__init__(config)
+        self._logger = logging.getLogger('alert_manager.log_notifier')
+
+    async def send(self, alert: Alert) -> bool:
+        if not self.enabled:
+            return False
+        self._logger.warning(
+            f"ALERT [{alert.severity.name}] {alert.site_name}: "
+            f"{alert.category} - {alert.description[:200]}"
+        )
+        alert.channels_sent.append('log')
+        return True
 
 
 class EmailNotifier(BaseNotifier):
@@ -610,7 +632,14 @@ class AlertManager:
         
         if 'webhook' in channels_config:
             self.channels['webhook'] = WebhookNotifier(self.config.get('webhook', {}))
-    
+
+        if 'log' in channels_config:
+            self.channels['log'] = LogNotifier(self.config.get('log', {}))
+
+        # Always register a log notifier as fallback if no channels configured
+        if not self.channels:
+            self.channels['log'] = LogNotifier({'enabled': True})
+
     def determine_severity(self, change_data: Dict) -> SeverityLevel:
         """Determine alert severity based on change data"""
         score = 0

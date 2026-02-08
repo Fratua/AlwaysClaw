@@ -9,12 +9,15 @@ Author: AI Systems Architecture Team
 Version: 1.0.0
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Deque, Any, Callable
 from collections import deque
 from datetime import datetime, timedelta
 from enum import Enum
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 class TriggerType(Enum):
@@ -59,7 +62,8 @@ class Condition:
         try:
             # WARNING: In production, use a safe evaluation method
             return eval(self.expression, {"__builtins__": {}}, context)
-        except:
+        except Exception as e:
+            logger.warning(f"Condition evaluation failed for expression '{self.expression}': {e}")
             return False
 
 

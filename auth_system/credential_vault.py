@@ -295,8 +295,8 @@ class WindowsCredentialVault:
                         attr_blob = credential['Attribute']
                         if isinstance(attr_blob, bytes):
                             attributes = json.loads(attr_blob.decode('utf-16-le'))
-                    except:
-                        pass
+                    except (ValueError, KeyError) as e:
+                        logger.warning(f"Credential attribute parsing error: {e}")
                 
                 creds = Credentials(
                     service_name=service_name,
@@ -507,11 +507,12 @@ class WindowsCredentialVault:
                 self._mfa_cache[target_name] = mfa_creds
                 return mfa_creds
                 
-            except:
+            except Exception as e:
+                logger.warning(f"MFA credential lookup failed: {e}")
                 continue
-        
+
         return None
-    
+
     async def update_mfa_credentials(
         self,
         mfa_creds: MFACredentials
@@ -581,9 +582,9 @@ class EncryptedFileVault:
                 DATA_BLOB = ctypes.Structure
                 # Simplified - in production use proper DPAPI
                 return key  # Placeholder
-            except:
-                pass
-        
+            except Exception as e:
+                logger.warning(f"DPAPI encryption failed, falling back: {e}")
+
         # Fallback: use simple obfuscation
         # In production, use proper key derivation
         return base64.urlsafe_b64encode(key)
@@ -592,8 +593,9 @@ class EncryptedFileVault:
         """Decrypt master key."""
         try:
             return base64.urlsafe_b64decode(encrypted)
-        except:
-            return encrypted
+        except (ValueError, Exception) as e:
+            logger.error(f"Decryption failed for credential: {e}")
+            raise
     
     def _get_credential_file(self, service_name: str, username: str) -> Path:
         """Get path to credential file."""
@@ -803,11 +805,12 @@ class EncryptedFileVault:
                 self._mfa_cache[cache_key] = mfa_creds
                 return mfa_creds
                 
-            except:
+            except Exception as e:
+                logger.warning(f"MFA credential lookup failed: {e}")
                 continue
-        
+
         return None
-    
+
     async def update_mfa_credentials(
         self,
         mfa_creds: MFACredentials

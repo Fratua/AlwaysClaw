@@ -339,8 +339,8 @@ class WebCrawler:
                 content.publish_date = datetime.fromisoformat(
                     date_meta.get('content', '').replace('Z', '+00:00')
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse publish date: {e}")
         
         # Extract main content
         article = soup.find('article') or soup.find('main') or soup.find('div', class_='content')
