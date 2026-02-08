@@ -23,7 +23,8 @@
     "noUnusedParameters": false,
     "strictNullChecks": true,
     "strictPropertyInitialization": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "downlevelIteration": true
   },
   "include": [
     "src/**/*",

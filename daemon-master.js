@@ -390,9 +390,7 @@ class DaemonMaster extends EventEmitter {
         if (meta.type === 'agent-loop') {
           this.forkAgentLoopWorker(meta.index || 0);
         } else if (meta.type === 'io' && meta.service) {
-          // Restart specific IO worker by re-forking all IO workers
-          // (simpler than tracking individual IO worker restarts)
-          this.forkIOWorkers();
+          this.forkSingleIOWorker(meta.service);
         } else if (meta.type === 'task') {
           // For task workers, we need to restart the specific one
           // Since forkTaskWorkers creates multiple, we need a single restart method
@@ -424,6 +422,48 @@ class DaemonMaster extends EventEmitter {
       startTime: Date.now(),
       state: 'starting'
     });
+  }
+
+  async forkSingleIOWorker(service) {
+    const workerEnv = {
+      WORKER_TYPE: 'io',
+      IO_SERVICE: service,
+      WORKER_ID: `io-${service}`
+    };
+
+    const worker = cluster.fork(workerEnv);
+    worker._meta = { type: 'io', index: null, service };
+
+    worker.on('message', (msg) => this.handleWorkerMessage(worker, msg));
+    worker.on('exit', (code, signal) => this.handleWorkerExit(worker, code, signal));
+
+    this.ioWorkers.set(service, {
+      worker,
+      service,
+      type: 'io',
+      startTime: Date.now(),
+      state: 'starting'
+    });
+  }
+
+  dispatchTask(task) {
+    // Find the least busy agent loop worker
+    let bestWorker = null;
+    let bestState = null;
+
+    for (const [id, info] of this.agentLoopWorkers) {
+      if (!bestWorker || info.state === 'ready') {
+        bestWorker = info.worker;
+        bestState = info.state;
+        if (info.state === 'ready') break;
+      }
+    }
+
+    if (bestWorker) {
+      bestWorker.send({ type: 'task', data: task });
+      return true;
+    }
+    return false;
   }
 
   checkRestartRate() {
@@ -554,7 +594,11 @@ class DaemonMaster extends EventEmitter {
     for (const [id, workerInfo] of this.taskWorkers) {
       disconnectPromises.push(this.gracefulDisconnect(workerInfo.worker));
     }
-    
+
+    for (const [service, workerInfo] of this.ioWorkers) {
+      disconnectPromises.push(this.gracefulDisconnect(workerInfo.worker));
+    }
+
     // Wait for graceful shutdown with timeout
     await Promise.race([
       Promise.all(disconnectPromises),
@@ -568,13 +612,13 @@ class DaemonMaster extends EventEmitter {
       }
     }
     
+    // Save state BEFORE stopping bridge
+    await this.saveState();
+
     // Stop Python bridge
     if (this.bridge) {
       await this.bridge.stop();
     }
-
-    // Save state
-    await this.saveState();
 
     logger.info('[Master] Shutdown complete');
     process.exit(0);
@@ -685,7 +729,8 @@ class DaemonMaster extends EventEmitter {
 module.exports = DaemonMaster;
 
 // Only auto-run if executed directly (not when required as a module)
-if (require.main === module && cluster.isMaster) {
+const _isPrimary = cluster.isPrimary !== undefined ? cluster.isPrimary : cluster.isMaster;
+if (require.main === module && _isPrimary) {
   const daemon = new DaemonMaster({
     workerCount: os.cpus().length,
     agentLoops: 15,
@@ -700,13 +745,4 @@ if (require.main === module && cluster.isMaster) {
     process.exit(1);
   });
   
-  // Graceful shutdown handlers
-  process.on('SIGINT', async () => { 
-    await daemon.shutdown('SIGINT'); 
-    process.exit(0); 
-  });
-  process.on('SIGTERM', async () => { 
-    await daemon.shutdown('SIGTERM'); 
-    process.exit(0); 
-  });
 }

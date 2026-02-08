@@ -145,24 +145,32 @@ class HealthMonitor extends EventEmitter {
 
   async checkCPU() {
     const cpus = os.cpus();
-    const loadAvg = os.loadavg();
-    const loadPercent = (loadAvg[0] / cpus.length) * 100;
-    
+
+    // Calculate CPU usage from cpu times (works on all platforms)
+    let totalIdle = 0;
+    let totalTick = 0;
+
+    for (const cpu of cpus) {
+      for (const type in cpu.times) {
+        totalTick += cpu.times[type];
+      }
+      totalIdle += cpu.times.idle;
+    }
+
+    const cpuUsage = 1 - (totalIdle / totalTick);
+    const loadPercent = cpuUsage * 100;
+
     const healthy = loadPercent < (this.options.cpuThreshold * 100);
-    
+
     if (!healthy) {
       this.trackThresholdBreach('cpu', loadPercent);
     }
-    
+
     return {
       healthy,
       count: cpus.length,
       model: cpus[0]?.model,
-      loadAvg: {
-        '1m': loadAvg[0].toFixed(2),
-        '5m': loadAvg[1].toFixed(2),
-        '15m': loadAvg[2].toFixed(2)
-      },
+      usage: loadPercent.toFixed(2) + '%',
       loadPercent: loadPercent.toFixed(2) + '%'
     };
   }
@@ -171,12 +179,15 @@ class HealthMonitor extends EventEmitter {
     try {
       if (process.platform === 'win32') {
         // Use PowerShell to get disk stats on Windows
-        const { execSync } = require('child_process');
-        const output = execSync(
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+
+        const { stdout } = await execAsync(
           'powershell -Command "Get-PSDrive -PSProvider FileSystem | Select-Object Name,Used,Free | ConvertTo-Json"',
-          { timeout: 10000, encoding: 'utf8' }
+          { timeout: 10000 }
         );
-        const drives = JSON.parse(output);
+        const drives = JSON.parse(stdout);
         const driveList = Array.isArray(drives) ? drives : [drives];
 
         const driveInfo = driveList.map(d => {

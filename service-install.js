@@ -20,7 +20,7 @@ const svc = new Service({
   grow: 0.5,
   abortOnError: false,
   logMode: 'rotate',
-  logpath: path.join(__dirname, 'logs', 'service.log')
+  logpath: path.join(__dirname, 'logs')
 });
 
 // Service event handlers
@@ -91,6 +91,22 @@ switch(command) {
     svc.stop();
     setTimeout(() => svc.start(), 3000);
     break;
+  case 'status':
+    console.log('Checking OpenClawAgent service status...');
+    if (svc.exists) {
+      console.log('Service is installed');
+      // Try to check if running
+      const { execSync } = require('child_process');
+      try {
+        const output = execSync('sc query OpenClawAgent', { encoding: 'utf8' });
+        console.log(output);
+      } catch (e) {
+        console.log('Could not query service status');
+      }
+    } else {
+      console.log('Service is not installed');
+    }
+    break;
   default:
     console.log(`
 ╔════════════════════════════════════════════════════════════╗
@@ -104,6 +120,7 @@ switch(command) {
 ║    start        Start the service                          ║
 ║    stop         Stop the service                           ║
 ║    restart      Restart the service                        ║
+║    status       Check service status                      ║
 ║                                                            ║
 ║  Or use npm scripts:                                       ║
 ║    npm run service:install                                 ║

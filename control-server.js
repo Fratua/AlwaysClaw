@@ -4,7 +4,6 @@
  */
 
 const http = require('http');
-const url = require('url');
 const logger = require('./logger');
 
 class ControlServer {
@@ -56,9 +55,9 @@ class ControlServer {
     this.metrics.requests++;
     
     // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:' + this.options.port);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
     
     if (req.method === 'OPTIONS') {
       res.writeHead(200);
@@ -66,7 +65,7 @@ class ControlServer {
       return;
     }
 
-    const parsedUrl = url.parse(req.url, true);
+    const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
     const path = parsedUrl.pathname;
     
     logger.debug(`[ControlServer] ${req.method} ${path}`);
@@ -86,6 +85,7 @@ class ControlServer {
           this.handleStatus(req, res);
           break;
         case '/control/restart-worker':
+          if (!this.authenticateRequest(req, res)) return;
           if (req.method === 'POST') {
             this.handleRestartWorker(req, res);
           } else {
@@ -93,6 +93,7 @@ class ControlServer {
           }
           break;
         case '/control/restart-all':
+          if (!this.authenticateRequest(req, res)) return;
           if (req.method === 'POST') {
             this.handleRestartAll(req, res);
           } else {
@@ -100,6 +101,7 @@ class ControlServer {
           }
           break;
         case '/control/shutdown':
+          if (!this.authenticateRequest(req, res)) return;
           if (req.method === 'POST') {
             this.handleShutdown(req, res);
           } else {
@@ -116,9 +118,34 @@ class ControlServer {
     }
   }
 
+  authenticateRequest(req, res) {
+    const apiKey = process.env.CONTROL_API_KEY;
+    if (!apiKey) {
+      // No API key configured - only allow localhost
+      const remoteAddr = req.socket.remoteAddress;
+      if (remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1') {
+        return true;
+      }
+      this.sendError(res, 403, 'Control endpoints only accessible from localhost');
+      return false;
+    }
+
+    // Check API key
+    const providedKey = req.headers['x-api-key'] || new URL(req.url, `http://${req.headers.host}`).searchParams.get('api_key');
+    if (providedKey !== apiKey) {
+      this.sendError(res, 401, 'Invalid or missing API key');
+      return false;
+    }
+    return true;
+  }
+
   handleHealth(req, res) {
+    const isHealthy = this.daemon ? this.daemon.state === 'running' : false;
+    const healthMonitor = this.daemon?.healthMonitor;
+    const monitorHealthy = healthMonitor ? healthMonitor.isHealthy() : true;
+
     const health = {
-      status: 'healthy',
+      status: isHealthy && monitorHealthy ? 'healthy' : 'degraded',
       timestamp: Date.now(),
       uptime: process.uptime(),
       pid: process.pid,
@@ -128,7 +155,7 @@ class ControlServer {
         workerCount: this.getTotalWorkerCount()
       }
     };
-    
+
     this.sendJson(res, 200, health);
   }
 
@@ -215,7 +242,18 @@ class ControlServer {
 
   handleRestartWorker(req, res) {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    let bodySize = 0;
+    const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+
+    req.on('data', chunk => {
+      bodySize += chunk.length;
+      if (bodySize > MAX_BODY_SIZE) {
+        this.sendError(res, 413, 'Request body too large');
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         const data = JSON.parse(body);
@@ -269,7 +307,18 @@ class ControlServer {
 
   handleShutdown(req, res) {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    let bodySize = 0;
+    const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+
+    req.on('data', chunk => {
+      bodySize += chunk.length;
+      if (bodySize > MAX_BODY_SIZE) {
+        this.sendError(res, 413, 'Request body too large');
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         const data = JSON.parse(body || '{}');

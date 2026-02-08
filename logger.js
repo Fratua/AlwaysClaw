@@ -156,11 +156,12 @@ logger.stream = {
 
 // Override console methods in production
 if (process.env.NODE_ENV === 'production') {
-  console.log = (...args) => logger.info.call(logger, args.join(' '));
-  console.info = (...args) => logger.info.call(logger, args.join(' '));
-  console.warn = (...args) => logger.warn.call(logger, args.join(' '));
-  console.error = (...args) => logger.error.call(logger, args.join(' '));
-  console.debug = (...args) => logger.debug.call(logger, args.join(' '));
+  const util = require('util');
+  console.log = (...args) => logger.info(util.format(...args));
+  console.info = (...args) => logger.info(util.format(...args));
+  console.warn = (...args) => logger.warn(util.format(...args));
+  console.error = (...args) => logger.error(util.format(...args));
+  console.debug = (...args) => logger.debug(util.format(...args));
 }
 
 module.exports = logger;

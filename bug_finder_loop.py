@@ -20,30 +20,56 @@ import json
 import pickle
 from pathlib import Path
 
-# ML Libraries
-from sklearn.ensemble import IsolationForest, RandomForestClassifier
-from sklearn.svm import OneClassSVM
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
-import xgboost as xgb
+# ML imports - optional, graceful fallback
+try:
+    from sklearn.ensemble import IsolationForest, RandomForestClassifier
+    from sklearn.svm import OneClassSVM
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
-# Deep Learning
-import tensorflow as tf
-from tensorflow.keras.models import Sequential, Model, load_model
-from tensorflow.keras.layers import (
-    LSTM, Dense, Dropout, RepeatVector, TimeDistributed,
-    Input, Conv1D, MaxPooling1D, Flatten
-)
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+try:
+    import xgboost as xgb
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
+    xgb = None
 
-# Explainability
-import shap
-import lime
-from lime.lime_tabular import LimeTabularExplainer
+try:
+    from tensorflow.keras.models import Sequential, Model, load_model
+    from tensorflow.keras.layers import (LSTM, Dense, Dropout, RepeatVector, TimeDistributed, Input, Conv1D, MaxPooling1D, Flatten)
+    from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+    HAS_TENSORFLOW = True
+except ImportError:
+    HAS_TENSORFLOW = False
 
-# Time series
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from prophet import Prophet
+try:
+    import shap
+    HAS_SHAP = True
+except ImportError:
+    HAS_SHAP = False
+    shap = None
+
+try:
+    import lime
+    from lime.lime_tabular import LimeTabularExplainer
+    HAS_LIME = True
+except ImportError:
+    HAS_LIME = False
+
+try:
+    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+    HAS_STATSMODELS = True
+except ImportError:
+    HAS_STATSMODELS = False
+
+try:
+    from prophet import Prophet
+    HAS_PROPHET = True
+except ImportError:
+    HAS_PROPHET = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

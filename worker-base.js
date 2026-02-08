@@ -12,6 +12,7 @@ class WorkerBase {
     this.workerIndex = parseInt(process.env.WORKER_INDEX) || 0;
     this.isShuttingDown = false;
     this.heartbeatInterval = null;
+    this.heartbeatMs = parseInt(process.env.WORKER_HEARTBEAT_MS) || 30000;
     this.state = 'initializing';
   }
 
@@ -82,7 +83,7 @@ class WorkerBase {
   startHeartbeat() {
     this.heartbeatInterval = setInterval(() => {
       this.sendHeartbeat();
-    }, 30000);
+    }, this.heartbeatMs);
   }
 
   sendHeartbeat() {

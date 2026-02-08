@@ -96,6 +96,7 @@ class BrowserService {
   constructor() {
     this.browserPool = null;
     this.pipelineOrchestrator = null;
+    this._sessionPages = new Map();
   }
 
   async initialize() {
@@ -138,8 +139,8 @@ class BrowserService {
       await this.browserPool.initialize();
       logger.info('[BrowserService] Browser pool and pipeline initialized');
     } catch (error) {
-      logger.warn('[BrowserService] Compiled TS modules not available, using stub:', error.message);
-      // Stub fallback
+      logger.warn('[BrowserService] Compiled TS modules not available, using stub mode:', error.message);
+      this.stubMode = true;
     }
   }
 
@@ -167,7 +168,14 @@ class BrowserService {
   async navigate(data) {
     logger.info(`[BrowserService] Navigating to ${data.url}`);
     if (this.browserPool) {
-      const pooledPage = await this.browserPool.acquirePage();
+      const sessionId = data.sessionId || `session-${Date.now()}`;
+      let pooledPage = this._sessionPages.get(sessionId);
+
+      if (!pooledPage) {
+        pooledPage = await this.browserPool.acquirePage();
+        this._sessionPages.set(sessionId, pooledPage);
+      }
+
       try {
         await pooledPage.page.goto(data.url, {
           waitUntil: data.waitUntil || 'domcontentloaded',
@@ -175,71 +183,110 @@ class BrowserService {
         });
         const title = await pooledPage.page.title();
         const content = await pooledPage.page.content();
-        return { navigated: true, url: data.url, title, contentLength: content.length };
-      } finally {
+        return { navigated: true, url: data.url, title, contentLength: content.length, sessionId };
+      } catch (error) {
+        // Release the page on error
+        this._sessionPages.delete(sessionId);
         await this.browserPool.releasePage(pooledPage);
+        throw error;
       }
     }
-    return { navigated: true, url: data.url };
+    return { navigated: true, url: data.url, stubMode: true, warning: 'BrowserService running in stub mode - no real browser available' };
   }
 
   async click(data) {
     logger.info(`[BrowserService] Clicking element: ${data.selector}`);
     if (this.browserPool) {
-      const pooledPage = await this.browserPool.acquirePage();
+      const sessionId = data.sessionId;
+      let pooledPage = sessionId && this._sessionPages.get(sessionId);
+
+      if (!pooledPage) {
+        pooledPage = await this.browserPool.acquirePage();
+      }
+
       try {
         await pooledPage.page.click(data.selector, { timeout: data.timeout || 10000 });
-        return { clicked: true, selector: data.selector };
-      } finally {
-        await this.browserPool.releasePage(pooledPage);
+        return { clicked: true, selector: data.selector, sessionId };
+      } catch (error) {
+        if (!sessionId || !this._sessionPages.has(sessionId)) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        throw error;
       }
     }
-    return { clicked: true };
+    return { clicked: true, stubMode: true, warning: 'BrowserService running in stub mode - no real browser available' };
   }
 
   async type(data) {
     logger.info(`[BrowserService] Typing into element: ${data.selector}`);
     if (this.browserPool) {
-      const pooledPage = await this.browserPool.acquirePage();
+      const sessionId = data.sessionId;
+      let pooledPage = sessionId && this._sessionPages.get(sessionId);
+
+      if (!pooledPage) {
+        pooledPage = await this.browserPool.acquirePage();
+      }
+
       try {
         await pooledPage.page.fill(data.selector, data.text || '');
-        return { typed: true };
-      } finally {
-        await this.browserPool.releasePage(pooledPage);
+        return { typed: true, sessionId };
+      } catch (error) {
+        if (!sessionId || !this._sessionPages.has(sessionId)) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        throw error;
       }
     }
-    return { typed: true };
+    return { typed: true, stubMode: true, warning: 'BrowserService running in stub mode - no real browser available' };
   }
 
   async screenshot(data) {
     logger.info('[BrowserService] Taking screenshot...');
     if (this.browserPool) {
-      const pooledPage = await this.browserPool.acquirePage();
+      const sessionId = data.sessionId;
+      let pooledPage = sessionId && this._sessionPages.get(sessionId);
+
+      if (!pooledPage) {
+        pooledPage = await this.browserPool.acquirePage();
+      }
+
       try {
         const buffer = await pooledPage.page.screenshot({
           fullPage: data.fullPage || false,
           type: 'png',
         });
-        return { screenshot: buffer.toString('base64'), size: buffer.length };
-      } finally {
-        await this.browserPool.releasePage(pooledPage);
+        return { screenshot: buffer.toString('base64'), size: buffer.length, sessionId };
+      } catch (error) {
+        if (!sessionId || !this._sessionPages.has(sessionId)) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        throw error;
       }
     }
-    return { screenshot: null };
+    return { screenshot: null, stubMode: true, warning: 'BrowserService running in stub mode - no real browser available' };
   }
 
   async evaluate(data) {
     logger.info('[BrowserService] Evaluating script...');
     if (this.browserPool) {
-      const pooledPage = await this.browserPool.acquirePage();
+      const sessionId = data.sessionId;
+      let pooledPage = sessionId && this._sessionPages.get(sessionId);
+
+      if (!pooledPage) {
+        pooledPage = await this.browserPool.acquirePage();
+      }
+
       try {
         const result = await pooledPage.page.evaluate(data.script || '(() => null)()');
-        return { result };
-      } finally {
-        await this.browserPool.releasePage(pooledPage);
+        return { result, sessionId };
+      } catch (error) {
+        if (!sessionId || !this._sessionPages.has(sessionId)) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        throw error;
       }
     }
-    return { result: null };
+    return { result: null, stubMode: true, warning: 'BrowserService running in stub mode - no real browser available' };
   }
 
   async scrape(data) {
@@ -252,11 +299,32 @@ class BrowserService {
 
   async closePage(data) {
     logger.info('[BrowserService] Closing page...');
+    const sessionId = data.sessionId;
+    if (sessionId && this._sessionPages.has(sessionId)) {
+      const pooledPage = this._sessionPages.get(sessionId);
+      this._sessionPages.delete(sessionId);
+      if (this.browserPool) {
+        await this.browserPool.releasePage(pooledPage);
+      }
+      return { closed: true, sessionId };
+    }
     return { closed: true };
   }
 
   async shutdown() {
     logger.info('[BrowserService] Shutting down...');
+    // Release all session pages
+    for (const [sessionId, pooledPage] of this._sessionPages) {
+      if (this.browserPool) {
+        try {
+          await this.browserPool.releasePage(pooledPage);
+        } catch (e) {
+          logger.debug(`[BrowserService] Error releasing page ${sessionId}: ${e.message}`);
+        }
+      }
+    }
+    this._sessionPages.clear();
+
     if (this.browserPool) {
       await this.browserPool.shutdown();
     }

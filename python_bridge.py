@@ -36,6 +36,7 @@ class PythonBridge:
         self.llm_client = None
         self.memory_manager = None
         self.db_connection = None
+        self._stopping = False
         self._register_builtin_handlers()
 
     def _register_builtin_handlers(self):
@@ -276,7 +277,7 @@ class PythonBridge:
         try:
             from gmail_client_implementation import GmailClient
             client = GmailClient()
-            return client.send_message(
+            return client.messages.send_message(
                 to=params.get('to', ''),
                 subject=params.get('subject', ''),
                 body=params.get('body', ''),
@@ -289,7 +290,7 @@ class PythonBridge:
         try:
             from gmail_client_implementation import GmailClient
             client = GmailClient()
-            return client.read_messages(
+            return client.messages.list_messages(
                 max_results=params.get('max_results', 10),
                 query=params.get('query', 'is:unread'),
             )
@@ -300,7 +301,7 @@ class PythonBridge:
         try:
             from gmail_client_implementation import GmailClient
             client = GmailClient()
-            return client.search_messages(query=params.get('query', ''))
+            return client.messages.list_messages(query=params.get('query', ''))
         except ImportError:
             return {"emails": [], "error": "Gmail client not available"}
 
@@ -308,15 +309,23 @@ class PythonBridge:
         try:
             from gmail_client_implementation import GmailClient
             client = GmailClient()
-            return client.get_context()
+            messages = client.messages.list_messages(query='is:unread', max_results=100)
+            unread_count = len(messages) if isinstance(messages, list) else messages.get('resultSizeEstimate', 0) if isinstance(messages, dict) else 0
+            return {"unread": unread_count}
         except ImportError:
             return {"unread": 0, "error": "Gmail client not available"}
+        except Exception as e:
+            return {"unread": 0, "error": str(e)}
 
     def _handle_gmail_process_batch(self, **params):
         try:
             from gmail_client_implementation import GmailClient
             client = GmailClient()
-            return client.process_batch(params)
+            messages = client.messages.list_messages(
+                max_results=params.get('max_results', 50),
+                query=params.get('query', ''),
+            )
+            return {"processed": True, "messages": messages}
         except ImportError:
             return {"processed": False, "error": "Gmail client not available"}
 
@@ -324,25 +333,30 @@ class PythonBridge:
 
     def _handle_twilio_call(self, **params):
         try:
-            from twilio_voice_integration import TwilioVoiceClient
-            client = TwilioVoiceClient()
-            return client.make_call(
-                to=params.get('to', ''),
-                message=params.get('message', ''),
+            from twilio_voice_integration import TwilioVoiceManager
+            manager = TwilioVoiceManager()
+            return manager.make_call(
+                to_number=params.get('to', ''),
+                twiml_url=params.get('twiml_url', ''),
+                from_number=params.get('from', ''),
             )
         except ImportError:
             return {"called": False, "error": "Twilio client not available"}
+        except Exception as e:
+            return {"called": False, "error": str(e)}
 
     def _handle_twilio_sms(self, **params):
         try:
-            from twilio_voice_integration import TwilioVoiceClient
-            client = TwilioVoiceClient()
-            return client.send_sms(
+            from twilio_voice_integration import TwilioVoiceManager
+            manager = TwilioVoiceManager()
+            return manager.send_sms(
                 to=params.get('to', ''),
                 body=params.get('body', ''),
             )
         except ImportError:
             return {"sent": False, "error": "Twilio client not available"}
+        except Exception as e:
+            return {"sent": False, "error": str(e)}
 
     # ── TTS handlers ─────────────────────────────────────────────
 
@@ -361,12 +375,58 @@ class PythonBridge:
     # ── STT handlers ─────────────────────────────────────────────
 
     def _handle_stt_transcribe(self, **params):
-        return {"text": "", "error": "STT not yet implemented via bridge"}
+        try:
+            import azure.cognitiveservices.speech as speechsdk
+            speech_key = os.environ.get('AZURE_SPEECH_KEY', '')
+            speech_region = os.environ.get('AZURE_SPEECH_REGION', '')
+            if not speech_key or not speech_region:
+                return {"text": "", "error": "Azure Speech credentials not configured (set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION)"}
+
+            audio_path = params.get('audio_path', '')
+            if not audio_path:
+                return {"text": "", "error": "No audio_path provided"}
+
+            speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
+            audio_config = speechsdk.AudioConfig(filename=audio_path)
+            recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+            result = recognizer.recognize_once()
+
+            if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+                return {"text": result.text, "confidence": 1.0}
+            elif result.reason == speechsdk.ResultReason.NoMatch:
+                return {"text": "", "error": "No speech recognized"}
+            else:
+                return {"text": "", "error": f"Speech recognition failed: {result.reason}"}
+        except ImportError:
+            return {"text": "", "error": "Azure Speech SDK not installed (pip install azure-cognitiveservices-speech)"}
+        except Exception as e:
+            return {"text": "", "error": str(e)}
 
     # ── Auth handlers ────────────────────────────────────────────
 
     def _handle_auth_validate(self, **params):
-        return {"valid": True}
+        token = params.get('token', '')
+        if not token:
+            return {"valid": False, "error": "No token provided"}
+
+        # Try JWT validation if pyjwt is available
+        try:
+            import jwt
+            secret = os.environ.get('JWT_SECRET', '')
+            if secret:
+                decoded = jwt.decode(token, secret, algorithms=['HS256'])
+                return {"valid": True, "claims": decoded}
+        except jwt.ExpiredSignatureError:
+            return {"valid": False, "error": "Token expired"}
+        except jwt.InvalidTokenError as e:
+            return {"valid": False, "error": f"Invalid token: {e}"}
+        except ImportError:
+            pass
+
+        # Fallback: at least verify token is non-empty and looks valid
+        if len(token) < 10:
+            return {"valid": False, "error": "Token too short"}
+        return {"valid": True, "note": "Basic validation only (no JWT secret configured)"}
 
     # ── Loop handler registration (called from loop_adapters.py) ─
 

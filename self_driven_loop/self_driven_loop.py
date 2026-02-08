@@ -17,27 +17,27 @@ import asyncio
 import logging
 
 # Import all submodules
-from motivation_engine import (
+from .motivation_engine import (
     IntrinsicMotivationEngine, AgentContext, MotivationState,
     get_motivation_engine
 )
-from goal_system import (
+from .goal_system import (
     GoalGenerator, GoalRefinementEngine, InterestModel, Goal,
     get_goal_generator, get_goal_refinement_engine, get_interest_model
 )
-from curiosity_module import (
+from .curiosity_module import (
     IntrinsicCuriosityModule, ExplorationStrategyManager,
     get_curiosity_module, get_exploration_manager
 )
-from proactive_trigger import (
+from .proactive_trigger import (
     ProactiveTriggerEngine, AgentContext as TriggerContext,
     get_trigger_engine
 )
-from prioritization import (
+from .prioritization import (
     GoalPrioritizer, DynamicScheduler,
     get_prioritizer, get_scheduler
 )
-from motivation_maintenance import (
+from .motivation_maintenance import (
     MotivationMonitor, MotivationRenewalEngine,
     SatisfactionTracker, RenewalCycleManager,
     get_motivation_monitor, get_renewal_engine,

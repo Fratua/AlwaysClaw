@@ -56,7 +56,7 @@ class CronScheduler {
       }
     }, {
       scheduled: options.scheduled !== false,
-      timezone: options.timezone || 'America/New_York',
+      timezone: options.timezone || process.env.SCHEDULER_TIMEZONE || 'UTC',
       name: name
     });
     
@@ -119,23 +119,38 @@ class CronScheduler {
   }
 
   async cleanupTask() {
-    // Cleanup old logs, temp files, and resources
     logger.info('[CronScheduler] Running cleanup task');
-    
-    // Clean old log files (keep last 14 days)
-    // Clean temp files
-    // Clear old cache entries
-    // Release unused resources
+    const fs = require('fs');
+    const path = require('path');
+    const logDir = path.join(__dirname, 'logs');
+
+    try {
+      if (fs.existsSync(logDir)) {
+        const files = fs.readdirSync(logDir);
+        const cutoff = Date.now() - (14 * 24 * 60 * 60 * 1000); // 14 days
+        let cleaned = 0;
+
+        for (const file of files) {
+          const filePath = path.join(logDir, file);
+          try {
+            const stat = fs.statSync(filePath);
+            if (stat.mtimeMs < cutoff && file.endsWith('.log')) {
+              fs.unlinkSync(filePath);
+              cleaned++;
+            }
+          } catch (e) {
+            // Skip files that can't be accessed
+          }
+        }
+        logger.info(`[CronScheduler] Cleanup: removed ${cleaned} old log files`);
+      }
+    } catch (error) {
+      logger.error('[CronScheduler] Cleanup error:', error.message);
+    }
   }
 
   async backupTask() {
-    // Backup state and data
     logger.info('[CronScheduler] Running backup task');
-    
-    // Backup state to persistent storage
-    // Backup configuration
-    // Backup logs
-    
     if (process.send) {
       process.send({
         type: 'backup-request',
@@ -145,52 +160,50 @@ class CronScheduler {
   }
 
   async weeklyReportTask() {
-    // Generate weekly report
-    logger.info('[CronScheduler] Running weekly report task');
-    
-    // Collect weekly statistics
-    // Generate report
-    // Send notification if configured
-    
+    logger.info('[CronScheduler] Generating weekly report');
+    const report = {
+      timestamp: Date.now(),
+      week: this.getWeekNumber(),
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      jobs: this.getJobStatus(),
+    };
+    logger.info('[CronScheduler] Weekly report:', JSON.stringify(report));
+
     if (process.send) {
       process.send({
         type: 'weekly-report',
-        data: { 
-          timestamp: Date.now(),
-          week: this.getWeekNumber()
-        }
+        data: report
       });
     }
   }
 
   async healthCheckTask() {
-    // Perform health checks
     logger.debug('[CronScheduler] Running health check task');
-    
-    // Check system resources
-    // Check worker health
-    // Check external service connectivity
-    
+    const health = {
+      timestamp: Date.now(),
+      memory: process.memoryUsage(),
+      uptime: process.uptime(),
+      cpuUsage: process.cpuUsage(),
+    };
+
     if (process.send) {
       process.send({
         type: 'health-check',
-        data: { 
-          timestamp: Date.now(),
-          memory: process.memoryUsage(),
-          uptime: process.uptime()
-        }
+        data: health
       });
     }
   }
 
   async statePersistTask() {
-    // Persist current state
     logger.debug('[CronScheduler] Running state persist task');
-    
     if (process.send) {
       process.send({
         type: 'persist-state',
-        data: { timestamp: Date.now() }
+        data: {
+          timestamp: Date.now(),
+          jobs: this.getJobStatus(),
+        }
       });
     }
   }

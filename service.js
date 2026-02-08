@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 /**
  * OpenClawAgent - Main Service Entry Point
  * Windows service entry point with clustering support
@@ -7,17 +9,6 @@ const cluster = require('cluster');
 const os = require('os');
 const DaemonMaster = require('./daemon-master');
 const logger = require('./logger');
-
-// Handle Windows service events
-if (process.platform === 'win32') {
-  // Handle service stop events from node-windows
-  process.on('message', (msg) => {
-    if (msg === 'shutdown') {
-      logger.info('Received shutdown signal from service manager');
-      process.exit(0);
-    }
-  });
-}
 
 // Main execution
 async function main() {
@@ -29,11 +20,13 @@ async function main() {
   logger.info('  CPUs: ' + os.cpus().length);
   logger.info('════════════════════════════════════════════════════════════');
   
-  if (cluster.isMaster) {
+  const isPrimary = cluster.isPrimary !== undefined ? cluster.isPrimary : cluster.isMaster;
+
+  if (isPrimary) {
     // Master process - manage workers
     const daemon = new DaemonMaster({
       workerCount: os.cpus().length,
-      agentLoops: 15,
+      agentLoops: parseInt(process.env.AGENT_LOOP_COUNT) || 15,
       heartbeatInterval: 30000,
       restartDelay: 5000,
       maxRestarts: 10,

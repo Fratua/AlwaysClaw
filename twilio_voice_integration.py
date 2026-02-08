@@ -294,6 +294,19 @@ class TwilioVoiceManager:
             logger.error(f"Error making call: {e}")
             return None
     
+    def send_sms(self, to: str, body: str, from_number: Optional[str] = None) -> Dict[str, Any]:
+        """Send an SMS message."""
+        try:
+            message = self.client.messages.create(
+                body=body,
+                from_=from_number or self.config.phone_number,
+                to=to
+            )
+            return {"sent": True, "sid": message.sid, "status": message.status}
+        except Exception as e:
+            logging.error(f"Failed to send SMS: {e}")
+            return {"sent": False, "error": str(e)}
+
     async def hangup_call(self, call_sid: str):
         """Hang up a call"""
         try:

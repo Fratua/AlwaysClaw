@@ -19,11 +19,26 @@ class AgentLoopWorker extends WorkerBase {
     this.currentTask = null;
     this.taskQueue = [];
     this.bridge = null;
+    this.pendingIORequests = new Map();
     this.stats = {
       tasksCompleted: 0,
       tasksFailed: 0,
       startTime: Date.now()
     };
+  }
+
+  onMessage(msg) {
+    if (msg.type === 'io-response') {
+      const pending = this.pendingIORequests.get(msg.data.requestId);
+      if (pending) {
+        this.pendingIORequests.delete(msg.data.requestId);
+        if (msg.data.error) {
+          pending.reject(new Error(msg.data.error));
+        } else {
+          pending.resolve(msg.data.result);
+        }
+      }
+    }
   }
 
   async onInitialize() {
@@ -242,9 +257,9 @@ class AgentLoopWorker extends WorkerBase {
     if (!this.capabilities.includes('browser')) {
       throw new Error('Browser capability not available');
     }
-    // Browser actions are handled via the IO worker through message bus
     return new Promise((resolve, reject) => {
       const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      this.pendingIORequests.set(requestId, { resolve, reject });
       this.sendToMaster({
         type: 'io-request',
         data: {
@@ -254,8 +269,13 @@ class AgentLoopWorker extends WorkerBase {
           requestId,
         }
       });
-      // For now, resolve immediately - actual response comes via message bus
-      resolve({ navigated: true, url: action.data?.url });
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        if (this.pendingIORequests.has(requestId)) {
+          this.pendingIORequests.delete(requestId);
+          reject(new Error('Browser navigate timeout'));
+        }
+      }, 30000);
     });
   }
 
@@ -263,8 +283,9 @@ class AgentLoopWorker extends WorkerBase {
     if (!this.capabilities.includes('browser')) {
       throw new Error('Browser capability not available');
     }
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      this.pendingIORequests.set(requestId, { resolve, reject });
       this.sendToMaster({
         type: 'io-request',
         data: {
@@ -274,7 +295,13 @@ class AgentLoopWorker extends WorkerBase {
           requestId,
         }
       });
-      resolve({ clicked: true });
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        if (this.pendingIORequests.has(requestId)) {
+          this.pendingIORequests.delete(requestId);
+          reject(new Error('Browser click timeout'));
+        }
+      }, 30000);
     });
   }
 
@@ -357,7 +384,29 @@ class AgentLoopWorker extends WorkerBase {
   }
 
   async performIdleCycle() {
-    // Perform maintenance tasks during idle time
+    // Run a cognitive loop cycle based on this worker's loop ID
+    const loopNames = [
+      'ralph', 'research', 'planning', 'e2e', 'exploration',
+      'discovery', 'bug_finder', 'self_learning', 'meta_cognition',
+      'self_upgrading', 'self_updating', 'self_driven', 'cpel',
+      'context_engineering', 'web_monitor'
+    ];
+
+    const loopName = loopNames[this.loopId % loopNames.length];
+
+    try {
+      const result = await this.bridge.call(`loop.${loopName}.run_cycle`, {
+        loopId: this.loopId,
+        timestamp: Date.now(),
+      });
+
+      if (result && result.success) {
+        logger.debug(`[AgentLoop ${this.loopId}] Idle cycle (${loopName}) completed`);
+      }
+    } catch (error) {
+      // Don't log at error level for idle cycles - these are opportunistic
+      logger.debug(`[AgentLoop ${this.loopId}] Idle cycle skipped: ${error.message}`);
+    }
   }
 
   async getGmailContext() {

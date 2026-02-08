@@ -132,3 +132,21 @@ mypy>=1.6.0
 black>=23.0.0
 flake8>=6.0.0
 isort>=5.12.0
+
+# ============================================
+# OPTIONAL ML DEPENDENCIES (for bug_finder_loop)
+# ============================================
+# tensorflow>=2.14.0  # Uncomment for advanced bug detection
+# xgboost>=2.0.0      # Uncomment for gradient boosting
+# shap>=0.43.0         # Uncomment for model explanations
+# lime>=0.2.0          # Uncomment for local interpretable explanations
+# statsmodels>=0.14.0  # Uncomment for time series analysis
+# prophet>=1.1.0       # Uncomment for forecasting
+
+# ============================================
+# OPTIONAL NLP DEPENDENCIES
+# ============================================
+# sentence-transformers>=2.2.0  # Uncomment for discovery loop
+# tiktoken>=0.5.0               # Uncomment for context management
+# elevenlabs>=0.2.0             # Uncomment for ElevenLabs TTS
+# google-generativeai>=0.3.0   # Uncomment for Google AI
