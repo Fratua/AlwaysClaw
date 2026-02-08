@@ -1,0 +1,340 @@
+# Advanced Bug Finder Loop Configuration
+# ML-Based Predictive Bug Detection for Windows 10 AI Agent System
+
+# =============================================================================
+# CORE SETTINGS
+# =============================================================================
+
+# Cycle interval in seconds
+cycle_interval: 30
+
+# Paths
+model_path: "models/bug_finder"
+patterns_path: "data/patterns"
+log_path: "logs/bug_finder.log"
+
+# Alert threshold (0-1)
+alert_threshold: 0.75
+
+# Minimum confidence for alert
+min_confidence_for_alert: 0.6
+
+# =============================================================================
+# ENSEMBLE CONFIGURATION
+# =============================================================================
+
+ensemble:
+  # Isolation Forest settings
+  isolation_forest:
+    n_estimators: 200
+    contamination: 0.05
+    max_samples: "auto"
+    random_state: 42
+    n_jobs: -1
+
+  # LSTM Autoencoder settings
+  lstm_autoencoder:
+    sequence_length: 50
+    lstm_units: [128, 64, 32]
+    dropout_rate: 0.2
+    epochs: 100
+    batch_size: 64
+    validation_split: 0.2
+
+  # XGBoost settings
+  xgboost:
+    n_estimators: 200
+    max_depth: 8
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    objective: "binary:logistic"
+    eval_metric: "logloss"
+    random_state: 42
+
+  # One-Class SVM settings
+  one_class_svm:
+    kernel: "rbf"
+    gamma: "scale"
+    nu: 0.05
+
+  # Ensemble weights (must sum to 1.0)
+  ensemble_weights:
+    isolation_forest: 0.25
+    lstm_autoencoder: 0.30
+    xgboost: 0.25
+    one_class_svm: 0.10
+    prophet: 0.10
+
+# =============================================================================
+# FEATURE ENGINEERING
+# =============================================================================
+
+feature_engineering:
+  # Feature window size in seconds
+  window_size: 300
+
+  # Sequence length for LSTM
+  sequence_length: 50
+
+  # Statistical features to extract
+  statistical_features:
+    - mean
+    - std
+    - max
+    - min
+    - trend
+    - rate_of_change
+    - spikes
+
+  # Log features
+  log_features:
+    - error_rate
+    - warning_rate
+    - log_volume
+    - unique_templates
+    - exception_count
+    - stacktrace_count
+    - timeout_count
+    - log_entropy
+
+  # Agent features
+  agent_features:
+    - loop_duration_mean
+    - loop_duration_max
+    - loop_timeout_rate
+    - api_error_rate
+    - api_latency_mean
+    - queue_depth
+    - success_rate
+    - consecutive_failures
+
+# =============================================================================
+# FALSE POSITIVE REDUCTION
+# =============================================================================
+
+fp_reduction:
+  # Minimum confidence to consider prediction
+  min_confidence: 0.7
+
+  # Minimum model agreement ratio
+  min_model_agreement: 0.6
+
+  # Minimum duration (seconds) for anomaly to persist
+  min_duration_seconds: 60
+
+  # Cooldown between similar alerts (seconds)
+  alert_cooldown_seconds: 300
+
+# =============================================================================
+# CONFIDENCE SCORING
+# =============================================================================
+
+confidence_scoring:
+  # Factor weights (must sum to 1.0)
+  factor_weights:
+    model_agreement: 0.25
+    prediction_stability: 0.20
+    historical_accuracy: 0.20
+    data_quality: 0.15
+    pattern_strength: 0.10
+    temporal_proximity: 0.10
+
+  # Confidence level thresholds
+  thresholds:
+    very_high: 0.9
+    high: 0.75
+    medium: 0.6
+    low: 0.4
+
+# =============================================================================
+# PATTERN LEARNING
+# =============================================================================
+
+pattern_learning:
+  # Minimum support for sequential patterns
+  min_pattern_support: 0.05
+
+  # Minimum confidence for patterns
+  min_pattern_confidence: 0.6
+
+  # Maximum number of patterns to keep
+  max_patterns: 100
+
+  # Temporal pattern settings
+  temporal:
+    hot_period_percentile: 75
+    hourly_bins: 24
+    daily_bins: 7
+
+# =============================================================================
+# MODEL RETRAINING
+# =============================================================================
+
+retraining:
+  # Minimum new samples to trigger retraining
+  min_new_samples: 1000
+
+  # Minimum F1 score drop to trigger retraining
+  min_f1_drop: 0.05
+
+  # Concept drift detection threshold
+  drift_threshold: 0.1
+
+  # Scheduled retraining interval (days)
+  retraining_interval_days: 7
+
+  # Maximum historical samples to keep
+  max_historical_samples: 100000
+
+  # Drift detection settings
+  drift_detection:
+    ks_pvalue_threshold: 0.01
+    psi_threshold: 0.25
+    drift_ratio_threshold: 0.1
+
+  # Strategy settings
+  incremental:
+    learning_rate: 0.01
+    epochs: 5
+
+  full:
+    test_size: 0.2
+
+  transfer:
+    fine_tune_epochs: 10
+    learning_rate: 0.0001
+
+# =============================================================================
+# DATA SOURCES
+# =============================================================================
+
+data_sources:
+  system_metrics:
+    enabled: true
+    collection_interval: 10
+    metrics:
+      - cpu_percent
+      - memory_percent
+      - disk_io
+      - network_io
+      - process_count
+
+  logs:
+    enabled: true
+    paths:
+      - "logs/agent.log"
+      - "logs/system.log"
+    parse_interval: 30
+
+  agent_metrics:
+    enabled: true
+    collection_interval: 10
+    metrics:
+      - loop_duration
+      - api_latency
+      - queue_depth
+      - success_rate
+
+# =============================================================================
+# ALERT CHANNELS
+# =============================================================================
+
+alert_channels:
+  # Console output
+  console:
+    enabled: true
+    min_severity: "low"
+
+  # File logging
+  file:
+    enabled: true
+    path: "alerts/bug_alerts.log"
+    min_severity: "medium"
+
+  # Webhook (e.g., Slack, Discord)
+  webhook:
+    enabled: false
+    url: ""
+    min_severity: "high"
+    headers:
+      Content-Type: "application/json"
+
+  # Email
+  email:
+    enabled: false
+    smtp_server: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    from_address: ""
+    to_addresses: []
+    min_severity: "critical"
+
+# =============================================================================
+# PERFORMANCE MONITORING
+# =============================================================================
+
+monitoring:
+  # Enable performance metrics collection
+  enabled: true
+
+  # Metrics to track
+  metrics:
+    - prediction_latency
+    - alert_count
+    - false_positive_rate
+    - precision
+    - recall
+    - f1_score
+
+  # Export interval (seconds)
+  export_interval: 60
+
+  # Prometheus endpoint (optional)
+  prometheus:
+    enabled: false
+    port: 9090
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  handlers:
+    console:
+      enabled: true
+      level: "INFO"
+    
+    file:
+      enabled: true
+      path: "logs/bug_finder.log"
+      level: "DEBUG"
+      max_bytes: 10485760  # 10MB
+      backup_count: 5
+
+# =============================================================================
+# ADVANCED SETTINGS
+# =============================================================================
+
+advanced:
+  # Enable parallel processing where possible
+  parallel_processing: true
+  n_jobs: -1
+
+  # Memory optimization
+  memory_limit_mb: 2048
+
+  # Cache settings
+  cache:
+    enabled: true
+    max_size: 1000
+    ttl_seconds: 300
+
+  # Async settings
+  async:
+    max_concurrent_tasks: 10
+    timeout_seconds: 30

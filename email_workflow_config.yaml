@@ -1,0 +1,663 @@
+# =============================================================================
+# Email Workflow and Automation Engine Configuration
+# OpenClaw Windows 10 AI Agent System
+# =============================================================================
+
+email_workflow:
+  # ===========================================================================
+  # Rule Engine Settings
+  # ===========================================================================
+  rule_engine:
+    # Maximum number of rules to evaluate per email
+    max_rules_per_email: 50
+    
+    # Default conflict resolution strategy
+    # Options: priority, sequence, merge, interactive
+    default_conflict_strategy: "priority"
+    
+    # Enable AI-powered analysis
+    ai_analysis_enabled: true
+    
+    # Minimum confidence threshold for AI analysis
+    ai_analysis_threshold: 0.7
+    
+    # Enable parallel rule evaluation where safe
+    parallel_evaluation: true
+    
+    # Maximum evaluation time per email (seconds)
+    max_evaluation_time: 30
+    
+    # Cache AI analysis results
+    cache_ai_results: true
+    cache_ttl: 3600  # seconds
+
+  # ===========================================================================
+  # Auto-Responder Settings
+  # ===========================================================================
+  auto_responder:
+    enabled: true
+    
+    # Default delay before sending auto-response
+    default_delay: "5m"  # 5 minutes
+    
+    # Maximum responses per sender within cooldown period
+    max_responses_per_sender: 1
+    
+    # Cooldown period between responses to same sender
+    response_cooldown: "24h"  # 24 hours
+    
+    # Include original message in auto-response
+    include_original_message: false
+    
+    # Reply to thread (maintain conversation)
+    reply_to_thread: true
+    
+    # Vacation responder settings
+    vacation_responder:
+      enabled: false
+      internal_message_template: "templates/vacation_internal.txt"
+      external_message_template: "templates/vacation_external.txt"
+      send_to_internal: true
+      send_to_external: true
+      send_only_once_per_sender: true
+      exclude_lists:
+        - "noreply"
+        - "no-reply"
+        - "do-not-reply"
+        - "mailer-daemon"
+        - "postmaster"
+    
+    # Smart responder settings
+    smart_responder:
+      enabled: true
+      ai_model: "gpt-5.2"
+      max_tokens: 500
+      temperature: 0.7
+      use_conversation_context: true
+      personalize_response: true
+
+  # ===========================================================================
+  # Template Engine Settings
+  # ===========================================================================
+  template_engine:
+    # Template directory
+    template_directory: "templates/emails"
+    
+    # Default language
+    default_language: "en"
+    
+    # Supported languages
+    supported_languages:
+      - "en"
+      - "es"
+      - "fr"
+      - "de"
+      - "zh"
+      - "ja"
+    
+    # Enable AI enhancement for templates
+    ai_enhancement_enabled: true
+    
+    # AI enhancement model
+    ai_enhancement_model: "gpt-5.2"
+    
+    # Default CSS styles for HTML emails
+    default_css: |
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        color: #333;
+      }
+      .header {
+        background-color: #f4f4f4;
+        padding: 20px;
+        border-bottom: 2px solid #ddd;
+      }
+      .content {
+        padding: 20px;
+      }
+      .footer {
+        background-color: #f4f4f4;
+        padding: 10px;
+        font-size: 12px;
+        color: #666;
+      }
+
+  # ===========================================================================
+  # Scheduler Settings
+  # ===========================================================================
+  scheduler:
+    # Default timezone
+    timezone: "America/New_York"
+    
+    # Maximum concurrent scheduled jobs
+    max_concurrent_jobs: 20
+    
+    # Misfire grace period (seconds)
+    misfire_grace_time: 3600  # 1 hour
+    
+    # Job store configuration
+    job_store:
+      type: "sqlalchemy"
+      url: "sqlite:///data/scheduler_jobs.db"
+    
+    # Executor configuration
+    executors:
+      default:
+        type: "threadpool"
+        max_workers: 10
+      
+    # Job defaults
+    job_defaults:
+      coalesce: true
+      max_instances: 1
+      misfire_grace_time: 3600
+
+  # ===========================================================================
+  # Threading and Conversation Settings
+  # ===========================================================================
+  threading:
+    # Similarity threshold for fuzzy matching (0.0 - 1.0)
+    similarity_threshold: 0.85
+    
+    # Maximum messages to keep in thread history
+    max_thread_history: 100
+    
+    # Auto-archive threads after inactivity
+    auto_archive_after: "30d"  # 30 days
+    
+    # Enable AI-generated thread summaries
+    ai_summaries_enabled: true
+    
+    # Summary generation frequency
+    summary_frequency: "daily"  # daily, weekly, or per_message
+    
+    # Extract action items from conversations
+    extract_action_items: true
+    
+    # Track sentiment trends
+    sentiment_tracking: true
+
+  # ===========================================================================
+  # Gmail Integration Settings
+  # ===========================================================================
+  integrations:
+    gmail:
+      enabled: true
+      
+      # Credentials path
+      credentials_path: "credentials/gmail_credentials.json"
+      token_path: "credentials/gmail_token.json"
+      
+      # Rate limiting (requests per second)
+      rate_limit: 250
+      
+      # Batch size for fetching emails
+      fetch_batch_size: 100
+      
+      # Polling interval (seconds)
+      polling_interval: 60
+      
+      # Webhook configuration for push notifications
+      webhook:
+        enabled: false
+        endpoint: "https://your-domain.com/webhook/gmail"
+        
+      # Label mappings
+      label_mappings:
+        important: "Label_1"
+        urgent: "Label_2"
+        vip: "Label_3"
+        
+    # ========================================================================
+    # Twilio Integration Settings
+    # ========================================================================
+    twilio:
+      enabled: true
+      
+      # Credentials (use environment variables in production)
+      account_sid: "${TWILIO_ACCOUNT_SID}"
+      auth_token: "${TWILIO_AUTH_TOKEN}"
+      
+      # Default phone number
+      phone_number: "${TWILIO_PHONE_NUMBER}"
+      
+      # SMS settings
+      sms:
+        enabled: true
+        max_length: 1600
+        
+      # Voice settings
+      voice:
+        enabled: true
+        default_voice: "Polly.Joanna"
+        language: "en-US"
+        
+    # ========================================================================
+    # Slack Integration Settings
+    # ========================================================================
+    slack:
+      enabled: false
+      bot_token: "${SLACK_BOT_TOKEN}"
+      default_channel: "#notifications"
+      
+    # ========================================================================
+    # Discord Integration Settings
+    # ========================================================================
+    discord:
+      enabled: false
+      webhook_url: "${DISCORD_WEBHOOK_URL}"
+      
+    # ========================================================================
+    # Webhook Integration Settings
+    # ========================================================================
+    webhook:
+      enabled: false
+      endpoints:
+        - name: "primary"
+          url: "https://your-domain.com/webhook/email"
+          headers:
+            Authorization: "Bearer ${WEBHOOK_TOKEN}"
+          timeout: 30
+
+  # ===========================================================================
+  # Notification Settings
+  # ===========================================================================
+  notifications:
+    # Desktop notifications
+    desktop:
+      enabled: true
+      default_timeout: 10
+      urgency_levels:
+        low: 5
+        normal: 10
+        high: 0  # No timeout
+        critical: 0
+        
+    # Text-to-speech notifications
+    tts:
+      enabled: true
+      default_voice: "default"
+      rate: 150  # words per minute
+      volume: 1.0
+      
+    # Email notifications
+    email:
+      enabled: true
+      smtp_host: "smtp.gmail.com"
+      smtp_port: 587
+      smtp_user: "${SMTP_USER}"
+      smtp_password: "${SMTP_PASSWORD}"
+      from_address: "notifications@your-domain.com"
+
+  # ===========================================================================
+  # Security Settings
+  # ===========================================================================
+  security:
+    # Enable phishing detection
+    phishing_detection:
+      enabled: true
+      ai_model: "gpt-5.2"
+      risk_threshold: 0.7
+      
+    # Enable attachment scanning
+    attachment_scanning:
+      enabled: true
+      max_file_size: "25MB"
+      blocked_extensions:
+        - ".exe"
+        - ".bat"
+        - ".cmd"
+        - ".scr"
+        - ".js"
+        - ".vbs"
+        - ".ps1"
+        - ".sh"
+        - ".dll"
+        - ".bin"
+      scan_with_virustotal: false
+      
+    # Content filtering
+    content_filtering:
+      enabled: true
+      blocked_patterns:
+        - "password"
+        - "credit card"
+        - "ssn"
+      
+    # URL scanning
+    url_scanning:
+      enabled: true
+      check_against_blacklists: true
+      use_google_safe_browsing: false
+
+  # ===========================================================================
+  # Compliance Settings
+  # ===========================================================================
+  compliance:
+    # Audit logging
+    audit_logging:
+      enabled: true
+      log_path: "logs/audit.log"
+      retention_days: 365
+      log_actions:
+        - "rule_matched"
+        - "action_executed"
+        - "email_sent"
+        - "auto_responded"
+        - "template_rendered"
+        
+    # Data retention policies
+    data_retention:
+      enabled: true
+      policies:
+        default:
+          retention_period: "7y"
+          
+        by_category:
+          financial:
+            retention_period: "10y"
+            
+          personal:
+            retention_period: "3y"
+            
+          marketing:
+            retention_period: "1y"
+            auto_delete: true
+            
+          spam:
+            retention_period: "30d"
+            auto_delete: true
+            
+    # GDPR compliance
+    gdpr:
+      enabled: true
+      allow_data_export: true
+      allow_data_deletion: true
+      anonymize_after_retention: true
+
+  # ===========================================================================
+  # Workflow Settings
+  # ===========================================================================
+  workflow:
+    enabled: true
+    
+    # Maximum workflow execution time (seconds)
+    max_execution_time: 300
+    
+    # Maximum number of nodes per workflow
+    max_nodes: 100
+    
+    # Maximum depth for nested workflows
+    max_nesting_depth: 5
+    
+    # Enable parallel node execution
+    parallel_execution: true
+    
+    # Default error handling strategy
+    default_error_handling: "stop"  # stop, continue, retry
+    
+    # State persistence
+    state_persistence:
+      enabled: true
+      store_type: "sqlite"
+      connection_string: "sqlite:///data/workflow_states.db"
+
+  # ===========================================================================
+  # Performance Settings
+  # ===========================================================================
+  performance:
+    # Connection pooling
+    connection_pool_size: 10
+    
+    # Async workers
+    max_async_workers: 20
+    
+    # Caching
+    cache:
+      enabled: true
+      type: "redis"  # redis, memory, or disk
+      redis_url: "redis://localhost:6379/0"
+      default_ttl: 3600
+      
+    # Database
+    database:
+      type: "sqlite"
+      path: "data/email_workflow.db"
+      
+    # Logging
+    logging:
+      level: "INFO"
+      format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+      file: "logs/email_workflow.log"
+      max_size: "10MB"
+      backup_count: 5
+
+# =============================================================================
+# Pre-configured Rules
+# =============================================================================
+preconfigured_rules:
+  - id: "rule_urgent_vip"
+    name: "Urgent VIP Emails"
+    description: "Handle urgent emails from VIP contacts"
+    priority: 1
+    enabled: true
+    stop_processing: true
+    conditions:
+      - operator: "and"
+        conditions:
+          - field: "from"
+            operator: "in_list"
+            value:
+              - "ceo@company.com"
+              - "cto@company.com"
+          - field: "ai_urgency"
+            operator: ">"
+            value: 0.8
+    actions:
+      - type: "label_add"
+        parameters:
+          labels:
+            - "VIP"
+            - "Urgent"
+      - type: "mark_important"
+      - type: "notify_desktop"
+        parameters:
+          title: "Urgent VIP Email"
+          urgency: "critical"
+      - type: "notify_sms"
+        parameters:
+          message: "Urgent email from {{sender_name}}: {{subject}}"
+          
+  - id: "rule_newsletters"
+    name: "Newsletter Filtering"
+    description: "Auto-archive newsletters"
+    priority: 100
+    enabled: true
+    conditions:
+      - operator: "or"
+        conditions:
+          - field: "subject"
+            operator: "contains"
+            value: "unsubscribe"
+          - field: "precedence"
+            operator: "equals"
+            value: "bulk"
+          - field: "mailing_list"
+            operator: "exists"
+    actions:
+      - type: "label_add"
+        parameters:
+          labels:
+            - "Newsletters"
+      - type: "archive"
+      
+  - id: "rule_after_hours"
+    name: "After Hours Notification"
+    description: "Notify for urgent emails received after hours"
+    priority: 10
+    enabled: true
+    conditions:
+      - operator: "and"
+        conditions:
+          - field: "received_time"
+            operator: "not_between"
+            value: ["09:00", "17:00"]
+          - field: "ai_urgency"
+            operator: ">"
+            value: 0.7
+    actions:
+      - type: "notify_sms"
+        parameters:
+          message: "After-hours urgent email: {{subject}}"
+
+# =============================================================================
+# Pre-configured Templates
+# =============================================================================
+preconfigured_templates:
+  - id: "acknowledgment_received"
+    name: "Acknowledgment - Received"
+    category: "acknowledgment"
+    subject_template: "Re: {{original_subject}} - Received"
+    body_text_template: |
+      Hi {{sender_name}},
+      
+      Thank you for your email. I've received your message and will review it shortly.
+      
+      {% if expected_response_time %}
+      You can expect a response within {{expected_response_time}}.
+      {% endif %}
+      
+      Best regards,
+      {{my_name}}
+      
+  - id: "meeting_confirmed"
+    name: "Meeting Request - Confirmed"
+    category: "meetings"
+    subject_template: "Re: {{original_subject}} - Meeting Confirmed"
+    body_text_template: |
+      Hi {{sender_name}},
+      
+      I'd be happy to meet with you.
+      
+      Confirmed Details:
+      - Date: {{meeting_date}}
+      - Time: {{meeting_time}}
+      - Duration: {{meeting_duration}}
+      {% if meeting_location %}
+      - Location: {{meeting_location}}
+      {% endif %}
+      {% if meeting_link %}
+      - Video Link: {{meeting_link}}
+      {% endif %}
+      
+      {% if agenda %}
+      Agenda:
+      {{agenda}}
+      {% endif %}
+      
+      Looking forward to our discussion.
+      
+      Best regards,
+      {{my_name}}
+      
+  - id: "out_of_office"
+    name: "Out of Office"
+    category: "auto_responder"
+    subject_template: "Out of Office: {{subject}}"
+    body_text_template: |
+      Thank you for your email.
+      
+      I am currently out of the office{% if return_date %} and will return on {{return_date | format_date}}{% endif %}.
+      
+      {% if backup_contact %}
+      For urgent matters, please contact:
+      {{backup_contact_name}}
+      {{backup_contact_email}}
+      {{backup_contact_phone}}
+      {% endif %}
+      
+      I will respond to your email as soon as possible upon my return.
+      
+      Best regards,
+      {{my_name}}
+
+# =============================================================================
+# Pre-configured Workflows
+# =============================================================================
+preconfigured_workflows:
+  - id: "workflow_urgent_escalation"
+    name: "Urgent Email Escalation"
+    description: "Escalates urgent emails from VIP contacts"
+    enabled: true
+    trigger:
+      type: "email_received"
+      filters:
+        ai_urgency: "> 0.8"
+    nodes:
+      - id: "start"
+        type: "trigger_email_received"
+        position: { x: 100, y: 100 }
+        config: {}
+        
+      - id: "check_vip"
+        type: "condition_filter"
+        position: { x: 300, y: 100 }
+        config:
+          condition: "sender in vip_list"
+          
+      - id: "label_urgent"
+        type: "action_label"
+        position: { x: 500, y: 100 }
+        config:
+          labels: ["Urgent", "VIP"]
+          
+      - id: "notify_desktop"
+        type: "action_notify"
+        position: { x: 700, y: 100 }
+        config:
+          type: "desktop"
+          title: "Urgent VIP Email"
+          urgency: "critical"
+          
+      - id: "notify_sms"
+        type: "integration_twilio"
+        position: { x: 700, y: 250 }
+        config:
+          type: "sms"
+          message: "Urgent email from {{sender_name}}: {{subject}}"
+          
+      - id: "end"
+        type: "control_merge"
+        position: { x: 900, y: 175 }
+        config: {}
+        
+    edges:
+      - id: "e1"
+        source: "start"
+        target: "check_vip"
+        
+      - id: "e2"
+        source: "check_vip"
+        target: "label_urgent"
+        condition: "true"
+        
+      - id: "e3"
+        source: "label_urgent"
+        target: "notify_desktop"
+        
+      - id: "e4"
+        source: "label_urgent"
+        target: "notify_sms"
+        
+      - id: "e5"
+        source: "notify_desktop"
+        target: "end"
+        
+      - id: "e6"
+        source: "notify_sms"
+        target: "end"
+        
+    settings:
+      parallel_execution: true
+      error_handling: "continue"

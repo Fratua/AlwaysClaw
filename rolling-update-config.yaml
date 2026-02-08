@@ -1,0 +1,85 @@
+# Rolling Update Configuration for OpenClaw Agent System
+# Windows 10/11 Deployment
+
+rolling_update:
+  # Batch configuration
+  batch_size: 2                    # Number of instances per batch
+  batch_percentage: 25             # Alternative: percentage of instances per batch
+  
+  # Timing configuration
+  drain_timeout_seconds: 30        # Max time to drain connections
+  stabilization_seconds: 60        # Wait time between batches
+  health_check_timeout: 45         # Health check timeout per instance
+  batch_cooldown_seconds: 30       # Cooldown between batches
+  
+  # Health check configuration
+  health_checks:
+    - type: http
+      endpoint: /health
+      expected_status: 200
+      timeout: 10
+      retries: 3
+    
+    - type: tcp
+      port: 8080
+      timeout: 5
+      retries: 3
+    
+    - type: custom
+      script: scripts/agent_health_check.ps1
+      timeout: 30
+      retries: 2
+    
+    - type: agent_loops
+      expected_count: 15
+      timeout: 15
+  
+  # Failure handling
+  max_failures_per_batch: 1        # Max failures before batch rollback
+  max_total_failures: 3            # Max total failures before full rollback
+  auto_rollback: true              # Auto rollback on failure
+  rollback_on_health_check: true   # Rollback if health checks fail
+  stop_on_first_failure: false     # Stop deployment on first failure
+  
+  # Progress monitoring
+  progress_notifications: true
+  notification_webhook: https://monitoring.openclaw.io/deployments
+  notification_interval_percent: 25  # Notify every X% progress
+  
+  # Connection draining
+  connection_draining:
+    enabled: true
+    timeout_seconds: 30
+    grace_period_seconds: 5
+  
+  # Resource limits during update
+  resource_limits:
+    max_cpu_percent: 80
+    max_memory_percent: 85
+    abort_on_resource_exhaustion: true
+
+# Agent loop specific settings
+agent_loops:
+  update_order:
+    - logging_audit        # Update logging first
+    - notification_router  # Then notifications
+    - cron_scheduler       # Then scheduler
+    - heartbeat_monitor    # Then monitoring
+    - user_system          # Then user management
+    - memory_manager       # Then memory
+    - identity_manager     # Then identity
+    - gpt_interface        # Then AI interface
+    - tts_engine           # Then TTS
+    - stt_engine           # Then STT
+    - voice_handler        # Then voice
+    - browser_agent        # Then browser
+    - gmail_processor      # Then Gmail
+    - system_controller    # Then system
+    - core_orchestrator    # Update core last
+  
+  critical_loops:         # These must never go down together
+    - core_orchestrator
+    - heartbeat_monitor
+    - system_controller
+  
+  max_parallel_updates: 3  # Max loops updating simultaneously

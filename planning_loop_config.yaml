@@ -1,0 +1,296 @@
+# Advanced Planning Loop Configuration
+# OpenClaw Windows 10 AI Agent System
+
+planning_loop:
+  # Core settings
+  name: "AdvancedPlanningLoop"
+  version: "1.0.0"
+  
+  # Replanning configuration
+  replanning:
+    enabled: true
+    cooldown_seconds: 30
+    min_severity: 5
+    max_replans_per_execution: 10
+    
+    # Trigger configurations
+    triggers:
+      goal_failed:
+        enabled: true
+        severity: 7
+        auto_replan: true
+      
+      timeout:
+        enabled: true
+        severity: 6
+        auto_replan: true
+      
+      context_changed:
+        enabled: true
+        severity: 4
+        auto_replan: false
+      
+      new_goal_added:
+        enabled: true
+        severity: 5
+        auto_replan: false
+      
+      resource_exhausted:
+        enabled: true
+        severity: 8
+        auto_replan: true
+      
+      plan_degraded:
+        enabled: true
+        severity: 5
+        auto_replan: false
+      
+      predicted_failure:
+        enabled: true
+        severity: 6
+        auto_replan: true
+      
+      system_overload:
+        enabled: true
+        severity: 7
+        auto_replan: true
+      
+      external_interrupt:
+        enabled: true
+        severity: 9
+        auto_replan: false
+      
+      user_override:
+        enabled: true
+        severity: 10
+        auto_replan: false
+
+  # Contingency planning configuration
+  contingency:
+    enabled: true
+    max_contingencies_per_plan: 5
+    validity_hours: 24
+    
+    # Risk thresholds for generating contingencies
+    risk_thresholds:
+      critical_goal: 0.3
+      external_dependency: 0.2
+      resource_intensive: 0.2
+      high_dependency: 0.15
+    
+    # Alternative generation
+    alternatives:
+      generate_simplified: true
+      generate_degraded: true
+      generate_delayed: true
+
+  # Resource planning configuration
+  resources:
+    monitoring_enabled: true
+    check_interval_seconds: 10
+    
+    # Resource limits
+    limits:
+      max_cpu_cores: 8
+      max_memory_mb: 8192
+      max_disk_io_mbps: 100
+      max_network_mbps: 100
+    
+    # Allocation strategy
+    allocation_strategy: "balanced"  # balanced, greedy, conservative
+    
+    # API rate limiting
+    api_rate_limits:
+      gmail: 100  # calls per minute
+      browser: 60
+      twilio: 30
+      openai: 1000
+
+  # Temporal planning configuration
+  temporal:
+    deadline_monitoring_enabled: true
+    
+    # Warning thresholds (as fraction of time elapsed)
+    deadline_warning_thresholds:
+      - 0.50  # 50% - First warning
+      - 0.75  # 75% - Second warning
+      - 0.90  # 90% - Urgent warning
+      - 0.95  # 95% - Critical warning
+    
+    # Buffer time before deadline
+    deadline_buffer: "5m"  # 5 minutes
+    
+    # Scheduling algorithm
+    scheduler: "critical_path"  # critical_path, earliest_deadline, priority_based
+
+  # Multi-objective optimization configuration
+  optimization:
+    enabled: true
+    max_candidate_plans: 10
+    pareto_front_size: 5
+    
+    # Objective weights (must sum to 1.0)
+    objectives:
+      time:
+        weight: 0.25
+        maximize: false
+      
+      cost:
+        weight: 0.15
+        maximize: false
+      
+      quality:
+        weight: 0.20
+        maximize: true
+      
+      reliability:
+        weight: 0.20
+        maximize: true
+      
+      resource_efficiency:
+        weight: 0.10
+        maximize: true
+      
+      user_satisfaction:
+        weight: 0.10
+        maximize: true
+    
+    # Trade-off strategy
+    trade_off_strategy: "weighted_sum"  # weighted_sum, pareto, goal_programming
+
+  # Quality assessment configuration
+  quality:
+    assessment_enabled: true
+    min_quality_threshold: 0.6
+    
+    # Dimension weights (must sum to 1.0)
+    dimension_weights:
+      feasibility: 0.25
+      efficiency: 0.15
+      robustness: 0.15
+      completeness: 0.15
+      consistency: 0.10
+      optimality: 0.10
+      simplicity: 0.05
+      adaptability: 0.05
+    
+    # Quality thresholds
+    thresholds:
+      excellent: 0.90
+      good: 0.75
+      acceptable: 0.60
+      poor: 0.40
+      critical: 0.20
+
+  # Hierarchical goal configuration
+  goals:
+    # Decomposition settings
+    decomposition:
+      auto_decompose: true
+      target_level: "action"  # mission, objective, task, subtask, action
+      max_depth: 5
+      
+      # LLM-based decomposition
+      use_llm: true
+      llm_model: "gpt-5.2"
+      
+      # Fallback to rule-based if LLM fails
+      fallback_to_rules: true
+    
+    # Default values
+    defaults:
+      hardness: "important"  # critical, important, nice_to_have
+      adaptability: "adaptable"  # fixed, adaptable, dynamic
+      priority: 50
+      estimated_duration: "5m"
+
+  # Execution monitoring configuration
+  monitoring:
+    enabled: true
+    
+    # Progress tracking
+    progress_tracking:
+      enabled: true
+      update_interval_seconds: 5
+    
+    # Metrics collection
+    metrics:
+      enabled: true
+      collect_resource_usage: true
+      collect_timing: true
+      collect_success_rates: true
+    
+    # Event emission
+    events:
+      enabled: true
+      emit_goal_events: true
+      emit_plan_events: true
+      emit_replanning_events: true
+
+  # Integration configuration
+  integration:
+    # Memory system
+    memory:
+      enabled: true
+      store_plans: true
+      store_executions: true
+      learn_from_history: true
+    
+    # Event system
+    events:
+      enabled: true
+      event_bus: "agent_event_bus"
+    
+    # External services
+    services:
+      gmail:
+        enabled: true
+        priority_boost: 10
+      
+      browser:
+        enabled: true
+        priority_boost: 5
+      
+      twilio:
+        enabled: true
+        priority_boost: 15
+      
+      tts:
+        enabled: true
+        priority_boost: 0
+      
+      stt:
+        enabled: true
+        priority_boost: 0
+
+  # Logging configuration
+  logging:
+    level: "INFO"
+    
+    # Log components
+    components:
+      goal_manager: true
+      replanning_engine: true
+      contingency_planner: true
+      quality_assessor: true
+      execution_monitor: true
+    
+    # Log destinations
+    destinations:
+      console: true
+      file: true
+      file_path: "logs/planning_loop.log"
+
+  # Performance tuning
+  performance:
+    # Async settings
+    max_concurrent_goals: 5
+    
+    # Caching
+    cache_plans: true
+    cache_size: 100
+    
+    # Timeouts
+    goal_timeout: "1h"
+    plan_timeout: "24h"
+    replanning_timeout: "5m"

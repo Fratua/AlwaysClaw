@@ -1,0 +1,26 @@
+# Web Authentication and Session Management System
+# For Windows 10 OpenClaw AI Agent Framework
+
+# Core dependencies
+pyjwt>=2.8.0
+cryptography>=41.0.0
+aiohttp>=3.8.0
+aiofiles>=23.0.0
+
+# Browser automation
+playwright>=1.40.0
+
+# MFA support
+pyotp>=2.9.0
+
+# Windows-specific (optional, Windows only)
+pywin32>=306; platform_system=="Windows"
+
+# SAML support (optional)
+signxml>=3.2.0
+
+# Development dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+mypy>=1.5.0

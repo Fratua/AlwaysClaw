@@ -1,0 +1,87 @@
+# OpenClaw AI Agent TTS System Configuration
+
+tts:
+  # System settings
+  system:
+    name: "OpenClaw TTS"
+    version: "1.0.0"
+    log_level: "INFO"
+    metrics_enabled: true
+
+  # Engine priorities (lower = higher priority)
+  engines:
+    priority_order:
+      - azure
+      - elevenlabs
+      - openai
+      - sapi
+    fallback_enabled: true
+    auto_select: true
+
+  # Voice management
+  voices:
+    default_voice: "azure_ava"
+    default_locale: "en-US"
+    default_gender: "female"
+    cache_enabled: true
+    cache_max_size_mb: 100
+    registry_path: "./config/voice_registry.json"
+
+  # Audio output
+  audio:
+    sample_rate: 24000
+    channels: 1
+    bit_depth: 16
+    backend: "sounddevice"
+    buffer_size: 1024
+    volume_default: 0.8
+    ducking_enabled: true
+
+  # SSML settings
+  ssml:
+    enabled: true
+    validation: "warn"
+    default_version: "1.0"
+
+  # Streaming settings
+  streaming:
+    enabled: true
+    chunk_size: 1024
+    pre_buffer_chunks: 3
+    latency_target_ms: 100
+
+  # Rate limiting
+  rate_limits:
+    requests_per_second: 10
+    burst_size: 20
+    cooldown_ms: 100
+
+  # Provider configurations
+  providers:
+    azure:
+      enabled: true
+      subscription_key: ${AZURE_SPEECH_KEY}
+      region: ${AZURE_SPEECH_REGION}
+      default_voice: "en-US-AvaMultilingualNeural"
+
+    elevenlabs:
+      enabled: true
+      api_key: ${ELEVENLABS_API_KEY}
+      default_voice: "21m00Tcm4TlvDq8ikWAM"
+      default_model: "eleven_multilingual_v2"
+
+    openai:
+      enabled: true
+      api_key: ${OPENAI_API_KEY}
+      default_voice: "nova"
+      default_model: "tts-1"
+
+    sapi:
+      enabled: true
+      default_voice: "Microsoft David Desktop"
+
+# Environment variables required:
+# - AZURE_SPEECH_KEY
+# - AZURE_SPEECH_REGION
+# - ELEVENLABS_API_KEY
+# - OPENAI_API_KEY

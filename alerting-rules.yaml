@@ -1,0 +1,268 @@
+# Alerting Rules for OpenClaw Agent System
+# Windows 10/11 Deployment
+
+alerts:
+  # ============================================
+  # Critical Alerts - Page On-Call Immediately
+  # ============================================
+  
+  critical:
+    - name: "ServiceDown"
+      condition: "up{job='openclaw'} == 0"
+      duration: "1m"
+      severity: critical
+      summary: "OpenClaw service is down"
+      description: "The OpenClaw agent service is not responding to health checks"
+      runbook_url: "https://wiki.openclaw.io/runbooks/service-down"
+      
+    - name: "HighErrorRate"
+      condition: "rate(http_requests_total{status=~'5..'}[5m]) > 0.01"
+      duration: "2m"
+      severity: critical
+      summary: "Error rate exceeds 1%"
+      description: "The error rate has exceeded 1% over the last 5 minutes"
+      
+    - name: "AgentLoopFailure"
+      condition: "openclaw_agent_loops_running < 15"
+      duration: "30s"
+      severity: critical
+      summary: "Agent loop failure detected"
+      description: "Fewer than 15 agent loops are running"
+      
+    - name: "CoreOrchestratorDown"
+      condition: "openclaw_loop_status{loop='core_orchestrator'} == 0"
+      duration: "30s"
+      severity: critical
+      summary: "Core orchestrator is down"
+      description: "The core orchestrator loop has stopped"
+      
+    - name: "MemoryExhaustion"
+      condition: "windows_memory_available_bytes / windows_memory_total_bytes < 0.1"
+      duration: "1m"
+      severity: critical
+      summary: "Memory exhaustion imminent"
+      description: "Less than 10% memory available"
+      
+    - name: "DiskFull"
+      condition: "100 - ((windows_logical_disk_free_bytes / windows_logical_disk_size_bytes) * 100) > 95"
+      duration: "5m"
+      severity: critical
+      summary: "Disk nearly full"
+      description: "Disk usage exceeds 95%"
+  
+  # ============================================
+  # Warning Alerts - Notify but Don't Page
+  # ============================================
+  
+  warning:
+    - name: "HighLatency"
+      condition: "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.3"
+      duration: "5m"
+      severity: warning
+      summary: "P95 latency exceeds 300ms"
+      description: "95th percentile latency is above 300ms"
+      
+    - name: "HighCPU"
+      condition: "100 - (avg by (instance) (irate(windows_cpu_time_total{mode='idle'}[5m])) * 100) > 70"
+      duration: "10m"
+      severity: warning
+      summary: "CPU usage exceeds 70%"
+      description: "CPU usage has been above 70% for 10 minutes"
+      
+    - name: "HighMemory"
+      condition: "windows_memory_available_bytes / windows_memory_total_bytes < 0.25"
+      duration: "10m"
+      severity: warning
+      summary: "Memory usage exceeds 75%"
+      description: "Memory usage has been above 75% for 10 minutes"
+      
+    - name: "SlowGmailProcessing"
+      condition: "rate(openclaw_gmail_processed_total[5m]) < 0.8"
+      duration: "10m"
+      severity: warning
+      summary: "Gmail processing rate low"
+      description: "Gmail processing rate is below expected threshold"
+      
+    - name: "GPTResponseSlow"
+      condition: "histogram_quantile(0.95, rate(openclaw_gpt_response_duration_seconds_bucket[5m])) > 5"
+      duration: "5m"
+      severity: warning
+      summary: "GPT response time high"
+      description: "GPT-5.2 response time exceeds 5 seconds"
+      
+    - name: "AgentLoopRestarting"
+      condition: "rate(openclaw_loop_restarts_total[5m]) > 0.1"
+      duration: "5m"
+      severity: warning
+      summary: "Agent loops restarting frequently"
+      description: "Agent loops are restarting more than expected"
+  
+  # ============================================
+  # Info Alerts - Log Only
+  # ============================================
+  
+  info:
+    - name: "DeploymentStarted"
+      condition: "openclaw_deployment_status == 1"
+      severity: info
+      summary: "Deployment started"
+      description: "A new deployment has been initiated"
+      
+    - name: "DeploymentCompleted"
+      condition: "openclaw_deployment_status == 2"
+      severity: info
+      summary: "Deployment completed successfully"
+      description: "Deployment has completed successfully"
+      
+    - name: "DeploymentFailed"
+      condition: "openclaw_deployment_status == 3"
+      severity: info
+      summary: "Deployment failed"
+      description: "Deployment has failed"
+      
+    - name: "RollbackInitiated"
+      condition: "openclaw_rollback_status == 1"
+      severity: info
+      summary: "Rollback initiated"
+      description: "A rollback has been initiated"
+      
+    - name: "RollbackCompleted"
+      condition: "openclaw_rollback_status == 2"
+      severity: info
+      summary: "Rollback completed"
+      description: "Rollback has completed successfully"
+      
+    - name: "CanaryPhaseComplete"
+      condition: "openclaw_canary_phase_completed == 1"
+      severity: info
+      summary: "Canary phase completed"
+      description: "A canary deployment phase has completed"
+  
+  # ============================================
+  # Business Metric Alerts
+  # ============================================
+  
+  business:
+    - name: "LowUserSatisfaction"
+      condition: "openclaw_user_satisfaction_score < 0.7"
+      duration: "30m"
+      severity: warning
+      summary: "User satisfaction below target"
+      description: "User satisfaction score has been below 0.7 for 30 minutes"
+      
+    - name: "HighTaskFailureRate"
+      condition: "rate(openclaw_task_failures_total[10m]) / rate(openclaw_task_total[10m]) > 0.1"
+      duration: "10m"
+      severity: warning
+      summary: "Task failure rate high"
+      description: "More than 10% of tasks are failing"
+
+# ============================================
+# Notification Configuration
+# ============================================
+
+notifications:
+  slack:
+    enabled: true
+    webhook: ${SLACK_WEBHOOK_URL}
+    channels:
+      critical: "#alerts-critical"
+      warning: "#alerts-warning"
+      info: "#deployments"
+    
+    # Formatting
+    include_graph: true
+    include_runbook: true
+    mention_on_critical: "@channel"
+  
+  pagerduty:
+    enabled: true
+    service_key: ${PAGERDUTY_SERVICE_KEY}
+    severity_mapping:
+      critical: critical
+      warning: warning
+      info: info
+  
+  email:
+    enabled: true
+    smtp_server: ${SMTP_SERVER}
+    smtp_port: 587
+    smtp_username: ${SMTP_USERNAME}
+    smtp_password: ${SMTP_PASSWORD}
+    from_address: "alerts@openclaw.io"
+    
+    recipients:
+      critical:
+        - oncall@openclaw.io
+        - devops@openclaw.io
+      warning:
+        - devops@openclaw.io
+      info:
+        - team@openclaw.io
+  
+  webhook:
+    enabled: false
+    url: https://monitoring.openclaw.io/alert-webhook
+    headers:
+      Authorization: "Bearer ${WEBHOOK_TOKEN}"
+
+# ============================================
+# Alert Routing
+# ============================================
+
+routing:
+  # Route by alert name
+  by_name:
+    "ServiceDown": ["pagerduty", "slack", "email"]
+    "HighErrorRate": ["pagerduty", "slack", "email"]
+    "*": ["slack"]
+  
+  # Route by severity
+  by_severity:
+    critical: ["pagerduty", "slack", "email"]
+    warning: ["slack", "email"]
+    info: ["slack"]
+  
+  # Time-based routing
+  time_based:
+    business_hours:
+      days: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+      hours: [9, 17]
+      routing:
+        critical: ["pagerduty", "slack", "email"]
+        warning: ["slack", "email"]
+    
+    after_hours:
+      routing:
+        critical: ["pagerduty"]
+        warning: ["slack"]
+
+# ============================================
+# Alert Management
+# ============================================
+
+management:
+  # Grouping
+  group_by:
+    - alertname
+    - severity
+    - instance
+  
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  
+  # Inhibition
+  inhibit_rules:
+    - source_match:
+        severity: critical
+      target_match:
+        severity: warning
+      equal:
+        - alertname
+        - instance
+  
+  # Silencing
+  silences:
+    enabled: true
+    max_duration: 24h

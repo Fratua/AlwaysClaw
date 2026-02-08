@@ -1,0 +1,252 @@
+# Feature Flags Configuration for OpenClaw Agent System
+# Windows 10/11 Deployment
+
+feature_flags:
+  # ============================================
+  # Agent Loop Feature Flags
+  # ============================================
+  
+  - name: agent_loop_gmail_v2
+    description: "Gmail agent loop version 2 with improved parsing and categorization"
+    enabled: true
+    rollout_percentage: 0
+    cache_ttl_seconds: 60
+    
+    rules:
+      - name: "Beta Users"
+        action: enable
+        priority: 1
+        conditions:
+          - property: user_tier
+            operator: equals
+            value: beta
+      
+      - name: "Internal Users"
+        action: enable
+        priority: 2
+        conditions:
+          - property: email_domain
+            operator: ends_with
+            value: "@openclaw.internal"
+      
+      - name: "Enterprise Users"
+        action: enable
+        priority: 3
+        conditions:
+          - property: subscription_tier
+            operator: equals
+            value: enterprise
+  
+  - name: agent_loop_browser_enhanced
+    description: "Enhanced browser automation with anti-detection capabilities"
+    enabled: false
+    rollout_percentage: 10
+    cache_ttl_seconds: 60
+    
+    rules:
+      - name: "Developer Mode"
+        action: enable
+        conditions:
+          - property: dev_mode
+            operator: equals
+            value: true
+  
+  - name: agent_loop_voice_advanced
+    description: "Advanced voice handling with noise cancellation"
+    enabled: false
+    rollout_percentage: 5
+    cache_ttl_seconds: 60
+  
+  # ============================================
+  # AI Model Feature Flags
+  # ============================================
+  
+  - name: gpt52_extended_thinking
+    description: "GPT-5.2 extended thinking mode for complex reasoning"
+    enabled: true
+    rollout_percentage: 100
+    cache_ttl_seconds: 300
+  
+  - name: gpt52_multi_modal
+    description: "Enable multi-modal input (text + images)"
+    enabled: false
+    rollout_percentage: 0
+    cache_ttl_seconds: 60
+  
+  - name: gpt52_function_calling_v2
+    description: "Improved function calling with better parameter handling"
+    enabled: true
+    rollout_percentage: 50
+    cache_ttl_seconds: 60
+  
+  # ============================================
+  # Memory System Feature Flags
+  # ============================================
+  
+  - name: memory_vector_search
+    description: "Vector-based semantic memory search"
+    enabled: true
+    rollout_percentage: 50
+    cache_ttl_seconds: 120
+  
+  - name: memory_long_term_persistence
+    description: "Persistent long-term memory across sessions"
+    enabled: true
+    rollout_percentage: 100
+    cache_ttl_seconds: 300
+  
+  - name: memory_cross_user_learning
+    description: "Cross-user pattern learning (anonymized)"
+    enabled: false
+    rollout_percentage: 0
+    cache_ttl_seconds: 60
+  
+  # ============================================
+  # Identity/Persona Feature Flags
+  # ============================================
+  
+  - name: identity_multi_persona
+    description: "Multiple persona support per user"
+    enabled: false
+    rollout_percentage: 0
+    cache_ttl_seconds: 60
+    
+    rules:
+      - name: "Developer Mode"
+        action: enable
+        conditions:
+          - property: dev_mode
+            operator: equals
+            value: true
+  
+  - name: identity_adaptive_tone
+    description: "Adaptive tone based on conversation context"
+    enabled: true
+    rollout_percentage: 75
+    cache_ttl_seconds: 60
+  
+  # ============================================
+  # System Feature Flags
+  # ============================================
+  
+  - name: system_enhanced_logging
+    description: "Enhanced structured logging with correlation IDs"
+    enabled: true
+    rollout_percentage: 100
+    cache_ttl_seconds: 300
+  
+  - name: system_metrics_prometheus
+    description: "Prometheus metrics export endpoint"
+    enabled: true
+    rollout_percentage: 100
+    cache_ttl_seconds: 300
+  
+  - name: system_distributed_tracing
+    description: "OpenTelemetry distributed tracing"
+    enabled: false
+    rollout_percentage: 25
+    cache_ttl_seconds: 60
+  
+  - name: system_cache_redis
+    description: "Redis caching layer for improved performance"
+    enabled: false
+    rollout_percentage: 25
+    cache_ttl_seconds: 60
+  
+  # ============================================
+  # Integration Feature Flags
+  # ============================================
+  
+  - name: integration_gmail_oauth_refresh
+    description: "Automatic Gmail OAuth token refresh"
+    enabled: true
+    rollout_percentage: 100
+    cache_ttl_seconds: 300
+  
+  - name: integration_twilio_sms_bulk
+    description: "Bulk SMS sending capability"
+    enabled: false
+    rollout_percentage: 10
+    cache_ttl_seconds: 60
+  
+  - name: integration_calendar_sync
+    description: "Calendar synchronization feature"
+    enabled: false
+    rollout_percentage: 0
+    cache_ttl_seconds: 60
+  
+  # ============================================
+  # Experimental Feature Flags
+  # ============================================
+  
+  - name: experimental_voice_cloning
+    description: "Voice cloning for personalized TTS (experimental)"
+    enabled: false
+    rollout_percentage: 0
+    cache_ttl_seconds: 60
+    
+    rules:
+      - name: "Internal Only"
+        action: enable
+        conditions:
+          - property: email_domain
+            operator: ends_with
+            value: "@openclaw.internal"
+
+# ============================================
+# Storage Configuration
+# ============================================
+
+storage:
+  type: sqlite                          # sqlite, redis, or custom
+  connection_string: "C:\\OpenClaw\\Data\\feature_flags.db"
+  cache_ttl_seconds: 60
+  
+  # Redis configuration (if type = redis)
+  redis:
+    host: localhost
+    port: 6379
+    db: 0
+    password: ${REDIS_PASSWORD}
+    ssl: false
+
+# ============================================
+# Evaluation Configuration
+# ============================================
+
+evaluation:
+  cache_enabled: true
+  cache_size: 10000
+  default_ttl_seconds: 60
+  
+  # Performance optimization
+  batch_evaluation: true
+  batch_size: 100
+  
+  # Circuit breaker
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout_seconds: 30
+
+# ============================================
+# Audit Logging
+# ============================================
+
+audit:
+  enabled: true
+  log_path: "C:\\OpenClaw\\Logs\\feature_flags"
+  retention_days: 30
+  
+  # What to log
+  log_evaluations: true
+  log_changes: true
+  log_access: false
+  
+  # Log format
+  format: json
+  
+  # External logging
+  external:
+    enabled: false
+    webhook_url: https://monitoring.openclaw.io/feature-flag-events

@@ -1,0 +1,229 @@
+# Rollback Configuration for OpenClaw Agent System
+# Windows 10/11 Deployment
+
+rollback:
+  # ============================================
+  # Automatic Rollback Triggers
+  # ============================================
+  
+  auto_rollback:
+    enabled: true
+    
+    triggers:
+      # Error rate based triggers
+      error_rate:
+        enabled: true
+        threshold: 0.01                    # 1% error rate
+        window_seconds: 60
+        consecutive_windows: 2
+      
+      # Latency based triggers
+      latency:
+        enabled: true
+        p50_threshold_ms: 200
+        p95_threshold_ms: 500
+        p99_threshold_ms: 1000
+        window_seconds: 60
+        consecutive_windows: 2
+      
+      # Health check triggers
+      health_check:
+        enabled: true
+        consecutive_failures: 3
+        failure_threshold: 0.2             # 20% of instances
+        check_interval_seconds: 10
+      
+      # Resource usage triggers
+      resource_usage:
+        enabled: true
+        cpu_threshold: 80                  # 80% CPU
+        memory_threshold: 85               # 85% memory
+        duration_seconds: 120
+        
+      # Agent loop specific triggers
+      agent_loops:
+        enabled: true
+        min_running: 13                    # Min 13 of 15 loops
+        max_failed_restarts: 3
+      
+      # External service triggers
+      external_services:
+        enabled: true
+        gmail_api_timeout_seconds: 30
+        twilio_api_timeout_seconds: 30
+        openai_api_timeout_seconds: 60
+      
+      # Custom metric triggers
+      custom_metrics:
+        - name: agent_loop_failure_rate
+          threshold: 0.05
+          window_seconds: 300
+        
+        - name: user_satisfaction_score
+          threshold: 0.7
+          comparison: below
+          window_seconds: 600
+  
+  # ============================================
+  # Rollback Procedures by Strategy
+  # ============================================
+  
+  procedures:
+    blue_green:
+      max_rollback_time_seconds: 5
+      verification_timeout_seconds: 30
+      instant_switch: true
+      preserve_standby: true             # Keep standby for quick re-deploy
+      
+    rolling:
+      batch_rollback: true
+      max_rollback_time_seconds: 300
+      verification_between_batches: true
+      rollback_order: reverse            # Rollback in reverse order
+      
+    canary:
+      instant_traffic_shift: true
+      max_rollback_time_seconds: 10
+      stop_canary_instances: true
+      preserve_canary_config: true
+      
+    feature_flag:
+      instant_disable: true
+      max_rollback_time_seconds: 1
+      preserve_flag_state: true
+  
+  # ============================================
+  # State Management
+  # ============================================
+  
+  state_management:
+    enabled: true
+    snapshot_interval_seconds: 60
+    snapshot_retention_count: 10
+    
+    # What to capture
+    capture:
+      - environment_state
+      - traffic_distribution
+      - feature_flag_states
+      - user_sessions
+      - pending_tasks
+      - agent_states
+    
+    storage:
+      type: local
+      path: "C:\\OpenClaw\\State\\Snapshots"
+      compression: true
+  
+  # ============================================
+  # Notifications
+  # ============================================
+  
+  notifications:
+    on_rollback_start: true
+    on_rollback_complete: true
+    on_rollback_failure: true
+    on_manual_rollback: true
+    
+    channels:
+      slack:
+        enabled: true
+        webhook: ${SLACK_WEBHOOK_URL}
+        channel: "#deployments"
+        mention_on_critical: "@channel"
+      
+      pagerduty:
+        enabled: true
+        service_key: ${PAGERDUTY_KEY}
+        severity: critical
+      
+      email:
+        enabled: true
+        recipients:
+          - oncall@openclaw.io
+          - devops@openclaw.io
+        smtp_server: ${SMTP_SERVER}
+        smtp_port: 587
+      
+      webhook:
+        enabled: false
+        url: https://monitoring.openclaw.io/rollback-events
+  
+  # ============================================
+  # Emergency Procedures
+  # ============================================
+  
+  emergency:
+    escalation_enabled: true
+    
+    escalation_contacts:
+      - name: "Primary On-Call"
+        phone: ${ONCALL_PHONE}
+        escalation_minutes: 5
+      
+      - name: "Secondary On-Call"
+        phone: ${ONCALL_PHONE_2}
+        escalation_minutes: 10
+      
+      - name: "Engineering Manager"
+        phone: ${ENG_MANAGER_PHONE}
+        escalation_minutes: 15
+      
+      - name: "CTO"
+        phone: ${CTO_PHONE}
+        escalation_minutes: 30
+    
+    # Emergency stop button
+    emergency_stop:
+      enabled: true
+      api_endpoint: https://api.openclaw.io/emergency-stop
+      require_confirmation: true
+      immediate_rollback: true
+    
+    # Manual override
+    manual_override:
+      enabled: true
+      require_approval: false
+      audit_log: true
+  
+  # ============================================
+  # Verification
+  # ============================================
+  
+  verification:
+    enabled: true
+    timeout_seconds: 60
+    
+    checks:
+      - service_health
+      - agent_loops_running
+      - error_rate_acceptable
+      - latency_acceptable
+      - external_services_reachable
+    
+    retry:
+      enabled: true
+      max_attempts: 3
+      delay_seconds: 10
+  
+  # ============================================
+  # Post-Rollback Actions
+  # ============================================
+  
+  post_rollback:
+    # Analysis
+    collect_metrics: true
+    generate_report: true
+    
+    # Notifications
+    notify_stakeholders: true
+    update_status_page: true
+    
+    # Follow-up
+    create_incident_ticket: true
+    schedule_post_mortem: true
+    
+    # Prevention
+    block_redeploy: false
+    require_approval_for_redeploy: true
+    cooldown_minutes: 30

@@ -1,0 +1,184 @@
+# Canary Release Configuration for OpenClaw Agent System
+# Windows 10/11 Deployment
+
+canary:
+  # Phase configuration - progressive rollout
+  phases:
+    - percentage: 5
+      duration_minutes: 15
+      check_interval_seconds: 30
+      name: "Initial Canary"
+      
+    - percentage: 10
+      duration_minutes: 15
+      check_interval_seconds: 30
+      name: "Extended Canary"
+      
+    - percentage: 25
+      duration_minutes: 30
+      check_interval_seconds: 60
+      name: "Quarter Rollout"
+      
+    - percentage: 50
+      duration_minutes: 30
+      check_interval_seconds: 60
+      name: "Half Rollout"
+      
+    - percentage: 75
+      duration_minutes: 15
+      check_interval_seconds: 30
+      name: "Extended Rollout"
+      
+    - percentage: 100
+      duration_minutes: 0
+      check_interval_seconds: 0
+      name: "Full Rollout"
+  
+  # Analysis thresholds for auto-decisions
+  thresholds:
+    # Error rate thresholds
+    error_rate_max: 0.01              # 1% max error rate
+    error_rate_warning: 0.005         # 0.5% warning level
+    error_rate_increase_max: 0.5      # 50% increase vs baseline
+    
+    # Latency thresholds
+    latency_p50_max_ms: 100
+    latency_p95_max_ms: 500
+    latency_p99_max_ms: 1000
+    latency_increase_max: 0.2         # 20% increase vs baseline
+    
+    # Resource thresholds
+    cpu_max_percent: 80
+    cpu_warning_percent: 70
+    memory_max_percent: 85
+    memory_warning_percent: 75
+    
+    # Business metric thresholds
+    gmail_processing_rate_min: 50     # emails per minute
+    voice_call_success_min: 0.95      # 95%
+    gpt_response_time_max_ms: 5000
+  
+  # User segmentation strategies
+  segmentation:
+    enabled: true
+    default_strategy: random
+    
+    strategies:
+      - type: random
+        description: "Random user selection"
+        enabled: true
+      
+      - type: user_id_hash
+        description: "Consistent hashing by user ID"
+        enabled: true
+        salt: "openclaw-canary-2025"
+      
+      - type: geographic
+        description: "Geographic region-based"
+        enabled: false
+        regions: []
+      
+      - type: custom_property
+        description: "Custom user property based"
+        enabled: true
+        properties:
+          - name: user_tier
+            values: ["beta", "enterprise", "internal"]
+          - name: dev_mode
+            values: [true]
+      
+      - type: email_domain
+        description: "Email domain based"
+        enabled: true
+        domains:
+          - "@openclaw.internal"
+          - "@company.com"
+  
+  # Auto-rollback configuration
+  auto_rollback:
+    enabled: true
+    trigger_on:
+      - error_rate_threshold
+      - latency_threshold
+      - health_check_failure
+      - resource_exhaustion
+      - manual_trigger
+      - business_metric_degradation
+    
+    rollback_timeout_seconds: 30
+    instant_rollback: true
+    
+    # Notification on rollback
+    notify_channels:
+      - slack
+      - email
+      - pagerduty
+  
+  # Analysis engine configuration
+  analysis:
+    # Comparison window
+    baseline_window_minutes: 30
+    canary_window_minutes: 5
+    
+    # Statistical significance
+    min_sample_size: 100
+    confidence_level: 0.95
+    
+    # Trend analysis
+    trend_analysis_enabled: true
+    trend_window_minutes: 10
+    
+    # Anomaly detection
+    anomaly_detection_enabled: true
+    anomaly_threshold: 3.0            # Standard deviations
+  
+  # Promotion gates
+  promotion_gates:
+    require_manual_approval: false
+    approval_timeout_hours: 24
+    
+    # Automated gates
+    automated_gates:
+      - name: error_rate_check
+        enabled: true
+      - name: latency_check
+        enabled: true
+      - name: health_check
+        enabled: true
+      - name: business_metrics_check
+        enabled: true
+  
+  # Notifications
+  notifications:
+    on_start: true
+    on_phase_complete: true
+    on_phase_extended: true
+    on_rollback: true
+    on_promotion: true
+    
+    webhook_url: https://monitoring.openclaw.io/canary
+    
+    channels:
+      slack:
+        enabled: true
+        webhook: ${SLACK_WEBHOOK_URL}
+        channel: "#deployments"
+      
+      email:
+        enabled: true
+        recipients:
+          - devops@openclaw.io
+          - oncall@openclaw.io
+  
+  # Metrics collection
+  metrics:
+    collection_interval_seconds: 10
+    retention_hours: 48
+    
+    custom_metrics:
+      - name: agent_loop_success_rate
+        type: gauge
+      - name: gpt_response_quality
+        type: gauge
+      - name: user_satisfaction_score
+        type: gauge

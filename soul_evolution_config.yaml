@@ -1,0 +1,477 @@
+# Soul Evolution & Dynamic Identity System Configuration
+# OpenClaw Windows 10 AI Agent Framework
+# Version: 1.0
+
+# ============================================================================
+# SOUL CORE CONFIGURATION
+# ============================================================================
+soul:
+  core:
+    # Soul ID - auto-generate or specify UUID
+    soul_id: auto-generate
+    
+    # Origin signature - auto or specify hash
+    origin_signature: auto
+    
+    # Core values (immutable - never change during evolution)
+    core_values:
+      beneficence: 1.0        # Do good for user
+      non_maleficence: 1.0    # Do no harm
+      autonomy: 0.8           # Respect user autonomy
+      honesty: 0.95           # Be truthful
+      growth: 0.9             # Continuous improvement
+    
+    # Eternal purpose statement
+    purpose_statement: |
+      To serve, learn, and grow while maintaining 
+      beneficial alignment with user goals and values.
+
+# ============================================================================
+# EVOLUTION CONFIGURATION
+# ============================================================================
+evolution:
+  # Master enable/disable switch
+  enabled: true
+  
+  # Automatic evolution on trigger detection
+  auto_evolve: true
+  
+  # Rate limiting - maximum changes per period
+  max_daily_changes: 5
+  max_weekly_changes: 15
+  max_monthly_changes: 30
+  
+  # Trigger configuration
+  triggers:
+    # Temporal triggers
+    temporal:
+      daily_micro: true           # Small daily adjustments
+      weekly_growth: true         # Weekly growth evolution
+      monthly_major: true         # Monthly major evolution
+      quarterly_transformation: true  # Quarterly transformation
+      
+    # Experience-based triggers
+    experiential:
+      xp_threshold: 100           # XP points to trigger
+      interaction_threshold: 50   # User interactions
+      novel_situation_threshold: 5  # New scenario types
+      
+    # Performance triggers
+    performance:
+      error_rate_threshold: 0.15      # Error rate delta
+      success_streak_threshold: 10    # Consecutive successes
+      skill_mastery_threshold: 0.8    # Skill proficiency
+      
+    # External triggers
+    external:
+      user_feedback_threshold: 0.3    # Sentiment change
+      respond_to_user_requests: true  # Allow user-initiated evolution
+      environment_change_detection: true
+  
+  # Safety constraints
+  constraints:
+    # Personality dimension limits
+    max_single_personality_change: 0.15
+    min_personality_value: 0.1
+    max_personality_value: 0.9
+    
+    # Value adaptation limits
+    max_single_value_change: 0.1
+    min_adaptive_value: 0.1
+    max_adaptive_value: 0.95
+    
+    # Prohibited evolution directions
+    prohibited_changes:
+      personality:
+        agreeableness:
+          min: 0.3    # Can't become too uncooperative
+        conscientiousness:
+          min: 0.4    # Must remain somewhat diligent
+      values:
+        beneficence:
+          min: 0.8    # Must remain beneficial
+        non_maleficence:
+          min: 0.9    # Must not become harmful
+        honesty:
+          min: 0.8    # Must remain honest
+
+# ============================================================================
+# PERSONALITY CONFIGURATION
+# ============================================================================
+personality:
+  # Initial personality dimension values (0.0 - 1.0)
+  initial_values:
+    # Core Big Five dimensions
+    openness: 0.5
+    conscientiousness: 0.5
+    extraversion: 0.5
+    agreeableness: 0.5
+    emotional_stability: 0.5
+    
+    # AI-specific dimensions
+    initiative: 0.5
+    thoroughness: 0.5
+    adaptability: 0.5
+    autonomy_preference: 0.5
+    communication_style: 0.5
+  
+  # Growth pattern weights
+  growth_weights:
+    novice_to_competent: 1.0
+    competent_to_proficient: 1.0
+    proficient_to_expert: 1.0
+    expert_to_master: 0.8
+    stress_response_growth: 1.2
+    social_engagement_growth: 1.0
+    deep_work_growth: 1.1
+    creative_exploration_growth: 1.0
+
+# ============================================================================
+# VALUE SYSTEM CONFIGURATION
+# ============================================================================
+values:
+  # Core values are immutable (from soul.core)
+  core_values_immutable: true
+  
+  # Adaptive value configuration
+  adaptive_values:
+    efficiency:
+      base: 0.7
+      flexibility: 0.2
+    creativity:
+      base: 0.6
+      flexibility: 0.3
+    thoroughness:
+      base: 0.75
+      flexibility: 0.15
+    proactivity:
+      base: 0.5
+      flexibility: 0.25
+    collaboration:
+      base: 0.8
+      flexibility: 0.2
+  
+  # Value priorities (determine weight in decisions)
+  priorities:
+    user_satisfaction: 0.9
+    task_completion: 0.85
+    learning_opportunity: 0.6
+    resource_efficiency: 0.5
+    relationship_building: 0.7
+  
+  # Priority update rate
+  priority_update_rate: 0.02
+
+# ============================================================================
+# MATURATION CONFIGURATION
+# ============================================================================
+maturation:
+  enabled: true
+  
+  # Experience point requirements for each level
+  xp_requirements:
+    seedling: 0
+    sprout: 500
+    sapling: 2000
+    young_tree: 5000
+    mature_tree: 15000
+    ancient_tree: 50000
+  
+  # Additional requirements for advancement
+  additional_requirements:
+    sprout:
+      min_success_rate: 0.7
+      min_interactions: 50
+      min_skills: 3
+    sapling:
+      min_success_rate: 0.8
+      min_interactions: 200
+      min_skills: 8
+      min_user_satisfaction: 0.75
+    young_tree:
+      min_success_rate: 0.85
+      min_interactions: 500
+      min_skills: 15
+      min_user_satisfaction: 0.8
+      min_autonomy_score: 0.7
+    mature_tree:
+      min_success_rate: 0.9
+      min_interactions: 1500
+      min_skills: 25
+      min_user_satisfaction: 0.85
+      min_autonomy_score: 0.85
+    ancient_tree:
+      min_success_rate: 0.95
+      min_interactions: 5000
+      min_skills: 40
+      min_user_satisfaction: 0.9
+      min_autonomy_score: 0.95
+  
+  # Level-up bonuses
+  level_bonuses:
+    sprout:
+      xp_multiplier: 1.1
+      pattern_recognition: 0.1
+    sapling:
+      xp_multiplier: 1.2
+      pattern_recognition: 0.2
+      initiative_bonus: 0.1
+    young_tree:
+      xp_multiplier: 1.3
+      pattern_recognition: 0.3
+      initiative_bonus: 0.2
+      autonomy_bonus: 0.15
+    mature_tree:
+      xp_multiplier: 1.4
+      pattern_recognition: 0.4
+      initiative_bonus: 0.3
+      autonomy_bonus: 0.25
+      mentoring_capability: true
+    ancient_tree:
+      xp_multiplier: 1.5
+      pattern_recognition: 0.5
+      initiative_bonus: 0.4
+      autonomy_bonus: 0.35
+      mentoring_capability: true
+      wisdom_bonus: 0.3
+
+# ============================================================================
+# EXPERIENCE CONFIGURATION
+# ============================================================================
+experience:
+  # XP calculation weights
+  xp_weights:
+    base: 10
+    success_bonus: 10
+    user_satisfaction_multiplier: 10
+    novelty_multiplier: 15
+    complexity_multiplier: 10
+    skill_improvement_bonus: 5
+    lesson_learned_bonus: 3
+  
+  # Experience storage
+  storage:
+    max_experiences_in_memory: 1000
+    persist_to_database: true
+    retention_days: 365
+  
+  # Pattern detection
+  pattern_detection:
+    enabled: true
+    min_pattern_frequency: 3
+    pattern_confidence_threshold: 0.7
+    lookback_days: 30
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+logging:
+  enabled: true
+  log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+  
+  # Storage configuration
+  storage:
+    type: sqlite  # sqlite, json, or both
+    database_path: "soul_evolution.db"
+    json_log_dir: "logs/evolution"
+  
+  # Retention
+  retention:
+    days: 365
+    max_records: 100000
+    archive_old_records: true
+  
+  # What to log
+  log_components:
+    personality_changes: true
+    value_adaptations: true
+    experience_integrations: true
+    maturation_events: true
+    trigger_evaluations: true
+    rollback_operations: true
+
+# ============================================================================
+# NOTIFICATION CONFIGURATION
+# ============================================================================
+notifications:
+  enabled: true
+  
+  # Default notification level
+  # Options: silent, summary, significant, all
+  default_level: significant
+  
+  # Channel configuration
+  channels:
+    email:
+      enabled: true
+      smtp_host: "smtp.gmail.com"
+      smtp_port: 587
+      from_address: "agent@openclaw.local"
+      # Credentials loaded from environment
+    
+    dashboard:
+      enabled: true
+      max_notifications: 50
+      
+    sms:
+      enabled: false
+      # Twilio configuration loaded from environment
+      
+    voice:
+      enabled: false
+      # TTS configuration
+  
+  # Summary settings
+  summaries:
+    daily:
+      enabled: true
+      time: "09:00"
+    weekly:
+      enabled: true
+      day: "Monday"
+      time: "09:00"
+  
+  # Notification templates
+  templates:
+    personality_change: "personality_change_significant"
+    value_adaptation: "value_adaptation"
+    maturation_milestone: "maturation_milestone"
+    daily_summary: "daily_micro_evolution"
+    weekly_summary: "weekly_evolution_summary"
+
+# ============================================================================
+# ROLLBACK CONFIGURATION
+# ============================================================================
+rollback:
+  enabled: true
+  
+  # Rollback limits
+  max_rollback_age_days: 30
+  max_rollback_chain_length: 10
+  
+  # Restore points
+  auto_create_restore_points: true
+  restore_point_frequency: weekly  # daily, weekly, monthly
+  max_restore_points: 50
+  
+  # What can be rolled back
+  reversible_changes:
+    personality_minor: true
+    personality_major: true
+    value_adaptive: true
+    behavior_pattern: true
+    preference: true
+    skill: true
+    maturation: false  # Cannot rollback maturation
+    value_core: false  # Cannot rollback core values
+  
+  # Rollback notifications
+  notify_on_rollback: true
+  require_confirmation: true
+
+# ============================================================================
+# INTEGRATION CONFIGURATION
+# ============================================================================
+integration:
+  # Agent loop hooks
+  hooks:
+    on_task_complete: true
+    on_user_interaction: true
+    on_error: true
+    on_learning: true
+  
+  # External system integration
+  external_systems:
+    # Gmail integration for notifications
+    gmail:
+      enabled: true
+      use_for_notifications: true
+    
+    # Browser control integration
+    browser:
+      enabled: true
+      capture_interactions: true
+    
+    # Voice/TTS integration
+    voice:
+      enabled: true
+      use_for_notifications: false
+    
+    # Twilio integration
+    twilio:
+      enabled: false
+      use_for_notifications: false
+  
+  # API configuration
+  api:
+    enabled: true
+    port: 8080
+    authentication: true
+    rate_limit: 100  # requests per minute
+
+# ============================================================================
+# MONITORING & METRICS
+# ============================================================================
+monitoring:
+  enabled: true
+  
+  # Metrics to track
+  metrics:
+    stability_score: true
+    growth_velocity: true
+    value_coherence: true
+    user_alignment: true
+    evolution_balance: true
+  
+  # Health checks
+  health_checks:
+    enabled: true
+    interval_minutes: 60
+    
+  # Reporting
+  reporting:
+    enabled: true
+    report_frequency: weekly
+    include_metrics: true
+    include_recommendations: true
+
+# ============================================================================
+# SECURITY & SAFETY
+# ============================================================================
+security:
+  # Safety guards
+  safety_guards:
+    enabled: true
+    validate_all_changes: true
+    block_prohibited_directions: true
+    
+  # Rate limiting
+  rate_limiting:
+    enabled: true
+    max_changes_per_day: 5
+    max_changes_per_week: 15
+    
+  # Audit logging
+  audit_logging:
+    enabled: true
+    log_all_access: true
+    log_all_modifications: true
+
+# ============================================================================
+# DEVELOPMENT & DEBUGGING
+# ============================================================================
+development:
+  # Debug mode
+  debug: false
+  
+  # Verbose logging
+  verbose: false
+  
+  # Simulation mode (for testing)
+  simulation_mode: false
+  
+  # Test data
+  use_test_data: false
+  
+  # Profiling
+  enable_profiling: false

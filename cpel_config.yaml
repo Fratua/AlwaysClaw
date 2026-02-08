@@ -1,0 +1,346 @@
+# Context Prompt Engineering Loop Configuration
+# Windows 10 OpenClaw-Inspired AI Agent System
+
+context_prompt_engineering_loop:
+  # ===========================================================================
+  # PERFORMANCE TRACKING SETTINGS
+  # ===========================================================================
+  performance:
+    # How often to collect metrics (seconds)
+    collection_interval: 60
+    
+    # Time windows for aggregation
+    aggregation_windows: ['1h', '6h', '24h', '7d', '30d']
+    
+    # How long to retain raw metrics (days)
+    retention_days: 90
+    
+    # Minimum samples before optimization triggers
+    min_samples_for_optimization: 100
+    
+    # Performance degradation threshold for auto-rollback (0-1)
+    degradation_threshold: 0.15
+    
+    # Enable real-time performance monitoring
+    enable_realtime_monitoring: true
+    
+  # ===========================================================================
+  # OPTIMIZATION SETTINGS
+  # ===========================================================================
+  optimization:
+    # Enable automatic optimization
+    auto_optimize: true
+    
+    # How often to run optimization (seconds)
+    optimization_interval: 3600
+    
+    # Minimum improvement threshold to accept optimization (0-1)
+    improvement_threshold: 0.05
+    
+    # Maximum number of optimization iterations per cycle
+    max_optimization_iterations: 5
+    
+    # Optimization strategies to apply (in order of priority)
+    strategies:
+      - clarity_enhancement
+      - specificity_boost
+      - example_optimization
+      - format_optimization
+      - constraint_refinement
+      
+    # Enable multi-strategy optimization
+    enable_multi_strategy: true
+    
+  # ===========================================================================
+  # A/B TESTING SETTINGS
+  # ===========================================================================
+  ab_testing:
+    # Default confidence level for statistical tests
+    default_confidence_level: 0.95
+    
+    # Minimum sample size per variant
+    min_sample_size: 500
+    
+    # Maximum test duration (days)
+    max_test_duration_days: 14
+    
+    # Enable multi-armed bandit for dynamic allocation
+    enable_bandit: true
+    
+    # Exploration rate for bandit (0-1)
+    exploration_rate: 0.1
+    
+    # Traffic allocation strategy: 'equal', 'performance_based', 'bandit'
+    allocation_strategy: 'bandit'
+    
+    # Auto-promote winning variant
+    auto_promote_winner: true
+    
+    # Minimum effect size to declare winner (0-1)
+    min_effect_size: 0.05
+    
+  # ===========================================================================
+  # CONTEXT DETECTION SETTINGS
+  # ===========================================================================
+  context_detection:
+    # Enable context detection
+    enabled: true
+    
+    # Complexity thresholds
+    complexity:
+      high_threshold: 0.8
+      low_threshold: 0.3
+      
+    # Urgency thresholds
+    urgency:
+      high_threshold: 0.7
+      medium_threshold: 0.4
+      
+    # Emotional tone detection
+    detect_emotional_tone: true
+    
+    # Domain detection
+    detect_domain: true
+    
+    # Conversation depth tracking
+    track_conversation_depth: true
+    
+  # ===========================================================================
+  # DYNAMIC ASSEMBLY SETTINGS
+  # ===========================================================================
+  assembly:
+    # Default assembly strategy
+    default_strategy: 'adaptive'
+    
+    # Available strategies
+    strategies:
+      - standard
+      - minimal
+      - comprehensive
+      - adaptive
+      
+    # Maximum prompt tokens
+    max_prompt_tokens: 4000
+    
+    # Token budget for context injection
+    context_token_budget: 2000
+    
+    # Token budget for few-shot examples
+    examples_token_budget: 1000
+    
+    # Enable variable resolution
+    enable_variable_resolution: true
+    
+    # Enable component prioritization
+    enable_prioritization: true
+    
+  # ===========================================================================
+  # FEW-SHOT EXAMPLE SELECTION SETTINGS
+  # ===========================================================================
+  example_selection:
+    # Default selection method
+    default_method: 'hybrid'
+    
+    # Available methods
+    methods:
+      - similarity      # Semantic similarity to query
+      - diversity       # Maximize diversity
+      - success         # Prioritize high success rate
+      - hybrid          # Combine multiple criteria
+      - lfm             # Learn from Mistakes
+      - lfnn            # Learn from Nearest Neighbors
+      - combined_method1
+      - combined_method2
+      - combined_method3
+      
+    # Maximum number of examples to include
+    max_examples: 5
+    
+    # Minimum similarity threshold (0-1)
+    min_similarity_threshold: 0.7
+    
+    # Enable example quality scoring
+    enable_quality_scoring: true
+    
+    # Example database settings
+    database:
+      max_examples_per_task: 100
+      min_success_rate: 0.6
+      
+  # ===========================================================================
+  # VERSION CONTROL SETTINGS
+  # ===========================================================================
+  versioning:
+    # Auto-commit on template change
+    auto_commit_on_change: true
+    
+    # Maximum versions per prompt
+    max_versions_per_prompt: 100
+    
+    # Auto-rollback on performance degradation
+    auto_rollback_on_degradation: true
+    
+    # Degradation threshold for auto-rollback (0-1)
+    degradation_threshold: 0.15
+    
+    # Enable branching
+    enable_branching: true
+    
+    # Enable merging
+    enable_merging: true
+    
+    # Semantic versioning scheme
+    versioning_scheme: 'semantic'
+    
+  # ===========================================================================
+  # METRICS AND EVALUATION SETTINGS
+  # ===========================================================================
+  metrics:
+    # Quality metrics
+    quality_dimensions:
+      - accuracy
+      - relevance
+      - completeness
+      - coherence
+      - helpfulness
+      - factual_correctness
+      
+    # Efficiency metrics
+    efficiency_dimensions:
+      - token_efficiency
+      - response_latency
+      - cost_per_request
+      - time_to_first_token
+      
+    # User satisfaction metrics
+    satisfaction_dimensions:
+      - explicit_rating
+      - implicit_satisfaction
+      - retry_rate
+      - correction_rate
+      - follow_up_question_rate
+      
+    # Robustness metrics
+    robustness_dimensions:
+      - consistency_score
+      - edge_case_handling
+      - error_recovery_rate
+      - context_adherence
+      
+    # Enable automated quality evaluation
+    enable_auto_evaluation: true
+    
+    # Enable correlation analysis
+    enable_correlation_analysis: true
+    
+  # ===========================================================================
+  # SYSTEM INTEGRATION SETTINGS
+  # ===========================================================================
+  integration:
+    # Heartbeat loop integration
+    heartbeat:
+      enabled: true
+      report_interval: 300  # seconds
+      
+    # Soul loop integration
+    soul:
+      enabled: true
+      contribute_to_personality: true
+      
+    # Identity loop integration
+    identity:
+      enabled: true
+      maintain_consistency: true
+      
+    # User loop integration
+    user:
+      enabled: true
+      adapt_to_preferences: true
+      
+    # Task loops integration
+    task_loops:
+      enabled: true
+      optimize_per_task_type: true
+      
+  # ===========================================================================
+  # WINDOWS 10 SPECIFIC SETTINGS
+  # ===========================================================================
+  windows_10:
+    # Enable Windows-specific optimizations
+    enabled: true
+    
+    # File system integration
+    file_system:
+      prompt_storage_path: "%LOCALAPPDATA%/OpenClaw/prompts"
+      metrics_storage_path: "%LOCALAPPDATA%/OpenClaw/metrics"
+      
+    # Process integration
+    process:
+      enable_background_optimization: true
+      optimization_process_priority: 'below_normal'
+      
+    # Service integration
+    service:
+      register_as_service: true
+      service_name: 'OpenClawCPEL'
+      
+  # ===========================================================================
+  # GPT-5.2 SPECIFIC SETTINGS
+  # ===========================================================================
+  gpt52:
+    # Enable extra high thinking capability
+    use_extra_high_thinking: true
+    
+    # Thinking budget for optimization
+    optimization_thinking_budget: 10000
+    
+    # Quality evaluation thinking budget
+    evaluation_thinking_budget: 5000
+    
+    # Context window utilization
+    max_context_utilization: 0.8
+    
+  # ===========================================================================
+  # LOGGING SETTINGS
+  # ===========================================================================
+  logging:
+    level: 'INFO'
+    
+    # Log to file
+    file_logging: true
+    log_file_path: '%LOCALAPPDATA%/OpenClaw/logs/cpel.log'
+    
+    # Log rotation
+    max_log_size_mb: 100
+    max_log_files: 10
+    
+    # Structured logging
+    structured_logging: true
+    
+  # ===========================================================================
+  # ALERTING SETTINGS
+  # ===========================================================================
+  alerting:
+    enabled: true
+    
+    # Alert conditions
+    conditions:
+      performance_degradation:
+        enabled: true
+        threshold: 0.15
+        
+      optimization_complete:
+        enabled: true
+        
+      ab_test_complete:
+        enabled: true
+        
+      rollback_executed:
+        enabled: true
+        
+    # Alert channels
+    channels:
+      - console
+      - file
+      # - webhook
+      # - email

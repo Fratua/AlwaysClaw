@@ -1,0 +1,225 @@
+# Research Loop Configuration
+# OpenClaw-Inspired AI Agent System - Windows 10 Edition
+
+research_loop:
+  enabled: true
+  poll_interval: 30  # seconds between trigger checks
+  
+  # Trigger Configuration
+  triggers:
+    enabled: true
+    
+    # Scheduled Research Tasks
+    schedules:
+      morning_briefing:
+        cron: "0 8 * * *"  # 8 AM daily
+        topics:
+          - tech_news
+          - market_updates
+          - weather
+        depth: shallow
+        sources:
+          - news_api
+          - rss_feeds
+        enabled: true
+      
+      weekly_research:
+        cron: "0 10 * * 1"  # Monday 10 AM
+        topics:
+          - emerging_tech
+          - industry_trends
+        depth: deep
+        sources:
+          - all
+        enabled: true
+      
+      hourly_check:
+        cron: "0 * * * *"  # Every hour
+        topics:
+          - alerts
+          - notifications
+        depth: surface
+        sources:
+          - priority_feeds
+        enabled: true
+      
+      continuous_learning:
+        cron: "*/30 * * * *"  # Every 30 minutes
+        topics:
+          - user_interests
+          - knowledge_gaps
+        depth: adaptive
+        sources:
+          - dynamic
+        enabled: true
+    
+    # Event-Driven Triggers
+    immediate_events:
+      - unknown_topic
+      - user_request
+      - contradiction_detected
+      - news_alert
+    
+    deferred_events:
+      - outdated_info
+      - memory_gap
+      - trending_topic
+    
+    # Curiosity Engine
+    min_curiosity_score: 0.7
+    max_daily_tasks: 10
+  
+  # Search Configuration
+  search:
+    engines:
+      - google
+      - bing
+      - duckduckgo
+    
+    results_per_engine: 10
+    max_query_variants: 5
+    request_timeout: 30
+    retry_attempts: 3
+    user_agent: "OpenClaw Research Bot 1.0"
+  
+  # Crawling Configuration
+  crawling:
+    max_concurrent: 5
+    timeout_seconds: 30
+    respect_robots_txt: true
+    follow_redirects: true
+    max_redirects: 5
+    request_delay: 0.5  # seconds between requests
+  
+  # Synthesis Configuration
+  synthesis:
+    model: gpt-5.2
+    thinking_mode: high
+    max_tokens: 4000
+    temperature: 0.3
+    summary_levels:
+      - ultra_brief
+      - brief
+      - standard
+      - detailed
+      - comprehensive
+  
+  # Memory Configuration
+  memory:
+    memory_file: "MEMORY.md"
+    knowledge_graph: "knowledge_graph.json"
+    citation_db: "citations.json"
+    reliability_db: "source_reliability.json"
+    auto_backup: true
+    backup_interval: daily
+    backup_retention_days: 30
+    max_entry_size: 10000  # characters
+  
+  # Research Depth Levels
+  depth_levels:
+    surface:
+      max_sources: 3
+      max_depth: 1
+      max_pages_per_source: 1
+      synthesis_detail: brief
+      time_budget_seconds: 60
+      query_variants: 2
+    
+    shallow:
+      max_sources: 5
+      max_depth: 1
+      max_pages_per_source: 2
+      synthesis_detail: standard
+      time_budget_seconds: 180
+      query_variants: 3
+    
+    medium:
+      max_sources: 10
+      max_depth: 2
+      max_pages_per_source: 3
+      synthesis_detail: detailed
+      time_budget_seconds: 600
+      query_variants: 5
+    
+    deep:
+      max_sources: 20
+      max_depth: 3
+      max_pages_per_source: 5
+      synthesis_detail: comprehensive
+      time_budget_seconds: 1800
+      query_variants: 8
+    
+    exhaustive:
+      max_sources: 50
+      max_depth: 5
+      max_pages_per_source: 10
+      synthesis_detail: comprehensive
+      time_budget_seconds: 3600
+      query_variants: 15
+  
+  # Security Configuration
+  security:
+    blocked_domains:
+      - malware
+      - phishing
+      - spam
+      - adult
+      - gambling
+      - illegal
+    
+    blocked_extensions:
+      - .exe
+      - .dll
+      - .bat
+      - .sh
+      - .bin
+      - .zip
+      - .rar
+    
+    respect_robots_txt: true
+    respect_noindex: true
+    anonymize_requests: true
+    no_personal_data_extraction: true
+    secure_storage: true
+    max_content_size: 10485760  # 10MB
+  
+  # Logging Configuration
+  logging:
+    level: INFO
+    file: research_loop.log
+    max_size: 10485760  # 10MB
+    backup_count: 5
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # Performance Configuration
+  performance:
+    max_concurrent_tasks: 5
+    task_queue_size: 100
+    cache_enabled: true
+    cache_ttl_seconds: 3600
+    memory_limit_mb: 512
+
+# Search Engine API Keys (populate from environment variables)
+api_keys:
+  google_search: ${GOOGLE_SEARCH_API_KEY}
+  bing_search: ${BING_SEARCH_API_KEY}
+  google_scholar: ${GOOGLE_SCHOLAR_API_KEY}
+
+# Integration Settings
+integrations:
+  # Windows Task Scheduler for scheduled research
+  windows_task_scheduler:
+    enabled: true
+    task_prefix: "OpenClaw_Research_"
+  
+  # Browser automation
+  browser:
+    enabled: true
+    headless: true
+    timeout: 30
+  
+  # Notification settings
+  notifications:
+    on_completion: true
+    on_failure: true
+    windows_toast: true

@@ -1,0 +1,339 @@
+# Self-Learning Loop Configuration
+# OpenClaw Windows 10 AI Agent System
+# Continuous Learning with Knowledge Consolidation
+
+learning:
+  # ==========================================================================
+  # CONTINUOUS LEARNING SETTINGS
+  # ==========================================================================
+  continuous_learning:
+    enabled: true
+    experience_buffer_size: 10000
+    batch_size: 32
+    processing_interval_minutes: 15
+    max_processing_time_seconds: 300
+    
+  # ==========================================================================
+  # FORGETTING PREVENTION
+  # ==========================================================================
+  forgetting_prevention:
+    # Elastic Weight Consolidation (EWC)
+    ewc:
+      enabled: true
+      lambda: 1000                    # EWC regularization strength
+      importance_threshold: 0.7       # Threshold for parameter importance
+      compute_fisher_every_n: 100     # Compute Fisher Information every N experiences
+    
+    # Knowledge Distillation
+    knowledge_distillation:
+      enabled: true
+      temperature: 2.0                # Softmax temperature for distillation
+      max_snapshots: 5                # Maximum teacher snapshots to maintain
+      distillation_weight: 0.3        # Weight for soft targets (0-1)
+      snapshot_performance_threshold: 0.85  # Performance threshold for snapshot
+    
+    # Memory Replay
+    memory_replay:
+      enabled: true
+      buffer_size: 10000              # Episodic memory buffer size
+      replay_ratio: 0.3               # Ratio of replay samples in batch
+      prioritization_alpha: 0.6       # Prioritization exponent (0=uniform, 1=full)
+      beta_start: 0.4                 # Importance sampling annealing start
+      beta_end: 1.0                   # Importance sampling annealing end
+    
+    # Synaptic Consolidation
+    synaptic_consolidation:
+      enabled: true
+      consolidation_threshold: 0.8    # Threshold for tagging critical synapses
+      protection_strength: 0.9        # Protection strength for consolidated synapses
+      consolidation_rate_per_hour: 0.1  # Consolidation progress per hour of idle
+  
+  # ==========================================================================
+  # KNOWLEDGE CONSOLIDATION
+  # ==========================================================================
+  consolidation:
+    enabled: true
+    idle_threshold_minutes: 15        # Minutes of idle before consolidation
+    max_consolidation_window_hours: 4  # Maximum consolidation window
+    min_consolidation_window_minutes: 10  # Minimum consolidation window
+    
+    # Phase durations (must sum to 1.0)
+    phase_durations:
+      replay: 0.25                    # Reactivate recent experiences
+      integration: 0.30               # Merge related knowledge
+      generalization: 0.25            # Extract patterns and create skills
+      indexing: 0.20                  # Optimize retrieval structures
+    
+    # Replay phase settings
+    replay:
+      lookback_hours: 24              # Hours of experiences to replay
+      min_importance: 0.5             # Minimum importance for replay
+      reactivation_strength: 0.8      # Strength of memory reactivation
+    
+    # Integration phase settings
+    integration:
+      similarity_threshold: 0.7       # Threshold for knowledge merging
+      conflict_resolution: "weighted_average"  # Conflict resolution strategy
+      max_merge_candidates: 10        # Maximum candidates for merging
+    
+    # Generalization phase settings
+    generalization:
+      min_pattern_frequency: 3        # Minimum occurrences for pattern
+      abstraction_depth: 2            # Depth of abstraction hierarchy
+      skill_creation_threshold: 0.75  # Confidence threshold for skill creation
+    
+    # Indexing phase settings
+    indexing:
+      embedding_update_batch: 100     # Batch size for embedding updates
+      index_rebuild_frequency: "weekly"  # How often to rebuild indices
+      compression_ratio: 0.1          # Target compression ratio
+  
+  # ==========================================================================
+  # SPACED REPETITION
+  # ==========================================================================
+  spaced_repetition:
+    enabled: true
+    base_intervals: [1, 3, 7, 14, 30, 60, 120]  # Days between reviews
+    easiness_factor_default: 2.5
+    min_easiness_factor: 1.3
+    max_easiness_factor: 5.0
+    target_retention: 0.9             # Target retention rate
+    
+    # Review session settings
+    review_sessions:
+      max_per_day: 20                 # Maximum reviews per day
+      session_duration_minutes: 30    # Duration of review session
+      critical_priority_threshold: 0.6  # Retention threshold for critical priority
+    
+    # Performance thresholds
+    performance:
+      excellent: 0.9                  # Performance for interval increase
+      good: 0.75                      # Performance for slight increase
+      pass: 0.6                       # Minimum passing performance
+      fail: 0.6                       # Below this, reset interval
+  
+  # ==========================================================================
+  # TRANSFER LEARNING
+  # ==========================================================================
+  transfer_learning:
+    enabled: true
+    similarity_threshold: 0.5         # Minimum similarity for transfer
+    transfer_weight: 0.8              # Weight for transferred knowledge
+    
+    # Domain adaptation
+    domain_adaptation:
+      embedding_dim: 256              # Dimension of domain embeddings
+      similarity_metric: "cosine"     # Similarity metric for domains
+      structural_similarity_weight: 0.3  # Weight for structural similarity
+    
+    # Meta-learning
+    meta_learning:
+      enabled: true
+      adaptation_iterations: 5        # Iterations for rapid adaptation
+      meta_learning_rate: 0.001       # Meta-learning rate
+      task_buffer_size: 100           # Buffer size for meta-learning tasks
+  
+  # ==========================================================================
+  # LEARNING RATE ADAPTATION
+  # ==========================================================================
+  learning_rate:
+    base: 0.001
+    min: 0.00001
+    max: 0.1
+    adaptation_strategy: "adaptive"   # Options: fixed, decay, adaptive
+    
+    # Adaptive settings
+    adaptive:
+      warmup_steps: 100               # Steps for warmup
+      decay_factor: 0.95              # Decay factor for plateau
+      increase_factor: 1.1            # Increase factor for improvement
+      decrease_factor: 0.5            # Decrease factor for decline
+    
+    # Task-specific profiles
+    profiles:
+      concept_learning:
+        initial: 0.01
+        decay_factor: 0.95
+        decay_steps: 100
+        warmup_steps: 10
+      
+      skill_acquisition:
+        initial: 0.005
+        decay_factor: 0.98
+        decay_steps: 50
+        warmup_steps: 5
+      
+      pattern_recognition:
+        initial: 0.02
+        decay_factor: 0.9
+        decay_steps: 200
+        warmup_steps: 20
+      
+      fine_tuning:
+        initial: 0.0001
+        decay_factor: 0.99
+        decay_steps: 500
+        warmup_steps: 0
+  
+  # ==========================================================================
+  # KNOWLEDGE ORGANIZATION
+  # ==========================================================================
+  knowledge_organization:
+    embedding_dim: 768                # Dimension of knowledge embeddings
+    
+    # Semantic indexing
+    semantic_index:
+      enabled: true
+      index_type: "faiss_flat"        # FAISS index type
+      nprobe: 10                      # Number of clusters to search
+      metric: "inner_product"         # Distance metric
+    
+    # Knowledge graph
+    graph:
+      enabled: true
+      max_hops: 2                     # Maximum hops for graph traversal
+      relationship_types:             # Supported relationship types
+        - "is_a"
+        - "part_of"
+        - "related_to"
+        - "prerequisite_for"
+        - "instance_of"
+    
+    # Clustering
+    clustering:
+      enabled: true
+      auto_cluster_count: true        # Automatically determine cluster count
+      default_cluster_count: 10       # Default if auto is disabled
+      min_cluster_size: 5             # Minimum size for valid cluster
+      max_cluster_size: 1000          # Maximum size before splitting
+    
+    # Abstraction
+    abstraction:
+      enabled: true
+      min_coverage: 3                 # Minimum knowledge units for abstraction
+      confidence_threshold: 0.7       # Minimum confidence for abstraction
+  
+  # ==========================================================================
+  # RETRIEVAL PRACTICE
+  # ==========================================================================
+  retrieval_practice:
+    enabled: true
+    
+    # Retrieval methods and their weights
+    strategies:
+      free_recall: 0.3                # Free recall weight
+      cued_recall: 0.5                # Cued recall weight
+      recognition: 0.2                # Recognition weight
+    
+    # Scheduling
+    scheduling:
+      initial_delay_hours: 1          # First retrieval after learning
+      max_interval_days: 365          # Maximum interval between retrievals
+      min_interval_hours: 1           # Minimum interval between retrievals
+    
+    # Session settings
+    session:
+      default_duration_minutes: 5     # Default session duration
+      max_duration_minutes: 30        # Maximum session duration
+      questions_per_session: 10       # Number of questions per session
+    
+    # Performance tracking
+    tracking:
+      track_response_time: true       # Track response times
+      track_confidence: true          # Track confidence ratings
+      forgetting_curve_model: "exponential"  # Forgetting curve model
+  
+  # ==========================================================================
+  # STORAGE
+  # ==========================================================================
+  storage:
+    # Knowledge store
+    knowledge_store:
+      backend: "sqlite"               # Storage backend
+      path: "./data/knowledge.db"     # Storage path
+      backup_frequency: "daily"       # Backup frequency
+      retention_days: 365             # Data retention period
+    
+    # Experience buffer
+    experience_buffer:
+      persist_to_disk: true           # Persist buffer to disk
+      path: "./data/experiences.jsonl"
+      max_file_size_mb: 100
+    
+    # Embeddings
+    embeddings:
+      storage_format: "numpy"         # Format for embedding storage
+      compression: "gzip"             # Compression for embeddings
+      cache_size: 1000                # Number of embeddings to cache
+  
+  # ==========================================================================
+  # MONITORING AND METRICS
+  # ==========================================================================
+  monitoring:
+    enabled: true
+    
+    # Metrics to track
+    metrics:
+      - "knowledge_retention_rate"
+      - "learning_speed"
+      - "transfer_efficiency"
+      - "consolidation_coverage"
+      - "forgetting_rate"
+      - "review_efficiency"
+    
+    # Reporting
+    reporting:
+      frequency: "daily"              # Report frequency
+      format: "json"                  # Report format
+      destination: "./reports"        # Report destination
+    
+    # Alerting
+    alerting:
+      enabled: true
+      retention_threshold: 0.8        # Alert if retention drops below
+      forgetting_rate_threshold: 0.1  # Alert if forgetting rate exceeds
+
+# ============================================================================
+# CRON JOB INTEGRATION
+# ==========================================================================
+cron_jobs:
+  experience_processing:
+    schedule: "*/15 * * * *"          # Every 15 minutes
+    function: "process_pending_experiences"
+    description: "Process accumulated experiences"
+  
+  daily_review:
+    schedule: "0 9,14,19 * * *"       # 9am, 2pm, 7pm
+    function: "conduct_due_reviews"
+    description: "Conduct spaced repetition reviews"
+  
+  consolidation_check:
+    schedule: "*/5 * * * *"           # Every 5 minutes
+    function: "check_consolidation_opportunity"
+    description: "Check for idle time consolidation"
+  
+  retention_assessment:
+    schedule: "0 2 * * 0"             # Sundays at 2am
+    function: "assess_knowledge_retention"
+    description: "Weekly retention assessment"
+  
+  transfer_learning:
+    schedule: "0 3 * * 3"             # Wednesdays at 3am
+    function: "update_transfer_matrix"
+    description: "Update cross-domain transfer knowledge"
+  
+  knowledge_optimization:
+    schedule: "0 4 1 * *"             # First of month at 4am
+    function: "optimize_knowledge_structure"
+    description: "Monthly knowledge structure optimization"
+
+# ============================================================================
+# PERFORMANCE TARGETS
+# ==========================================================================
+targets:
+  knowledge_retention_30d: 0.90       # 90% retention after 30 days
+  learning_speed_iterations: 10       # Max iterations to proficiency
+  transfer_efficiency: 0.70           # 70% performance on new domain
+  consolidation_coverage: 0.95        # 95% knowledge consolidated
+  forgetting_rate_monthly: 0.05       # Max 5% forgetting per month
+  review_time_daily_minutes: 5        # Max 5 minutes daily review

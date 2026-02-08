@@ -1,0 +1,28 @@
+# OpenClaw AI Agent TTS System Dependencies
+# Windows 10 Text-to-Speech Integration
+
+# Windows SAPI Integration
+pywin32>=306
+comtypes>=1.2.0
+
+# Azure Cognitive Services Speech SDK
+azure-cognitiveservices-speech>=1.34.0
+
+# ElevenLabs API
+elevenlabs>=0.2.26
+
+# OpenAI API
+openai>=1.0.0
+
+# Audio Processing
+sounddevice>=0.4.6
+soundfile>=0.12.1
+pyaudio>=0.2.13
+pydub>=0.25.1
+numpy>=1.24.0
+
+# Utilities
+pyyaml>=6.0
+requests>=2.31.0
+aiohttp>=3.9.0
+asyncio>=3.4.3

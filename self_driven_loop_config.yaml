@@ -1,0 +1,282 @@
+# Self-Driven Loop Configuration
+# Intrinsic Motivation with Curiosity-Driven Exploration
+# For OpenClaw-Inspired Windows 10 AI Agent Framework
+
+self_driven_loop:
+  # Core Settings
+  enabled: true
+  priority: high
+  version: "1.0.0"
+  
+  # =============================================================================
+  # CURIOSITY ENGINE CONFIGURATION
+  # =============================================================================
+  curiosity:
+    # Enabled curiosity types
+    enabled_types:
+      - epistemic      # Uncertainty reduction
+      - diversive      # Novelty seeking
+      - empowerment    # Control maximization
+      - social         # Interaction drive
+      - aesthetic      # Pattern appreciation
+    
+    # Adaptive weight configuration
+    adaptive_weights: true
+    weight_update_frequency: 100
+    
+    # Neural network dimensions
+    embedding_dim: 256
+    hidden_dim: 512
+    
+    # Initial weights (will adapt if adaptive_weights is true)
+    initial_weights:
+      epistemic: 0.25
+      diversive: 0.25
+      empowerment: 0.20
+      social: 0.15
+      aesthetic: 0.15
+  
+  # =============================================================================
+  # INTRINSIC REWARD CONFIGURATION
+  # =============================================================================
+  rewards:
+    # Reward component weights
+    curiosity_weight: 0.30
+    surprise_weight: 0.25
+    novelty_weight: 0.20
+    learning_progress_weight: 0.25
+    
+    # Normalization settings
+    normalization_window: 1000
+    
+    # Random Network Distillation
+    use_rnd: true
+    rnd_output_dim: 64
+    rnd_learning_rate: 0.0001
+    
+    # Learning progress tracking
+    learning_progress_window: 100
+  
+  # =============================================================================
+  # SURPRISE DETECTION CONFIGURATION
+  # =============================================================================
+  surprise:
+    # Threshold for considering something surprising
+    threshold: 2.0
+    
+    # Rate at which statistics adapt
+    adaptation_rate: 0.01
+    
+    # Memory capacity for surprise patterns
+    memory_capacity: 10000
+    
+    # Similarity threshold for pattern matching
+    similarity_threshold: 0.9
+  
+  # =============================================================================
+  # NOVELTY TRACKING CONFIGURATION
+  # =============================================================================
+  novelty:
+    # SimHash configuration
+    hash_size: 64
+    embedding_dim: 512
+    use_simhash: true
+    
+    # Visit count normalization
+    count_normalization: "sqrt"  # Options: sqrt, log, linear
+    
+    # State encoding
+    encoding_method: "auto"  # auto, manual, neural
+  
+  # =============================================================================
+  # BOREDOM DETECTION CONFIGURATION
+  # =============================================================================
+  boredom:
+    # Repetition detection
+    repetition_threshold: 0.95
+    
+    # Reward variance threshold
+    reward_variance_threshold: 0.01
+    
+    # Progress stagnation detection
+    stagnation_threshold: 100
+    
+    # Boredom activation threshold
+    boredom_threshold: 0.7
+    
+    # Buffer sizes
+    state_buffer_size: 100
+    reward_buffer_size: 100
+    action_buffer_size: 100
+    
+    # Indicator weights
+    indicator_weights:
+      state_repetition: 0.30
+      reward_variance: 0.25
+      progress_stagnation: 0.30
+      action_diversity: 0.15
+  
+  # =============================================================================
+  # BOREDOM AVOIDANCE CONFIGURATION
+  # =============================================================================
+  boredom_avoidance:
+    # Exploration boost factor
+    exploration_boost: 2.0
+    
+    # Novelty weight increase
+    novelty_weight_increase: 1.5
+    
+    # Skill switch threshold
+    skill_switch_threshold: 0.6
+    
+    # Strategy durations
+    strategy_durations:
+      explore_new: 50
+      reduce_difficulty: 30
+      diversify_actions: 40
+      random_exploration: 20
+  
+  # =============================================================================
+  # INTEREST MODEL CONFIGURATION
+  # =============================================================================
+  interest:
+    # Number of interest dimensions
+    dimensions: 10
+    
+    # Learning rate for interest updates
+    learning_rate: 0.1
+    
+    # Decay rate for interests
+    decay_rate: 0.001
+    
+    # Saturation recovery rate
+    saturation_recovery: 0.999
+    
+    # History size
+    history_size: 1000
+  
+  # =============================================================================
+  # DRIVE SATISFACTION CONFIGURATION
+  # =============================================================================
+  drives:
+    # Drive definitions
+    knowledge_acquisition:
+      initial: 0.5
+      target: 0.8
+      decay_rate: 0.01
+      satisfaction_rate: 0.05
+    
+    novelty_seeking:
+      initial: 0.5
+      target: 0.7
+      decay_rate: 0.02
+      satisfaction_rate: 0.08
+    
+    competence:
+      initial: 0.5
+      target: 0.75
+      decay_rate: 0.005
+      satisfaction_rate: 0.03
+    
+    autonomy:
+      initial: 0.5
+      target: 0.8
+      decay_rate: 0.01
+      satisfaction_rate: 0.04
+    
+    social_connection:
+      initial: 0.5
+      target: 0.6
+      decay_rate: 0.015
+      satisfaction_rate: 0.06
+  
+  # =============================================================================
+  # MOTIVATION DYNAMICS CONFIGURATION
+  # =============================================================================
+  motivation:
+    # Decay parameters
+    base_decay_rate: 0.001
+    activity_decay_factor: 0.1
+    
+    # Renewal parameters
+    success_boost: 0.1
+    novelty_boost: 0.15
+    social_boost: 0.08
+    
+    # Thresholds
+    critical_threshold: 0.3
+    low_threshold: 0.5
+    
+    # Cycle tracking
+    track_cycles: true
+    cycle_detection_window: 10
+  
+  # =============================================================================
+  # MOTIVATION RENEWAL CONFIGURATION
+  # =============================================================================
+  motivation_renewal:
+    # Strategy triggers
+    critical_strategy: "major_shift"
+    low_strategy: "new_challenge"
+    decreasing_strategy: "variety_injection"
+    
+    # Major shift parameters
+    major_shift:
+      target_domain: "least_explored"
+      commitment_duration: 100
+    
+    # New challenge parameters
+    new_challenge:
+      difficulty_increment: 0.2
+      target_success_rate: 0.6
+    
+    # Variety injection parameters
+    variety_injection:
+      variation_probability: 0.3
+      exploration_boost: 1.5
+  
+  # =============================================================================
+  # INTEGRATION CONFIGURATION
+  # =============================================================================
+  integration:
+    # Heartbeat interval (seconds)
+    heartbeat_interval: 60
+    
+    # Logging
+    log_level: "INFO"
+    log_file: "logs/self_driven_loop.log"
+    
+    # Metrics
+    metrics_enabled: true
+    metrics_interval: 100
+    metrics_file: "metrics/self_driven_loop.json"
+    
+    # Other loop integration
+    notify_loops:
+      - perception_loop
+      - planning_loop
+      - action_loop
+      - learning_loop
+      - memory_loop
+      - reflection_loop
+      - social_loop
+      - goal_management_loop
+      - emotion_loop
+      - creativity_loop
+      - safety_loop
+      - resource_management_loop
+      - communication_loop
+      - adaptation_loop
+  
+  # =============================================================================
+  # PERFORMANCE TARGETS
+  # =============================================================================
+  performance_targets:
+    exploration_coverage: 0.80
+    curiosity_stability: 0.10
+    boredom_recovery_time: 50
+    learning_progress_rate: 0.001
+    drive_satisfaction: 0.70
+    motivation_sustainability: 1000
+    novelty_detection_accuracy: 0.85
+    surprise_response_time: 10

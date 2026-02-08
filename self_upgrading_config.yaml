@@ -1,0 +1,394 @@
+# Self-Upgrading Loop Configuration
+# Windows 10 OpenClaw-Inspired AI Agent Framework
+
+self_upgrading:
+  # Master enable/disable switch
+  enabled: true
+  
+  # =============================================================================
+  # CYCLE CONFIGURATION
+  # =============================================================================
+  cycle:
+    # How often to run the upgrade cycle (in minutes)
+    interval_minutes: 60
+    
+    # Maximum number of concurrent upgrades
+    max_concurrent_upgrades: 1
+    
+    # Auto-approve threshold (0.0 - 1.0)
+    # If opportunity confidence is above this, auto-approve
+    auto_approve_threshold: 0.9
+    
+    # Require manual approval for high-impact changes
+    manual_approval_for_critical: true
+    
+    # Pause upgrades during high load
+    pause_on_high_load: true
+    load_threshold_cpu: 80
+    load_threshold_memory: 85
+  
+  # =============================================================================
+  # GAP ANALYSIS CONFIGURATION
+  # =============================================================================
+  gap_analysis:
+    enabled: true
+    
+    # Detection sources to enable
+    sources:
+      - failure_analysis      # Analyze task failures
+      - user_requests         # Analyze unfulfilled user requests
+      - benchmarks            # Compare against performance benchmarks
+      - competitor_analysis   # Research competitor capabilities
+    
+    # Minimum gap severity to consider
+    min_gap_severity: medium  # low, medium, high, critical
+    
+    # Analysis window (hours)
+    analysis_window_hours: 24
+    
+    # Minimum frequency for user-request gaps
+    min_user_request_frequency: 3
+  
+  # =============================================================================
+  # OPPORTUNITY SCORING CONFIGURATION
+  # =============================================================================
+  opportunity_scoring:
+    # Scoring weights (must sum to 1.0)
+    weights:
+      impact: 0.30           # User/system impact
+      feasibility: 0.25      # Implementation feasibility
+      urgency: 0.20          # Time sensitivity
+      alignment: 0.15        # Alignment with system goals
+      resource_cost: 0.10    # Resource requirements
+    
+    # Minimum score to consider (0-10)
+    min_score: 7.0
+    
+    # Maximum opportunities to track
+    max_opportunities: 100
+    
+    # Opportunity expiration (days)
+    opportunity_expiration_days: 30
+  
+  # =============================================================================
+  # EXPERIMENTATION CONFIGURATION
+  # =============================================================================
+  experimentation:
+    enabled: true
+    
+    # Sandbox type
+    sandbox_type: isolated_process  # isolated_process, container, vm
+    
+    # Test scenarios to run
+    test_scenarios:
+      - unit_tests
+      - integration_tests
+      - performance_tests
+      - chaos_tests
+    
+    # Minimum success rate to proceed
+    min_success_rate: 0.95
+    
+    # Maximum experiment duration (minutes)
+    max_experiment_duration_minutes: 30
+    
+    # Auto-cleanup after experiment
+    auto_cleanup: true
+    
+    # Shadow mode settings
+    shadow_mode:
+      enabled: true
+      traffic_percentage: 10
+      duration_hours: 24
+  
+  # =============================================================================
+  # INTEGRATION CONFIGURATION
+  # =============================================================================
+  integration:
+    # Default integration pattern
+    default_pattern: feature_flag  # direct, feature_flag, canary, blue_green
+    
+    # Gradual rollout configuration
+    gradual_rollout:
+      enabled: true
+      stages:
+        - percentage: 5
+          duration_minutes: 30
+          metrics_check: true
+        - percentage: 25
+          duration_minutes: 60
+          metrics_check: true
+        - percentage: 50
+          duration_minutes: 120
+          metrics_check: true
+        - percentage: 100
+          duration_minutes: 0
+          metrics_check: true
+    
+    # Feature flag configuration
+    feature_flags:
+      prefix: "self_upgrade_"
+      default_value: false
+      allow_override: true
+    
+    # Dependency resolution
+    auto_install_dependencies: true
+    missing_dependency_action: queue  # queue, fail, skip
+  
+  # =============================================================================
+  # VALIDATION CONFIGURATION
+  # =============================================================================
+  validation:
+    enabled: true
+    
+    # Benchmarks to run
+    benchmarks:
+      - latency
+      - throughput
+      - resource_usage
+      - reliability
+      - scalability
+    
+    # Performance thresholds
+    thresholds:
+      latency_p50_ms: 100
+      latency_p95_ms: 500
+      latency_p99_ms: 1000
+      throughput_rps_min: 100
+      error_rate_max: 0.01
+      cpu_percent_max: 80
+      memory_mb_max: 2048
+    
+    # Maximum acceptable regression
+    max_regression_percent: 10
+    
+    # Validation timeout (minutes)
+    validation_timeout_minutes: 15
+  
+  # =============================================================================
+  # VERIFICATION CONFIGURATION
+  # =============================================================================
+  verification:
+    enabled: true
+    
+    # Verification categories
+    categories:
+      - functional
+      - integration
+      - security
+      - performance
+      - documentation
+    
+    # Minimum overall score (0-1)
+    min_overall_score: 0.8
+    
+    # Require all categories to pass
+    require_all_categories: false
+    
+    # Critical categories (must pass)
+    critical_categories:
+      - functional
+      - security
+  
+  # =============================================================================
+  # ROLLBACK CONFIGURATION
+  # =============================================================================
+  rollback:
+    # Enable automatic rollback
+    auto_rollback: true
+    
+    # Snapshot retention (days)
+    snapshot_retention_days: 30
+    
+    # Rollback triggers
+    triggers:
+      error_rate_spike:
+        enabled: true
+        threshold_multiplier: 5.0
+        window_minutes: 5
+      
+      latency_spike:
+        enabled: true
+        threshold_multiplier: 3.0
+        window_minutes: 5
+      
+      availability_drop:
+        enabled: true
+        threshold_percent: 95.0
+        window_minutes: 2
+      
+      resource_exhaustion:
+        enabled: true
+        cpu_threshold: 95.0
+        memory_threshold: 95.0
+        duration_minutes: 3
+    
+    # Circuit breaker settings
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5
+      recovery_timeout_seconds: 30
+      half_open_max_calls: 3
+  
+  # =============================================================================
+  # TRACKING CONFIGURATION
+  # =============================================================================
+  tracking:
+    enabled: true
+    
+    # Metrics retention (days)
+    metrics_retention_days: 365
+    
+    # Report generation
+    report_generation:
+      daily: true
+      weekly: true
+      monthly: true
+    
+    # Metrics to track
+    metrics:
+      - upgrade_success_rate
+      - time_to_upgrade
+      - rollback_rate
+      - experiment_success_rate
+      - capability_gaps
+      - active_experiments
+    
+    # Alert thresholds
+    alerts:
+      upgrade_success_rate_below: 0.95
+      rollback_rate_above: 0.05
+      experiment_success_rate_below: 0.80
+  
+  # =============================================================================
+  # WINDOWS 10 SPECIFIC CONFIGURATION
+  # =============================================================================
+  windows:
+    # Service configuration
+    service:
+      install_as_service: true
+      service_name: "OpenClawAgent"
+      display_name: "OpenClaw AI Agent"
+      description: "Autonomous AI agent with self-upgrading capabilities"
+      auto_start: true
+      recovery_actions:
+        - action: restart
+          delay_seconds: 60
+        - action: restart
+          delay_seconds: 120
+        - action: none
+      
+    # File system paths
+    paths:
+      install: "C:\\Program Files\\OpenClaw"
+      data: "C:\\ProgramData\\OpenClaw"
+      user_data: "%LOCALAPPDATA%\\OpenClaw"
+      logs: "C:\\ProgramData\\OpenClaw\\logs"
+      temp: "%TEMP%\\OpenClaw"
+      snapshots: "C:\\ProgramData\\OpenClaw\\snapshots"
+    
+    # Registry configuration
+    registry:
+      base_key: "HKEY_LOCAL_MACHINE\\SOFTWARE\\OpenClaw"
+      user_key: "HKEY_CURRENT_USER\\Software\\OpenClaw"
+      capabilities_key: "HKEY_LOCAL_MACHINE\\SOFTWARE\\OpenClaw\\Capabilities"
+    
+    # Windows services integration
+    windows_services:
+      task_scheduler:
+        use_for_cron: true
+        task_folder: "OpenClaw"
+        task_name_prefix: "OpenClaw_"
+      
+      event_log:
+        source_name: "OpenClawAgent"
+        log_name: "Application"
+        event_ids:
+          upgrade_started: 1000
+          upgrade_completed: 1001
+          upgrade_failed: 1002
+          rollback_executed: 1003
+      
+      performance_counters:
+        category_name: "OpenClaw Agent"
+        counters:
+          - name: "Capabilities Active"
+            type: NumberOfItems32
+          - name: "Upgrades Performed"
+            type: NumberOfItems64
+          - name: "Tasks Completed/sec"
+            type: RateOfCountsPerSecond32
+    
+    # Security configuration
+    security:
+      run_as_user: "NT SERVICE\\OpenClaw"
+      required_privileges:
+        - SeServiceLogonRight
+        - SeDebugPrivilege
+        - SeBackupPrivilege
+      
+      firewall_rules:
+        - name: "OpenClaw Agent Outbound"
+          direction: outbound
+          action: allow
+          protocol: any
+        
+      antivirus_exclusions:
+        - path: "C:\\Program Files\\OpenClaw"
+        - path: "C:\\ProgramData\\OpenClaw"
+  
+  # =============================================================================
+  # NOTIFICATION CONFIGURATION
+  # =============================================================================
+  notifications:
+    enabled: true
+    
+    # Events to notify on
+    events:
+      - upgrade_started
+      - upgrade_completed
+      - upgrade_failed
+      - rollback_executed
+      - experiment_completed
+      - high_priority_gap_detected
+    
+    # Notification channels
+    channels:
+      email:
+        enabled: false
+        smtp_server: ""
+        smtp_port: 587
+        username: ""
+        password: ""
+        from_address: ""
+        to_addresses: []
+      
+      webhook:
+        enabled: false
+        url: ""
+        headers: {}
+      
+      log:
+        enabled: true
+        level: info
+  
+  # =============================================================================
+  # DEBUG CONFIGURATION
+  # =============================================================================
+  debug:
+    # Enable debug logging
+    verbose_logging: false
+    
+    # Save intermediate artifacts
+    save_artifacts: false
+    artifact_path: "C:\\ProgramData\\OpenClaw\\debug"
+    
+    # Dry run mode (no actual changes)
+    dry_run: false
+    
+    # Force specific behaviors
+    force:
+      gap_detection: false
+      opportunity_selection: false
+      experiment_result: null
+      integration_pattern: null

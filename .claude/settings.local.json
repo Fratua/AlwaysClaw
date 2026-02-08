@@ -1,12 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch",
+      "Bash(wc:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(sort:*)",
+      "Bash(del \"C:\\\\Users\\\\Fratu\\\\Desktop\\\\AlwaysClaw\\\\claude_client.py\")",
+      "Bash(npx tsc:*)",
+      "Bash(npm install:*)",
+      "Bash(npm view:*)",
+      "Bash(node -e:*)",
+      "Bash(python -c:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git rm:*)",
-      "Bash(git rebase:*)",
-      "Bash(GIT_EDITOR=true git rebase:*)"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nWire end-to-end Node.js<->Python bridge with GPT-5.2, 15 cognitive loops, and scheduler\n\nFull 8-phase implementation connecting the Node.js infrastructure layer \\(daemon,\nworkers, message bus, scheduler\\) to the Python cognitive layer \\(15 loops, memory\nsystem, Gmail, Twilio, TTS\\) via a JSON-RPC stdin/stdout bridge.\n\nNew files:\n- python_bridge.py: Python JSON-RPC server with 35 handlers \\(memory, LLM, Gmail,\n  Twilio, TTS, STT, auth, and 15 loop dispatchers\\)\n- python-bridge.js: Node.js bridge client \\(master\\) + worker proxy \\(IPC\\)\n- openai_client.py: GPT-5.2 wrapper singleton for all Python loops\n- loop_adapters.py: Lazy-init adapters for all 15 cognitive loops\n- src/declarations.d.ts: Type declarations for sqlite3\n\nKey changes:\n- daemon-master.js: Bridge startup, IPC routing, state persistence to memory DB\n- message-bus.js: python-bridge-request/response routing\n- agent-loop-worker.js: All actions wired through bridge \\(GPT-5.2, Gmail, Twilio, TTS\\)\n- io-worker.js: Services delegate to bridge or compiled TS BrowserPool\n- task-worker.js: All 9 handlers wired through bridge\n- health-monitor.js: Real cluster worker counts, Python bridge health check\n- control-server.js: Fixed missing break after /workers case\n- src/agent-loops.ts: 15 operational + 15 cognitive loops + 6 cron jobs = 36 total\n- src/cron-engine.ts: Fixed parseExpression and destroy\\(\\) API mismatches\n- src/retry-mechanism.ts: Fixed Partial<RetryConfig> typing\n- src/persistence.ts: Fixed sqlite3 import\n- CheerioParser.ts: Fixed deprecated options and Cheerio<T> generics\n- tsconfig.json: Added DOM lib, root-level TS files\n- package.json: Fixed node-windows and azure deps, added build scripts\n- .gitignore: Added dist/, __pycache__/, logs/, data/, .env\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }

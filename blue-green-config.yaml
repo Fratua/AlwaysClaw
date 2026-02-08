@@ -1,0 +1,121 @@
+# Blue-Green Deployment Configuration for OpenClaw Agent System
+# Windows 10/11 Deployment
+
+blue_green:
+  # Environment configuration
+  environments:
+    blue:
+      name: blue
+      host: localhost
+      port_range: [8000, 8014]      # 15 agent loops
+      data_directory: C:\OpenClaw\Data\Blue
+      log_directory: C:\OpenClaw\Logs\Blue
+      temp_directory: C:\OpenClaw\Temp\Blue
+      service_name: OpenClawAgent-Blue
+      enabled: true
+    
+    green:
+      name: green
+      host: localhost
+      port_range: [8020, 8034]      # 15 agent loops
+      data_directory: C:\OpenClaw\Data\Green
+      log_directory: C:\OpenClaw\Logs\Green
+      temp_directory: C:\OpenClaw\Temp\Green
+      service_name: OpenClawAgent-Green
+      enabled: true
+  
+  # Router configuration
+  router:
+    type: nginx                     # nginx, haproxy, custom, or windows_service
+    listen_port: 8080
+    health_check_interval: 5
+    health_check_timeout: 10
+    
+    nginx_config_template: |
+      upstream openclaw_backend {
+          server localhost:{{active_port}} weight={{active_weight}};
+          server localhost:{{standby_port}} weight={{standby_weight}};
+          
+          check interval=5000 rise=2 fall=3 timeout=3000;
+      }
+      
+      server {
+          listen 8080;
+          
+          location / {
+              proxy_pass http://openclaw_backend;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+          }
+          
+          location /health {
+              access_log off;
+              return 200 "healthy\n";
+          }
+      }
+  
+  # Cutover configuration
+  cutover:
+    strategy: gradual               # gradual or atomic
+    gradual_steps: [10, 25, 50, 100]
+    step_duration_seconds: 30
+    stabilization_seconds: 60
+    
+    # Health checks during cutover
+    health_check_interval_seconds: 10
+    abort_on_health_check_failure: true
+    
+    # Metric thresholds for abort
+    abort_thresholds:
+      error_rate: 0.01              # 1%
+      latency_p95_ms: 500
+      cpu_percent: 80
+      memory_percent: 85
+  
+  # State synchronization
+  state_sync:
+    enabled: true
+    sync_interval_seconds: 60
+    snapshot_retention_count: 5
+    compression: true
+    compression_level: 6
+    
+    # What to sync
+    sync_items:
+      - user_sessions
+      - agent_state
+      - memory_cache
+      - pending_tasks
+      - configuration
+  
+  # Rollback configuration
+  rollback:
+    auto_rollback_on_error: true
+    error_rate_threshold: 0.01      # 1%
+    latency_threshold_ms: 500
+    rollback_timeout_seconds: 30
+    instant_rollback: true          # No gradual rollback
+    
+    # Verification after rollback
+    verify_rollback: true
+    verification_timeout_seconds: 60
+  
+  # Cleanup configuration
+  cleanup:
+    enabled: true
+    delay_minutes: 60               # Wait before cleanup
+    preserve_last_n_versions: 3
+    
+# Traffic splitting configuration
+traffic_split:
+  sticky_sessions: true
+  session_cookie: openclaw_session
+  session_ttl_seconds: 3600
+  
+  # Geographic routing (optional)
+  geo_routing:
+    enabled: false
+    
+  # User-based routing (optional)
+  user_routing:
+    enabled: false

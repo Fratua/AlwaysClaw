@@ -1,0 +1,249 @@
+# Memory System Configuration for OpenClaw-Inspired AI Agent
+# Windows 10 Compatible
+
+# Base directory for all memory storage
+base_dir: "~/.openclaw"
+
+# LLM model configuration
+llm_model: "gpt-5.2"
+
+# ============================================================
+# EMBEDDING CONFIGURATION
+# ============================================================
+
+embedding:
+  # Provider: auto, openai, gemini, local
+  # auto: tries local -> openai -> gemini in order
+  provider: "auto"
+  
+  # Model name (null = use provider default)
+  # OpenAI: text-embedding-3-small, text-embedding-3-large
+  # Gemini: gemini-embedding-001
+  # Local: all-MiniLM-L6-v2, etc.
+  model_name: null
+  
+  # Embedding dimension (must match model)
+  dimension: 1536
+  
+  # Batch size for embedding generation
+  batch_size: 50
+  
+  # Retry configuration
+  max_retries: 3
+  timeout_seconds: 60
+  
+  # API keys (can also use environment variables)
+  openai_api_key: null  # or set OPENAI_API_KEY env var
+  gemini_api_key: null  # or set GEMINI_API_KEY env var
+  
+  # Local model path (for local provider)
+  local_model_path: null  # uses default if null
+
+# ============================================================
+# CHUNKING CONFIGURATION
+# ============================================================
+
+chunking:
+  # Target chunk size in tokens
+  chunk_tokens: 400
+  
+  # Overlap between chunks in tokens
+  overlap_tokens: 80
+  
+  # Respect markdown headers when chunking
+  respect_headers: true
+  
+  # Characters per token (approximation)
+  chars_per_token: 4
+
+# ============================================================
+# SEARCH CONFIGURATION
+# ============================================================
+
+search:
+  # Default number of results
+  default_results: 10
+  
+  # Minimum relevance score (0-1)
+  min_score: 0.3
+  
+  # RRF (Reciprocal Rank Fusion) constant
+  rrf_k: 60
+  
+  # Recency half-life in days (for temporal scoring)
+  recency_half_life_days: 7
+  
+  # Scoring weights (must sum to 1.0)
+  semantic_weight: 0.30
+  lexical_weight: 0.20
+  temporal_weight: 0.20
+  importance_weight: 0.15
+  access_weight: 0.15
+
+# ============================================================
+# CONTEXT WINDOW CONFIGURATION
+# ============================================================
+
+context_budget:
+  # Token allocation for each context component
+  # Total should be less than model context window
+  
+  # System prompt + identity
+  system_tokens: 10000
+  
+  # Available skills/tools
+  skills_tokens: 15000
+  
+  # Retrieved memories
+  memory_tokens: 50000
+  
+  # Conversation history
+  history_tokens: 75000
+  
+  # Current request
+  request_tokens: 30000
+  
+  # Reserved for response generation
+  response_reserve: 20000
+
+# ============================================================
+# WRITE CONFIGURATION
+# ============================================================
+
+write:
+  # Batch size for batched writes
+  batch_size: 10
+  
+  # Interval between batch flushes (seconds)
+  batch_interval_seconds: 30
+  
+  # Importance threshold for immediate writes (skip batching)
+  immediate_importance_threshold: 0.8
+  
+  # Enable embedding cache
+  enable_caching: true
+  
+  # Cache size (number of entries)
+  cache_size: 10000
+
+# ============================================================
+# CONSOLIDATION CONFIGURATION
+# ============================================================
+
+consolidation:
+  # Enable automatic consolidation
+  enabled: true
+  
+  # Cron schedule for consolidation (default: daily at 2 AM)
+  schedule: "0 2 * * *"
+  
+  # Age threshold for consolidation (days)
+  age_threshold_days: 7
+  
+  # Minimum importance to consolidate
+  importance_threshold: 0.6
+  
+  # Maximum daily logs to keep in active index
+  max_daily_logs: 30
+  
+  # Archive logs after this many days
+  archive_after_days: 90
+
+# ============================================================
+# FILE PATHS
+# ============================================================
+
+# These are derived from base_dir but can be overridden
+paths:
+  memory_dir: "${base_dir}/memory"
+  daily_dir: "${base_dir}/memory/daily"
+  sessions_dir: "${base_dir}/sessions"
+  config_dir: "${base_dir}/config"
+  state_dir: "${base_dir}/state"
+  logs_dir: "${base_dir}/logs"
+  skills_dir: "${base_dir}/skills"
+  temp_dir: "${base_dir}/temp"
+
+# ============================================================
+# MEMORY FILES
+# ============================================================
+
+files:
+  # Curated long-term memory
+  memory_md: "${memory_dir}/MEMORY.md"
+  
+  # Agent persona and boundaries
+  soul_md: "${memory_dir}/SOUL.md"
+  
+  # Agent identity
+  identity_md: "${memory_dir}/IDENTITY.md"
+  
+  # User profile
+  user_md: "${memory_dir}/USER.md"
+  
+  # Operating instructions
+  agents_md: "${memory_dir}/AGENTS.md"
+  
+  # Daily log format (strftime format)
+  daily_log_format: "${daily_dir}/%Y-%m-%d.md"
+  
+  # Session format
+  session_format: "${sessions_dir}/%Y-%m-%d-%s.md"
+  
+  # Vector database
+  vector_db: "${memory_dir}/index.db"
+
+# ============================================================
+# PERFORMANCE TUNING
+# ============================================================
+
+performance:
+  # SQLite cache size (MB)
+  sqlite_cache_mb: 256
+  
+  # Enable WAL mode for SQLite
+  enable_wal: true
+  
+  # File watcher debounce (ms)
+  watcher_debounce_ms: 500
+  
+  # Maximum concurrent embedding requests
+  embedding_concurrency: 4
+  
+  # Search timeout (ms)
+  search_timeout_ms: 5000
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  
+  # Log to file
+  file_logging: true
+  log_file: "${logs_dir}/memory.log"
+  
+  # Log to console
+  console_logging: true
+  
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# ============================================================
+# WINDOWS-SPECIFIC SETTINGS
+# ============================================================
+
+windows:
+  # Use Windows-specific paths
+  use_known_folders: true
+  
+  # Integration with Windows Search
+  windows_search_integration: false
+  
+  # PowerShell script execution
+  allow_powershell: true
+  
+  # Windows event log integration
+  event_log_integration: false

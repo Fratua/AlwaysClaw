@@ -1,0 +1,260 @@
+# =============================================================================
+# Advanced Context Prompt Engineering Loop Configuration
+# Evolutionary Prompt Optimization with Genetic Algorithms
+# =============================================================================
+
+evolutionary_prompt_optimization:
+  
+  # ==========================================================================
+  # Genetic Algorithm Parameters
+  # ==========================================================================
+  genetic_algorithm:
+    population_size: 100              # Number of individuals in population
+    max_generations: 1000             # Maximum evolution generations
+    elite_ratio: 0.1                  # Top performers preserved (10%)
+    crossover_rate: 0.8               # Probability of genetic crossover
+    mutation_rate: 0.15               # Base mutation probability
+    adaptive_mutation: true           # Enable adaptive mutation rates
+    tournament_size: 5                # Selection tournament size
+    selection_strategy: "tournament"  # Options: tournament, rank, roulette
+    crossover_strategy: "semantic"    # Options: semantic, uniform, single_point
+    
+  # ==========================================================================
+  # Prompt Encoding Configuration
+  # ==========================================================================
+  encoding:
+    gene_types:
+      - system_context                 # Role definition
+      - task_instruction               # Core task description
+      - constraint                     # Rules and limitations
+      - example                        # Few-shot examples
+      - format_spec                    # Output format specification
+      - tool_hint                      # Tool usage guidance
+      - reasoning_step                 # Chain-of-thought steps
+      - safety_guard                   # Safety constraints
+      - context_variable               # Dynamic context slots
+      - style_modifier                 # Tone/style adjustments
+    
+    max_genes_per_chromosome: 50      # Maximum genes per chromosome
+    min_genes_per_chromosome: 3       # Minimum genes per chromosome
+    token_limit: 4096                 # Maximum tokens per prompt
+    
+  # ==========================================================================
+  # Fitness Evaluation Weights
+  # ==========================================================================
+  fitness:
+    weights:
+      task_performance: 0.40          # Task success rate (40%)
+      token_efficiency: 0.25          # Token usage efficiency (25%)
+      response_quality: 0.20          # Response quality metrics (20%)
+      robustness: 0.10                # Edge case handling (10%)
+      safety: 0.05                    # Safety compliance (5%)
+    
+    evaluation_tasks_per_generation: 50
+    validation_split: 0.2             # 20% for validation
+    
+    # Task-specific fitness weights
+    domain_weights:
+      email:
+        recipient_correct: 0.25
+        subject_appropriate: 0.15
+        tone_match: 0.20
+        content_complete: 0.25
+        format_proper: 0.10
+        attachments_handled: 0.05
+      
+      browser:
+        navigation_success: 0.20
+        element_interaction: 0.25
+        data_extraction: 0.25
+        action_sequence: 0.15
+        error_recovery: 0.10
+        page_load_efficiency: 0.05
+      
+      voice:
+        intent_recognition: 0.30
+        response_naturalness: 0.25
+        latency_acceptable: 0.20
+        context_retention: 0.15
+        interruption_handling: 0.07
+        barge_in_support: 0.03
+  
+  # ==========================================================================
+  # Convergence Detection Parameters
+  # ==========================================================================
+  convergence:
+    fitness_improvement_threshold: 0.01    # Min improvement to avoid plateau
+    fitness_variance_threshold: 0.001      # Max variance for plateau detection
+    diversity_threshold: 0.3               # Minimum population diversity
+    stagnation_generations: 100            # Gens without improvement
+    max_generations_without_improvement: 50
+    
+  # ==========================================================================
+  # Elite Preservation Configuration
+  # ==========================================================================
+  elite_preservation:
+    elite_pool_size: 10               # Number of elites to preserve
+    hall_of_fame_size: 50             # All-time best individuals
+    validation_frequency: 10          # Validate every N generations
+    overfit_threshold: 1.5            # Training/validation ratio threshold
+    elite_breeding_probability: 0.2   # Chance to use elite in breeding
+    
+  # ==========================================================================
+  # Diversity Management
+  # ==========================================================================
+  diversity:
+    maintenance_strategy: "crowding"  # crowding, sharing, injection
+    diversity_threshold: 0.3          # Minimum acceptable diversity
+    injection_ratio: 0.3              # Ratio to replace when low diversity
+    crowding_factor: 2.0              # Crowding tournament size multiplier
+    fitness_sharing_alpha: 1.0        # Sharing function exponent
+    fitness_sharing_sigma: 0.1        # Sharing distance threshold
+    
+  # ==========================================================================
+  # Breeding Strategies
+  # ==========================================================================
+  breeding:
+    primary_strategy: "semantic_crossover"
+    secondary_strategies:
+      - uniform_crossover
+      - niching
+      - memetic
+    strategy_rotation_frequency: 100
+    
+    # Niching parameters
+    niching:
+      num_niches: 5
+      fitness_sharing_enabled: true
+    
+    # Memetic parameters
+    memetic:
+      local_search_iterations: 10
+      neighborhood_size: 20
+      local_search_frequency: 0.2
+  
+  # ==========================================================================
+  # Mutation Operators Configuration
+  # ==========================================================================
+  mutation:
+    operators:
+      gene_substitution: 0.25         # Replace with alternative
+      gene_insertion: 0.20            # Add new gene
+      gene_deletion: 0.15             # Remove gene
+      gene_reordering: 0.15           # Shuffle gene order
+      weight_adjustment: 0.15         # Adjust gene weight
+      paraphrase: 0.10                # Reword content
+    
+    adaptive_schedule:
+      exploration_phase:              # Generations 0-50
+        multiplier: 1.5
+      exploitation_phase:             # Generations 50-200
+        multiplier: 1.0
+      refinement_phase:               # Generations 200+
+        multiplier: 0.7
+    
+    # Paraphrasing settings
+    paraphrase:
+      preserve_keywords: true
+      style_preservation: 0.8
+      
+  # ==========================================================================
+  # Archive Management
+  # ==========================================================================
+  archive:
+    max_archived_prompts: 10000
+    compression_enabled: true
+    similarity_threshold: 0.95
+    retention_policy: "fitness_based"  # fitness_based, age_based, hybrid
+    
+    checkpoint:
+      enabled: true
+      interval: 50                    # Save every N generations
+      max_checkpoints: 10
+      
+  # ==========================================================================
+  # Integration Settings
+  # ==========================================================================
+  integration:
+    loop_frequency: "per_task"        # per_task, periodic, manual
+    adaptation_enabled: true
+    real_time_tuning: true
+    
+    # Real-time adaptation
+    real_time:
+      performance_window_size: 100
+      adaptation_threshold: 0.7       # Success rate threshold
+      cooldown_period: 10             # Generations between adaptations
+      
+  # ==========================================================================
+  # Performance Monitoring
+  # ==========================================================================
+  monitoring:
+    enabled: true
+    log_level: "INFO"
+    
+    metrics:
+      - generation_time
+      - fitness_progression
+      - diversity_tracking
+      - elite_performance
+      - convergence_status
+    
+    alerts:
+      diversity_collapse:
+        threshold: 0.1
+        level: "critical"
+      
+      fitness_stagnation:
+        threshold: 50
+        level: "warning"
+      
+      overfitting_detected:
+        threshold: 1.5
+        level: "warning"
+  
+  # ==========================================================================
+  # Windows 10 Agent System Integration
+  # ==========================================================================
+  agent_integration:
+    enabled: true
+    
+    # Loop triggers
+    triggers:
+      - task_completion
+      - performance_drop
+      - scheduled_optimization
+      - manual_trigger
+    
+    # Task domains for optimization
+    domains:
+      - email                          # Gmail integration
+      - browser                        # Browser control
+      - voice                          # TTS/STT
+      - sms                            # Twilio SMS
+      - system                         # System operations
+      - scheduling                     # Cron jobs
+    
+    # Optimization schedule
+    schedule:
+      continuous: true
+      batch_optimization: false
+      optimization_interval: 3600       # Seconds between optimizations
+      
+  # ==========================================================================
+  # GPT-5.2 Specific Settings
+  # ==========================================================================
+  model_settings:
+    model: "gpt-5.2"
+    thinking_capability: "extra_high"
+    
+    # Prompt engineering for GPT-5.2
+    prompt_format:
+      use_xml_tags: true
+      enable_chain_of_thought: true
+      structure_importance: "high"
+      
+    optimization_focus:
+      - reasoning_clarity
+      - instruction_precision
+      - context_management
+      - tool_usage_efficiency

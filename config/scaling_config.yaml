@@ -1,0 +1,492 @@
+# OpenClaw AI Agent System - Scaling Configuration
+# Windows 10 24/7 Operation
+
+---
+# System Configuration
+system:
+  name: "OpenClaw Agent System"
+  version: "1.0.0"
+  environment: "production"
+  platform: "windows"
+
+# Scaling Configuration
+scaling:
+  # Instance limits
+  min_instances: 1
+  max_instances: 100
+  
+  # Default instance configuration
+  default_instance:
+    cpu_cores: 2
+    memory_gb: 4
+    disk_gb: 10
+    network_mbps: 100
+  
+  # GPT-5.2 specific overhead
+  gpt52_overhead:
+    cpu_multiplier: 1.5
+    memory_multiplier: 2.0
+    token_rate_per_min: 1000
+  
+  # Users per instance (conservative for GPT-5.2 high thinking)
+  users_per_instance: 5
+  
+  # Peak load factor
+  peak_factor: 1.5
+
+# Auto-Scaling Policies
+auto_scaling:
+  check_interval_seconds: 10
+  
+  policies:
+    - name: "scale_out_cpu"
+      metric: "cpu_percent"
+      threshold: 70
+      comparison: "gt"
+      duration_seconds: 120
+      action: "scale_out"
+      instance_change: 1
+      cooldown_seconds: 60
+      priority: 1
+    
+    - name: "scale_out_fast_cpu"
+      metric: "cpu_percent"
+      threshold: 85
+      comparison: "gt"
+      duration_seconds: 60
+      action: "scale_out"
+      instance_change: 3
+      cooldown_seconds: 60
+      priority: 2
+    
+    - name: "scale_out_queue"
+      metric: "queue_depth"
+      threshold: 100
+      comparison: "gt"
+      duration_seconds: 120
+      action: "scale_out"
+      instance_change: 5
+      cooldown_seconds: 60
+      priority: 2
+    
+    - name: "scale_in_cpu"
+      metric: "cpu_percent"
+      threshold: 30
+      comparison: "lt"
+      duration_seconds: 600
+      action: "scale_in"
+      instance_change: 1
+      cooldown_seconds: 300
+      priority: 1
+    
+    - name: "scale_in_safe_cpu"
+      metric: "cpu_percent"
+      threshold: 20
+      comparison: "lt"
+      duration_seconds: 900
+      action: "scale_in"
+      instance_change: 2
+      cooldown_seconds: 300
+      priority: 1
+    
+    - name: "emergency_high_cpu"
+      metric: "cpu_percent"
+      threshold: 95
+      comparison: "gt"
+      duration_seconds: 30
+      action: "emergency"
+      instance_change: 5
+      cooldown_seconds: 0
+      priority: 10
+
+# Load Balancer Configuration
+load_balancer:
+  algorithm: "dynamic_weighted"
+  health_check_interval: 10
+  weight_update_interval: 5
+  
+  # Weight calculation factors
+  weight_factors:
+    cpu: 1.0
+    memory: 1.0
+    response_time: 1.0
+    connections: 1.0
+    thinking_time: 1.0
+  
+  # Session affinity
+  session_affinity:
+    enabled: true
+    ttl_seconds: 3600
+
+# Health Check Configuration
+health_checks:
+  layers:
+    - name: "tcp"
+      interval_seconds: 5
+      timeout_seconds: 2
+      failure_threshold: 3
+    
+    - name: "http"
+      interval_seconds: 10
+      timeout_seconds: 5
+      endpoint: "/health"
+      failure_threshold: 3
+    
+    - name: "application"
+      interval_seconds: 30
+      timeout_seconds: 10
+      failure_threshold: 2
+    
+    - name: "deep"
+      interval_seconds: 60
+      timeout_seconds: 30
+      failure_threshold: 1
+
+# Work Distribution
+work_distribution:
+  # Priority queues
+  queues:
+    - name: "critical"
+      priority_levels: ["P0", "P1"]
+      ttl_seconds: 300
+      max_retry: 3
+    
+    - name: "high"
+      priority_levels: ["P2", "P3"]
+      ttl_seconds: 3600
+      max_retry: 3
+    
+    - name: "normal"
+      priority_levels: ["P4", "P5"]
+      ttl_seconds: 86400
+      max_retry: 2
+    
+    - name: "background"
+      priority_levels: ["P6"]
+      ttl_seconds: 604800
+      max_retry: 1
+
+# Cron Job Distribution (15 Hardcoded Loops)
+cron_jobs:
+  distribution:
+    strategy: "consistent_hash"
+    backup_instances: 2
+  
+  jobs:
+    - id: "loop_01"
+      interval: "*/5 * * * *"
+      priority: "high"
+    
+    - id: "loop_02"
+      interval: "*/10 * * * *"
+      priority: "high"
+    
+    - id: "loop_03"
+      interval: "*/15 * * * *"
+      priority: "medium"
+    
+    - id: "loop_04"
+      interval: "*/15 * * * *"
+      priority: "medium"
+    
+    - id: "loop_05"
+      interval: "*/30 * * * *"
+      priority: "medium"
+    
+    - id: "loop_06"
+      interval: "*/30 * * * *"
+      priority: "medium"
+    
+    - id: "loop_07"
+      interval: "0 * * * *"
+      priority: "low"
+    
+    - id: "loop_08"
+      interval: "0 * * * *"
+      priority: "low"
+    
+    - id: "loop_09"
+      interval: "0 */2 * * *"
+      priority: "low"
+    
+    - id: "loop_10"
+      interval: "0 */3 * * *"
+      priority: "low"
+    
+    - id: "loop_11"
+      interval: "0 */6 * * *"
+      priority: "low"
+    
+    - id: "loop_12"
+      interval: "0 */12 * * *"
+      priority: "low"
+    
+    - id: "loop_13"
+      interval: "0 0 * * *"
+      priority: "low"
+    
+    - id: "loop_14"
+      interval: "0 0 * * 0"
+      priority: "low"
+    
+    - id: "loop_15"
+      interval: "0 0 1 * *"
+      priority: "low"
+
+# Resource Quotas
+resource_quotas:
+  tiers:
+    free:
+      cpu_cores: 0.5
+      memory_gb: 1.0
+      disk_io_mbps: 10.0
+      network_mbps: 10.0
+      gpt52_tokens_per_min: 100
+      gpt52_requests_per_min: 10
+      browser_instances: 1
+      concurrent_tasks: 2
+    
+    basic:
+      cpu_cores: 1.0
+      memory_gb: 2.0
+      disk_io_mbps: 20.0
+      network_mbps: 20.0
+      gpt52_tokens_per_min: 500
+      gpt52_requests_per_min: 30
+      browser_instances: 2
+      concurrent_tasks: 5
+    
+    premium:
+      cpu_cores: 2.0
+      memory_gb: 4.0
+      disk_io_mbps: 50.0
+      network_mbps: 50.0
+      gpt52_tokens_per_min: 2000
+      gpt52_requests_per_min: 100
+      browser_instances: 5
+      concurrent_tasks: 10
+    
+    enterprise:
+      cpu_cores: 4.0
+      memory_gb: 8.0
+      disk_io_mbps: 100.0
+      network_mbps: 100.0
+      gpt52_tokens_per_min: 10000
+      gpt52_requests_per_min: 500
+      browser_instances: 10
+      concurrent_tasks: 20
+
+# Bottleneck Detection
+bottleneck_detection:
+  check_interval_seconds: 30
+  
+  signatures:
+    - type: "gpt_52_throttling"
+      severity: "critical"
+      indicators:
+        - metric: "gpt_response_time_ms"
+          threshold: 5000
+          comparison: "gt"
+          weight: 1.0
+        - metric: "gpt_tokens_per_min"
+          threshold: 500
+          comparison: "lt"
+          weight: 0.8
+        - metric: "gpt_queue_depth"
+          threshold: 20
+          comparison: "gt"
+          weight: 0.9
+      min_indicators: 2
+      auto_remediation: "scale_out_gpt_workers"
+    
+    - type: "memory_pressure"
+      severity: "critical"
+      indicators:
+        - metric: "memory_percent"
+          threshold: 90
+          comparison: "gt"
+          weight: 1.0
+        - metric: "swap_percent"
+          threshold: 50
+          comparison: "gt"
+          weight: 0.8
+      min_indicators: 2
+      auto_remediation: "scale_out_and_restart_heavy"
+    
+    - type: "cpu_saturation"
+      severity: "high"
+      indicators:
+        - metric: "cpu_percent"
+          threshold: 95
+          comparison: "gt"
+          weight: 1.0
+        - metric: "load_avg"
+          threshold: 8
+          comparison: "gt"
+          weight: 0.9
+      min_indicators: 2
+      auto_remediation: "scale_out_instances"
+
+# Alerting
+alerting:
+  rules:
+    - name: "high_cpu_usage"
+      metric: "cpu_percent"
+      condition: "gt"
+      threshold: 70
+      duration_seconds: 300
+      severity: "warning"
+      channels: ["log", "slack"]
+      message: "High CPU usage: {value}%"
+      cooldown_seconds: 600
+    
+    - name: "critical_cpu_usage"
+      metric: "cpu_percent"
+      condition: "gt"
+      threshold: 90
+      duration_seconds: 60
+      severity: "critical"
+      channels: ["log", "slack", "pagerduty"]
+      message: "CRITICAL: CPU usage at {value}%"
+      cooldown_seconds: 300
+    
+    - name: "gpt52_high_latency"
+      metric: "gpt_response_time_ms"
+      condition: "gt"
+      threshold: 5000
+      duration_seconds: 300
+      severity: "warning"
+      channels: ["log", "slack"]
+      message: "GPT-5.2 response time high: {value}ms"
+      cooldown_seconds: 600
+    
+    - name: "queue_backlog"
+      metric: "queue_depth"
+      condition: "gt"
+      threshold: 100
+      duration_seconds: 300
+      severity: "warning"
+      channels: ["log", "slack"]
+      message: "Queue backlog: {value} messages"
+      cooldown_seconds: 600
+
+# Capacity Planning
+capacity_planning:
+  # Growth rates
+  growth_rates:
+    daily: 0.02
+    weekly: 0.15
+    monthly: 0.50
+  
+  # Planning periods
+  plan_period_days: 90
+  review_interval_days: 30
+  
+  # Cost estimation
+  costs:
+    cpu_per_hour: 0.05
+    memory_gb_per_hour: 0.01
+    storage_gb_per_month: 0.10
+    network_mbps_per_hour: 0.01
+    gpt_token: 0.00002
+
+# Performance Optimization
+optimization:
+  # Caching
+  cache:
+    enabled: true
+    l1_size: 1000
+    l1_ttl_seconds: 60
+    l2_ttl_seconds: 300
+    l3_ttl_seconds: 86400
+  
+  # Browser automation
+  browser:
+    pool_size: 10
+    headless: true
+    block_ads: true
+    parallel_tabs: 5
+  
+  # GPT-5.2
+  gpt52:
+    request_batching: true
+    streaming_responses: true
+    connection_pool_size: 10
+    timeout_seconds: 30
+
+# Monitoring
+monitoring:
+  metrics_retention_days: 30
+  
+  collection_intervals:
+    system: 10
+    application: 10
+    business: 60
+  
+  # Key metrics to track
+  key_metrics:
+    - name: "cpu_percent"
+      type: "gauge"
+      unit: "percent"
+    
+    - name: "memory_percent"
+      type: "gauge"
+      unit: "percent"
+    
+    - name: "gpt_response_time_ms"
+      type: "histogram"
+      unit: "milliseconds"
+    
+    - name: "gpt_tokens_per_min"
+      type: "counter"
+      unit: "tokens"
+    
+    - name: "queue_depth"
+      type: "gauge"
+      unit: "messages"
+    
+    - name: "active_instances"
+      type: "gauge"
+      unit: "instances"
+    
+    - name: "request_rate"
+      type: "counter"
+      unit: "requests_per_second"
+    
+    - name: "error_rate"
+      type: "gauge"
+      unit: "percent"
+
+# Windows-Specific Configuration
+windows:
+  # Service configuration
+  service:
+    name: "OpenClawAgent"
+    display_name: "OpenClaw AI Agent Service"
+    startup_type: "Automatic"
+    recovery:
+      reset_seconds: 86400
+      actions:
+        - action: "restart"
+          delay_ms: 5000
+        - action: "restart"
+          delay_ms: 10000
+        - action: "restart"
+          delay_ms: 30000
+  
+  # Performance counters
+  performance_counters:
+    enabled: true
+    counters:
+      - name: "Active Instances"
+        type: "NumberOfItems32"
+      - name: "Requests Per Second"
+        type: "RateOfCountsPerSecond32"
+      - name: "GPT-5.2 Response Time"
+        type: "AverageTimer32"
+  
+  # Container configuration
+  container:
+    type: "docker"  # or "windows_container"
+    base_image: "mcr.microsoft.com/windows/servercore:ltsc2022"
+    isolation: "process"  # or "hyperv"

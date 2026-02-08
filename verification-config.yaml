@@ -1,0 +1,278 @@
+# Verification Configuration for OpenClaw Agent System
+# Windows 10/11 Deployment
+
+verification:
+  # ============================================
+  # Health Check Configuration
+  # ============================================
+  
+  health_checks:
+    enabled: true
+    interval_seconds: 30
+    timeout_seconds: 10
+    max_retries: 3
+    retry_delay_seconds: 5
+    
+    endpoints:
+      - name: "main_health"
+        url: "http://localhost:8080/health"
+        expected_status: 200
+        required: true
+        timeout: 10
+      
+      - name: "agent_loops_health"
+        url: "http://localhost:8080/health/agents"
+        expected_status: 200
+        required: true
+        timeout: 15
+        expected_response:
+          path: "$.agents[*].status"
+          value: "running"
+          count_min: 15
+      
+      - name: "ready_check"
+        url: "http://localhost:8080/ready"
+        expected_status: 200
+        required: true
+        timeout: 10
+      
+      - name: "live_check"
+        url: "http://localhost:8080/live"
+        expected_status: 200
+        required: false
+        timeout: 5
+      
+      - name: "metrics_endpoint"
+        url: "http://localhost:8080/metrics"
+        expected_status: 200
+        required: false
+        timeout: 5
+  
+  # ============================================
+  # Smoke Test Configuration
+  # ============================================
+  
+  smoke_tests:
+    enabled: true
+    timeout_seconds: 120
+    parallel_execution: true
+    
+    tests:
+      - name: "core_orchestrator"
+        description: "Test core orchestrator functionality"
+        required: true
+        timeout: 30
+        test_type: api
+        endpoint: /test/core
+        expected_status: 200
+      
+      - name: "gmail_integration"
+        description: "Test Gmail API connectivity"
+        required: true
+        timeout: 30
+        test_type: api
+        endpoint: /test/gmail
+        expected_status: 200
+      
+      - name: "browser_control"
+        description: "Test browser automation"
+        required: true
+        timeout: 45
+        test_type: api
+        endpoint: /test/browser
+        expected_status: 200
+      
+      - name: "voice_handler"
+        description: "Test Twilio voice/SMS"
+        required: true
+        timeout: 30
+        test_type: api
+        endpoint: /test/voice
+        expected_status: 200
+      
+      - name: "tts_stt"
+        description: "Test TTS and STT engines"
+        required: true
+        timeout: 30
+        test_type: api
+        endpoint: /test/audio
+        expected_status: 200
+      
+      - name: "memory_system"
+        description: "Test memory storage and retrieval"
+        required: true
+        timeout: 20
+        test_type: api
+        endpoint: /test/memory
+        expected_status: 200
+      
+      - name: "user_system"
+        description: "Test user authentication"
+        required: true
+        timeout: 20
+        test_type: api
+        endpoint: /test/auth
+        expected_status: 200
+      
+      - name: "gpt_interface"
+        description: "Test GPT-5.2 connectivity"
+        required: true
+        timeout: 60
+        test_type: api
+        endpoint: /test/gpt
+        expected_status: 200
+  
+  # ============================================
+  # Metric Verification
+  # ============================================
+  
+  metrics:
+    enabled: true
+    window_seconds: 300              # 5 minute window
+    collection_interval_seconds: 10
+    
+    thresholds:
+      error_rate:
+        max: 0.001                   # 0.1%
+        warning: 0.0005              # 0.05%
+        critical: 0.01               # 1%
+      
+      latency:
+        p50_max_ms: 100
+        p95_max_ms: 300
+        p99_max_ms: 500
+        p50_warning_ms: 75
+        p95_warning_ms: 200
+      
+      throughput:
+        min_requests_per_second: 10
+        expected_requests_per_second: 50
+      
+      resources:
+        cpu_max_percent: 70
+        cpu_warning_percent: 60
+        memory_max_percent: 75
+        memory_warning_percent: 65
+        disk_max_percent: 80
+      
+      agent_loops:
+        min_running: 15
+        max_restart_count: 3
+        max_error_rate: 0.01
+  
+  # ============================================
+  # Continuous Verification
+  # ============================================
+  
+  continuous:
+    enabled: true
+    interval_seconds: 60
+    
+    checks:
+      - type: metric_validation
+        enabled: true
+        interval: 60
+      
+      - type: log_analysis
+        enabled: true
+        interval: 30
+        error_pattern: "ERROR|CRITICAL|FATAL|EXCEPTION"
+        max_errors_per_minute: 10
+        max_critical_per_minute: 1
+      
+      - type: user_experience
+        enabled: true
+        interval: 300
+        apdex_threshold: 0.9
+        apdex_toleration_ms: 500
+      
+      - type: external_services
+        enabled: true
+        interval: 60
+        services:
+          - gmail_api
+          - twilio_api
+          - openai_api
+      
+      - type: business_metrics
+        enabled: true
+        interval: 300
+        metrics:
+          - gmail_processing_rate
+          - voice_call_success_rate
+          - user_session_duration
+  
+  # ============================================
+  # Failure Handling
+  # ============================================
+  
+  on_failure:
+    action: alert_and_rollback        # alert, rollback, alert_and_rollback, ignore
+    
+    alert_channels:
+      - slack
+      - email
+      - pagerduty
+    
+    auto_rollback:
+      enabled: true
+      consecutive_failures: 3
+      failure_rate_threshold: 0.5     # 50% of checks failing
+      
+    escalation:
+      enabled: true
+      delay_minutes: 5
+  
+  # ============================================
+  # Pre-Deployment Verification
+  # ============================================
+  
+  pre_deployment:
+    enabled: true
+    
+    checks:
+      - artifact_integrity
+      - configuration_valid
+      - dependencies_available
+      - disk_space_sufficient
+      - ports_available
+    
+    min_disk_space_mb: 1000
+    required_ports: [8080, 8081, 9222]
+  
+  # ============================================
+  # Post-Deployment Verification
+  # ============================================
+  
+  post_deployment:
+    enabled: true
+    
+    immediate_checks:
+      - service_started
+      - health_endpoint_responding
+      - agent_loops_running
+    
+    extended_checks:
+      duration_minutes: 30
+      interval_seconds: 60
+      checks:
+        - error_rate_acceptable
+        - latency_acceptable
+        - resource_usage_acceptable
+        - business_metrics_healthy
+  
+  # ============================================
+  # Verification Report
+  # ============================================
+  
+  reporting:
+    enabled: true
+    format: json
+    
+    output:
+      file: "C:\\OpenClaw\\Logs\\verification-report.json"
+      webhook: https://monitoring.openclaw.io/verification-reports
+    
+    retention:
+      days: 30
+      max_files: 100
