@@ -12,6 +12,7 @@ import queue
 import os
 import logging
 import yaml
+from datetime import date
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,8 @@ class TTSOrchestrator:
             'requests_total': 0,
             'requests_success': 0,
             'requests_failed': 0,
-            'avg_latency_ms': 0
+            'avg_latency_ms': 0,
+            'stats_date': date.today().isoformat(),
         }
 
         self._initialize()
@@ -101,11 +103,13 @@ class TTSOrchestrator:
         }
 
     def _initialize(self):
-        """Initialize all components"""
+        """Initialize all components. Adapters are fully initialized before
+        the worker thread starts so that early requests never hit an
+        uninitialized adapter."""
         # Initialize adapters based on configuration
         self._init_adapters()
 
-        # Start worker thread
+        # Only start the worker once adapters are ready
         self._start_worker()
 
     def _init_adapters(self):
@@ -165,8 +169,21 @@ class TTSOrchestrator:
             except (RuntimeError, OSError) as e:
                 logger.error(f"[TTS] Queue processing error: {e}")
 
+    def _maybe_reset_daily_stats(self):
+        """Reset statistics on day boundary."""
+        today = date.today().isoformat()
+        if self._stats.get('stats_date') != today:
+            self._stats = {
+                'requests_total': 0,
+                'requests_success': 0,
+                'requests_failed': 0,
+                'avg_latency_ms': 0,
+                'stats_date': today,
+            }
+
     def _execute_request(self, request: TTSRequest) -> TTSResponse:
         """Execute TTS request"""
+        self._maybe_reset_daily_stats()
         start_time = time.time()
         self._stats['requests_total'] += 1
 
@@ -190,15 +207,35 @@ class TTSOrchestrator:
                     text,
                     voice_id=request.voice_id
                 )
+                # Collect streamed chunks into a single bytes buffer
+                chunks = []
+                for chunk in audio_stream:
+                    if chunk is None:
+                        continue
+                    if not isinstance(chunk, (bytes, bytearray)):
+                        raise TypeError(
+                            f"TTS adapter {engine.value} streaming yielded "
+                            f"{type(chunk).__name__}, expected bytes"
+                        )
+                    chunks.append(chunk)
+                audio_data = b"".join(chunks) if chunks else None
+                if audio_data is None:
+                    raise RuntimeError(f"TTS adapter {engine.value} streaming produced no audio")
                 response = TTSResponse(
                     success=True,
+                    audio_data=audio_data,
                     engine_used=engine.value,
-                    duration_ms=0  # Streaming
+                    duration_ms=int((time.time() - start_time) * 1000)
                 )
             else:
                 audio_data = adapter.text_to_speech(text, voice_id=request.voice_id)
                 if audio_data is None:
                     raise RuntimeError(f"TTS adapter {engine.value} returned None")
+                if not isinstance(audio_data, (bytes, bytearray)):
+                    raise TypeError(
+                        f"TTS adapter {engine.value} returned "
+                        f"{type(audio_data).__name__}, expected bytes"
+                    )
                 response = TTSResponse(
                     success=True,
                     audio_data=audio_data,
@@ -207,7 +244,7 @@ class TTSOrchestrator:
 
             self._stats['requests_success'] += 1
 
-        except (RuntimeError, OSError, ValueError) as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
             self._stats['requests_failed'] += 1
             response = TTSResponse(
                 success=False,

@@ -574,32 +574,80 @@ class UserNotificationSystem:
         return ok
 
     def _deliver_email(self, notification: UserNotification) -> bool:
-        """Deliver notification via GmailClient."""
-        if not _gmail_available:
-            logger.info("Gmail client not available; email delivery skipped")
-            return False
-        try:
-            if self._gmail_client is None:
-                self._gmail_client = GmailClient()
-            recipient = "user@example.com"
-            if hasattr(notification, "metadata") and isinstance(
-                getattr(notification, "metadata", None), dict
-            ):
-                recipient = notification.metadata.get("email", recipient)
-            self._gmail_client.messages.send_message(
-                to=recipient,
-                subject=notification.title,
-                body=notification.message[:2000],
+        """
+        Deliver notification via email.
+
+        Attempts GmailClient first (if available), then falls back to
+        SMTP using env vars SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
+        and NOTIFICATION_EMAIL_TO for the recipient.
+        """
+        recipient = "user@example.com"
+        if hasattr(notification, "metadata") and isinstance(
+            getattr(notification, "metadata", None), dict
+        ):
+            recipient = notification.metadata.get("email", recipient)
+
+        # Strategy 1: GmailClient
+        if _gmail_available:
+            try:
+                if self._gmail_client is None:
+                    self._gmail_client = GmailClient()
+                self._gmail_client.messages.send_message(
+                    to=recipient,
+                    subject=notification.title,
+                    body=notification.message[:2000],
+                )
+                return True
+            except Exception as exc:
+                logger.warning("GmailClient delivery failed, trying SMTP: %s", exc)
+
+        # Strategy 2: smtplib using environment config
+        import os
+        smtp_host = os.environ.get("SMTP_HOST", "")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        smtp_user = os.environ.get("SMTP_USER", "")
+        smtp_pass = os.environ.get("SMTP_PASSWORD", "")
+        env_recipient = os.environ.get("NOTIFICATION_EMAIL_TO", "")
+
+        if env_recipient:
+            recipient = env_recipient
+
+        if not smtp_host or not smtp_user:
+            logger.warning(
+                "Email delivery skipped: configure SMTP_HOST, SMTP_PORT, SMTP_USER, "
+                "SMTP_PASSWORD, and NOTIFICATION_EMAIL_TO environment variables, "
+                "or install gmail_client_implementation for Gmail delivery."
             )
+            return False
+
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+
+            msg = MIMEText(notification.message[:2000])
+            msg["Subject"] = notification.title
+            msg["From"] = smtp_user
+            msg["To"] = recipient
+
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, [recipient], msg.as_string())
             return True
         except Exception as exc:
-            logger.warning("Email delivery failed: %s", exc)
+            logger.warning("SMTP email delivery failed: %s", exc)
             return False
 
     def _deliver_sms(self, notification: UserNotification) -> bool:
         """Deliver notification via Twilio SMS."""
         if not _twilio_available:
-            logger.info("Twilio client not available; SMS delivery skipped")
+            logger.warning(
+                "SMS delivery skipped: twilio_voice_integration package not installed. "
+                "Install it and set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, "
+                "TWILIO_FROM_NUMBER, and TWILIO_TO_NUMBER to enable SMS notifications."
+            )
             return False
         try:
             import os
@@ -626,7 +674,11 @@ class UserNotificationSystem:
     def _deliver_voice(self, notification: UserNotification) -> bool:
         """Deliver notification via Twilio voice call."""
         if not _twilio_available:
-            logger.info("Twilio client not available; voice delivery skipped")
+            logger.warning(
+                "Voice delivery skipped: twilio_voice_integration package not installed. "
+                "Install it and set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, "
+                "TWILIO_FROM_NUMBER, and TWILIO_TO_NUMBER to enable voice notifications."
+            )
             return False
         try:
             import os

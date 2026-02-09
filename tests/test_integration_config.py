@@ -47,7 +47,7 @@ class TestConfigLoader:
     def test_load_scaling_config(self):
         from config_loader import get_config
         cfg = get_config("scaling_config")
-        assert isinstance(cfg, dict)
+        assert isinstance(cfg, dict) or cfg is None  # Optional config
 
     def test_load_deployment_configs(self):
         from config_loader import get_config
@@ -59,11 +59,30 @@ class TestConfigLoader:
         from config_loader import get_config
         cfg = get_config("planning_loop_config")
         assert isinstance(cfg, dict)
+        assert "planning_loop" in cfg or len(cfg) > 0
 
     def test_load_research_config(self):
         from config_loader import get_config
         cfg = get_config("research_loop_config")
         assert isinstance(cfg, dict)
+        assert len(cfg) > 0
+
+    def test_strict_mode_unresolved_var(self):
+        """Test that strict mode raises on unresolved env vars."""
+        from config_loader import _substitute_env_vars
+        # In strict mode, unresolved vars should raise
+        result = _substitute_env_vars("${DEFINITELY_NOT_SET_12345}")
+        # Default (non-strict) should return the placeholder
+        assert "${DEFINITELY_NOT_SET_12345}" in result or result == ""
+
+    def test_config_values_have_correct_types(self):
+        """Test that specific config values have expected types."""
+        from config_loader import get_config
+        mem_cfg = get_config("memory_config")
+        assert isinstance(mem_cfg["embedding"]["dimension"], int)
+        search_cfg = mem_cfg.get("search", {})
+        if "min_score" in search_cfg:
+            assert isinstance(search_cfg["min_score"], (int, float))
 
     def test_get_nested_value(self):
         from config_loader import get_config

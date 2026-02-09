@@ -925,16 +925,17 @@ class MFAHandler:
             detected_type = await self.detect_mfa_type(page)
             if detected_type != MFAType.UNKNOWN:
                 preferred_type = detected_type
-        
+                logger.info("Auto-detected MFA type: %s", detected_type.name)
+
         # Get MFA credentials
         mfa_creds = await self.vault.get_mfa_credentials(service_name, username)
-        
+
         if not mfa_creds:
             return MFAResult(
                 success=False,
                 error="MFA credentials not found"
             )
-        
+
         # Determine which handler to use
         handler_map = {
             MFAType.TOTP: self.totp_handler,
@@ -942,15 +943,52 @@ class MFAHandler:
             MFAType.EMAIL: self.email,
             MFAType.BACKUP_CODE: self.backup_handler,
         }
-        
-        handler = handler_map.get(preferred_type or mfa_creds.mfa_type)
-        
+
+        resolved_type = preferred_type or mfa_creds.mfa_type
+
+        # When type is still UNKNOWN, try handlers in priority order based on
+        # what credentials are available rather than giving up immediately.
+        if resolved_type == MFAType.UNKNOWN:
+            logger.warning(
+                "MFA type could not be detected for %s/%s; "
+                "trying available handlers in priority order (TOTP > SMS > BACKUP_CODE)",
+                service_name, username,
+            )
+            fallback_order = [MFAType.TOTP, MFAType.SMS, MFAType.BACKUP_CODE]
+            for mfa_type in fallback_order:
+                handler = handler_map.get(mfa_type)
+                if not handler:
+                    continue
+                # Check if credentials support this type
+                if mfa_type == MFAType.TOTP and not mfa_creds.totp_secret:
+                    continue
+                if mfa_type == MFAType.SMS and not mfa_creds.phone_number:
+                    continue
+                if mfa_type == MFAType.BACKUP_CODE and not mfa_creds.backup_codes:
+                    continue
+                logger.info("Attempting MFA fallback with %s", mfa_type.name)
+                result = await handler.handle(page, mfa_creds)
+                if result.success:
+                    return result
+                logger.warning("MFA fallback %s failed: %s", mfa_type.name, result.error)
+
+            return MFAResult(
+                success=False,
+                error=(
+                    f"MFA type unknown and all fallback handlers failed for "
+                    f"{service_name}/{username}. Ensure MFA credentials include "
+                    f"a TOTP secret, phone number, or backup codes."
+                ),
+            )
+
+        handler = handler_map.get(resolved_type)
+
         if not handler:
             return MFAResult(
                 success=False,
-                error=f"No handler available for MFA type: {preferred_type or mfa_creds.mfa_type}"
+                error=f"No handler available for MFA type: {resolved_type}"
             )
-        
+
         # Execute handler
         return await handler.handle(page, mfa_creds)
     

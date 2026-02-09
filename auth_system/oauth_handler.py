@@ -925,13 +925,17 @@ class OAuthHandler:
                     if consent_button:
                         await consent_button.click()
                 except (TimeoutError, OSError):
-                    pass  # No consent screen, continue
+                    logger.debug("No consent screen detected for %s, continuing", provider)
 
         except (OSError, ValueError, TimeoutError) as e:
-            logger.warning(f"Automated login handling failed for {provider}: {e}")
+            logger.error(
+                "Automated login handling failed for %s: %s. "
+                "This may indicate the login page structure has changed.",
+                provider, e,
+            )
             # Try generic fallback if provider-specific failed
             if provider != 'generic':
-                logger.info("Retrying with generic selectors")
+                logger.info("Retrying with generic selectors for %s", provider)
                 try:
                     fallback = self._GENERIC_SELECTORS
                     username_field = await page.wait_for_selector(
@@ -952,7 +956,14 @@ class OAuthHandler:
                         if submit_btn:
                             await submit_btn.click()
                 except (OSError, ValueError, TimeoutError) as fallback_err:
-                    logger.warning(f"Generic fallback login also failed: {fallback_err}")
+                    logger.error(
+                        "Generic fallback login also failed for %s: %s",
+                        provider, fallback_err,
+                    )
+                    raise OAuthError(
+                        f"Login automation failed for {provider}: "
+                        f"provider-specific error: {e}, fallback error: {fallback_err}"
+                    ) from fallback_err
     
     async def refresh_token(
         self,

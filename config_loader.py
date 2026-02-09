@@ -35,11 +35,31 @@ _ENV_PATTERN = re.compile(r'\$\{(\w+)(?::([^}]*))?\}')
 def _env_constructor(loader: yaml.SafeLoader, node: yaml.Node) -> str:
     """Handle !env tag: !env ${VAR_NAME:default_value}"""
     value = loader.construct_scalar(node)
-    return _substitute_env_vars(value)
+    strict = getattr(loader, 'strict', False)
+    return _substitute_env_vars(value, strict=strict)
 
 
-def _substitute_env_vars(value: str) -> str:
-    """Replace ${VAR_NAME} and ${VAR_NAME:default} patterns with env values."""
+class UnresolvedEnvVarError(Exception):
+    """Raised when strict mode finds unresolved ${VAR} placeholders."""
+    def __init__(self, unresolved: List[str]):
+        self.unresolved = unresolved
+        super().__init__(
+            f"Unresolved environment variables: {', '.join(unresolved)}"
+        )
+
+
+def _substitute_env_vars(value: str, *, strict: bool = False) -> str:
+    """Replace ${VAR_NAME} and ${VAR_NAME:default} patterns with env values.
+
+    Args:
+        value: The string containing env var placeholders.
+        strict: When True, raise ``UnresolvedEnvVarError`` if any placeholder
+                has no matching env var and no default value.  When False
+                (the default), unresolved placeholders are left as literal
+                strings (backwards-compatible behaviour).
+    """
+    unresolved: List[str] = []
+
     def _replacer(match):
         var_name = match.group(1)
         default = match.group(2)
@@ -48,21 +68,33 @@ def _substitute_env_vars(value: str) -> str:
             return env_val
         if default is not None:
             return default
+        # No env var found and no default provided
+        unresolved.append(var_name)
         return match.group(0)  # leave unchanged if no env and no default
 
-    return _ENV_PATTERN.sub(_replacer, value)
+    result = _ENV_PATTERN.sub(_replacer, value)
+
+    if strict and unresolved:
+        raise UnresolvedEnvVarError(unresolved)
+
+    return result
 
 
 class _EnvVarLoader(yaml.SafeLoader):
-    """YAML loader that substitutes ${ENV_VAR} patterns in all strings."""
-    pass
+    """YAML loader that substitutes ${ENV_VAR} patterns in all strings.
+
+    Set the class-level ``strict`` attribute to ``True`` before loading
+    to raise on unresolved env-var placeholders.
+    """
+    strict: bool = False
 
 
 def _env_str_constructor(loader, node):
     """Implicitly substitute env vars in all scalar strings."""
     value = loader.construct_scalar(node)
     if isinstance(value, str) and '${' in value:
-        return _substitute_env_vars(value)
+        strict = getattr(loader, 'strict', False)
+        return _substitute_env_vars(value, strict=strict)
     return value
 
 
@@ -86,8 +118,36 @@ class ConfigValidationError(Exception):
         super().__init__(f"Config validation failed: {'; '.join(errors)}")
 
 
+# Keys that are commonly expected at the top level of config files.
+# A warning (not an error) is emitted when these are absent.
+_COMMON_EXPECTED_KEYS: List[str] = [
+    'version',
+    'logging',
+]
+
+
 def _validate_required_keys(config: dict, required: List[str], prefix: str = "") -> List[str]:
-    """Check that all required keys exist in the config dict."""
+    """Check that all *required* keys exist in the config dict.
+
+    Args:
+        config: The parsed configuration dictionary.
+        required: Dot-separated key paths that must be present
+                  (e.g. ``["database.host", "database.port"]``).
+        prefix: Internal prefix used for nested error messages.
+
+    Returns:
+        A list of human-readable error strings for every missing key.
+        An empty list means all required keys are present.
+
+    Example::
+
+        errors = _validate_required_keys(
+            config,
+            required=["database.host", "database.port", "api.key"],
+        )
+        if errors:
+            raise ConfigValidationError(errors)
+    """
     errors = []
     for key in required:
         parts = key.split('.')
@@ -100,6 +160,16 @@ def _validate_required_keys(config: dict, required: List[str], prefix: str = "")
                 break
             current = current[part]
     return errors
+
+
+def _warn_common_keys(config: dict, config_name: str) -> None:
+    """Emit warnings for commonly expected top-level keys that are absent."""
+    for key in _COMMON_EXPECTED_KEYS:
+        if key not in config:
+            logger.warning(
+                f"Config '{config_name}' is missing commonly expected key '{key}'. "
+                f"Consider adding it for consistency."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -144,13 +214,22 @@ class ConfigLoader:
         with cls._lock:
             cls._instance = None
 
-    def load(self, name: str, required_keys: Optional[List[str]] = None) -> dict:
+    def load(
+        self,
+        name: str,
+        required_keys: Optional[List[str]] = None,
+        strict: bool = False,
+    ) -> dict:
         """
         Load a YAML config file by name (without .yaml extension).
 
         Args:
             name: Config file name (e.g., "memory_config", "cpel_config")
-            required_keys: Optional list of dot-separated keys that must exist
+            required_keys: Optional list of dot-separated keys that must exist.
+                Use :func:`_validate_required_keys` for programmatic validation.
+            strict: When True, raise ``UnresolvedEnvVarError`` if any
+                ``${VAR}`` placeholder cannot be resolved from the
+                environment and has no default value.
 
         Returns:
             Parsed config dictionary
@@ -158,12 +237,16 @@ class ConfigLoader:
         Raises:
             FileNotFoundError: If config file doesn't exist
             ConfigValidationError: If required keys are missing
+            UnresolvedEnvVarError: If *strict* is True and env vars are unresolved
         """
         with self._cache_lock:
             if name in self._cache:
                 return deepcopy(self._cache[name])
 
-        config = self._load_file(name)
+        config = self._load_file(name, strict=strict)
+
+        # Warn about commonly expected keys that are absent
+        _warn_common_keys(config, name)
 
         if required_keys:
             errors = _validate_required_keys(config, required_keys)
@@ -175,8 +258,14 @@ class ConfigLoader:
 
         return deepcopy(config)
 
-    def _load_file(self, name: str) -> dict:
-        """Load and parse a YAML file."""
+    def _load_file(self, name: str, strict: bool = False) -> dict:
+        """Load and parse a YAML file.
+
+        Args:
+            name: Config file stem (no extension).
+            strict: When True the YAML loader will raise on unresolved
+                ``${VAR}`` env-var placeholders.
+        """
         # Try multiple locations
         candidates = [
             self._config_dir / f"{name}.yaml",
@@ -188,8 +277,14 @@ class ConfigLoader:
         for path in candidates:
             if path.exists():
                 logger.debug(f"Loading config from {path}")
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = yaml.load(f, Loader=_EnvVarLoader)
+                # Temporarily set strict flag on the loader class
+                prev_strict = _EnvVarLoader.strict
+                _EnvVarLoader.strict = strict
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        data = yaml.load(f, Loader=_EnvVarLoader)
+                finally:
+                    _EnvVarLoader.strict = prev_strict
                 if data is None:
                     data = {}
                 return data
@@ -280,7 +375,12 @@ class ConfigLoader:
 # Module-level convenience functions
 # ---------------------------------------------------------------------------
 
-def get_config(name: str, key_path: Optional[str] = None, default: Any = None) -> Any:
+def get_config(
+    name: str,
+    key_path: Optional[str] = None,
+    default: Any = None,
+    strict: bool = False,
+) -> Any:
     """
     Convenience function to get config values.
 
@@ -288,6 +388,8 @@ def get_config(name: str, key_path: Optional[str] = None, default: Any = None) -
         name: Config file name (e.g., "memory_config")
         key_path: Optional dot-separated path (e.g., "embedding.dimension")
         default: Default value if not found
+        strict: When True, raise ``UnresolvedEnvVarError`` for any
+            ``${VAR}`` placeholder that cannot be resolved.
 
     Returns:
         Full config dict (if no key_path) or specific value
@@ -301,11 +403,14 @@ def get_config(name: str, key_path: Optional[str] = None, default: Any = None) -
 
         # Get section
         search = get_config("memory_config", "search")
+
+        # Strict mode – blow up on unresolved env vars
+        cfg = get_config("memory_config", strict=True)
     """
     loader = ConfigLoader.instance()
     if key_path is None:
         try:
-            return loader.load(name)
+            return loader.load(name, strict=strict)
         except FileNotFoundError:
             return default if default is not None else {}
     return loader.get(name, key_path, default)

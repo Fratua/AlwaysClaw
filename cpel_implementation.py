@@ -302,8 +302,8 @@ class PerformanceTracker:
         metrics.latency_ms = execution_time_ms
         
         # Calculate token counts (simplified estimation)
-        metrics.token_count_input = len(rendered_prompt.split()) // 0.75
-        metrics.token_count_output = len(llm_response.split()) // 0.75
+        metrics.token_count_input = int(len(rendered_prompt.split()) / 0.75)
+        metrics.token_count_output = int(len(llm_response.split()) / 0.75)
         metrics.token_efficiency = (
             metrics.token_count_output / max(metrics.token_count_input, 1)
         )
@@ -336,59 +336,175 @@ class PerformanceTracker:
         context: ExecutionContext,
         llm_interface: Any
     ) -> Dict[str, float]:
-        """Use LLM to evaluate response quality across dimensions."""
-        evaluation_prompt = f"""
-        Evaluate the following AI response based on the original prompt and context.
-        
-        ORIGINAL PROMPT (truncated):
-        {prompt[:1500]}
-        
-        AI RESPONSE (truncated):
-        {response[:1500]}
-        
-        CONTEXT:
-        Task Type: {context.task_type.value if context.task_type else 'unknown'}
-        User Intent: {context.user_intent or 'unknown'}
-        Complexity: {context.complexity_score:.2f}
-        
-        Rate the response on a scale of 0.0 to 1.0 for:
-        1. accuracy - factual correctness
-        2. relevance - addresses the specific query
-        3. completeness - fully answers the question
-        4. coherence - logical flow and clarity
-        5. helpfulness - practical utility
-        
-        Return ONLY a JSON object with these scores.
+        """Evaluate response quality using objective heuristics.
+
+        Primary scoring uses measurable text properties (length, overlap,
+        structure) rather than asking the same LLM to judge its own output,
+        which would be circular.  An optional LLM cross-check is used only
+        to adjust scores by a small delta when available.
         """
-        
+        prompt_lower = prompt.lower()
+        response_lower = response.lower()
+        prompt_words = set(prompt_lower.split())
+        response_words = response_lower.split()
+        response_word_set = set(response_words)
+
+        # --- Objective relevance: word overlap between prompt and response ---
+        if prompt_words:
+            overlap = len(prompt_words & response_word_set) / len(prompt_words)
+        else:
+            overlap = 0.5
+        relevance = min(1.0, overlap * 1.5)  # scale up; partial overlap is fine
+
+        # --- Objective completeness: response length relative to complexity ---
+        expected_min_words = max(20, int(context.complexity_score * 200))
+        completeness = min(1.0, len(response_words) / expected_min_words)
+
+        # --- Objective coherence: sentence count, avg sentence length ---
+        sentences = [s.strip() for s in re.split(r'[.!?]+', response) if s.strip()]
+        if sentences:
+            avg_sentence_len = np.mean([len(s.split()) for s in sentences])
+            # Penalize very short (<5 words) or very long (>40 words) avg sentences
+            if 5 <= avg_sentence_len <= 40:
+                coherence = 0.8
+            elif avg_sentence_len < 5:
+                coherence = 0.4
+            else:
+                coherence = 0.5
+            # Bonus for having multiple sentences
+            coherence = min(1.0, coherence + min(len(sentences), 5) * 0.04)
+        else:
+            coherence = 0.3
+
+        # --- Objective helpfulness proxy: presence of actionable language ---
+        action_indicators = ['you can', 'try', 'use', 'run', 'open', 'click',
+                             'step', 'first', 'then', 'finally', 'example']
+        action_hits = sum(1 for a in action_indicators if a in response_lower)
+        helpfulness = min(1.0, 0.3 + action_hits * 0.07)
+
+        # --- Accuracy: cannot truly be measured without ground truth ---
+        # Use a conservative baseline; adjust slightly if LLM evaluation succeeds
+        accuracy = 0.6
+
+        # Optional LLM cross-check (small weight adjustment only)
         try:
-            evaluation = await llm_interface.generate(evaluation_prompt)
-            return json.loads(evaluation)
-        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
-            logger.error(f"Quality evaluation failed: {e}")
-            return {
-                'accuracy': 0.5,
-                'relevance': 0.5,
-                'completeness': 0.5,
-                'coherence': 0.5,
-                'helpfulness': 0.5
-            }
+            evaluation_prompt = (
+                f"Rate this AI response 0.0-1.0 for accuracy only.\n"
+                f"Prompt: {prompt[:500]}\nResponse: {response[:500]}\n"
+                f"Return JSON: {{\"accuracy\": <float>}}"
+            )
+            raw = await llm_interface.generate(evaluation_prompt)
+            llm_scores = json.loads(raw)
+            llm_accuracy = float(llm_scores.get('accuracy', 0.6))
+            # Blend: 70% objective baseline, 30% LLM
+            accuracy = 0.7 * accuracy + 0.3 * llm_accuracy
+        except (OSError, ConnectionError, TimeoutError, ValueError, TypeError, KeyError):
+            pass  # keep objective baseline
+
+        return {
+            'accuracy': round(accuracy, 3),
+            'relevance': round(relevance, 3),
+            'completeness': round(completeness, 3),
+            'coherence': round(coherence, 3),
+            'helpfulness': round(helpfulness, 3),
+        }
             
     def _calculate_context_match(
         self,
         rendered_prompt: str,
         context: ExecutionContext
     ) -> float:
-        """Calculate how well the prompt matches the context."""
-        score = 1.0
-        
-        # Check if context indicators are present
-        if context.complexity_score > 0.7 and 'complex' not in rendered_prompt.lower():
-            score -= 0.1
-        if context.urgency_level > 0.7 and 'urgent' not in rendered_prompt.lower():
-            score -= 0.1
-            
-        return max(0.0, score)
+        """Calculate how well the prompt matches the execution context.
+
+        Uses multiple objective signals rather than checking for a single
+        keyword.  Each dimension contributes a weighted sub-score.
+        """
+        prompt_lower = rendered_prompt.lower()
+        score = 0.0
+        total_weight = 0.0
+
+        # 1. Task-type alignment: does the prompt mention the task domain?
+        task_weight = 0.30
+        total_weight += task_weight
+        task_keywords = {
+            'browser': ['browse', 'search', 'navigate', 'website', 'url', 'page'],
+            'email': ['email', 'inbox', 'send', 'reply', 'message', 'mail'],
+            'voice': ['call', 'voice', 'speak', 'phone', 'audio'],
+            'sms': ['sms', 'text message', 'messaging'],
+            'file': ['file', 'folder', 'directory', 'save', 'path'],
+            'schedule': ['schedule', 'remind', 'calendar', 'alarm', 'timer'],
+            'research': ['research', 'investigate', 'analyze', 'report'],
+            'tool_use': ['execute', 'command', 'run', 'tool'],
+        }
+        task_type_str = context.task_type.value if context.task_type else ''
+        keywords = task_keywords.get(task_type_str, [])
+        if keywords and any(kw in prompt_lower for kw in keywords):
+            score += task_weight
+        elif not keywords:
+            # Conversation / generic -- always matches
+            score += task_weight
+
+        # 2. Complexity alignment: complex prompts should contain step-by-step
+        #    or chain-of-thought guidance
+        complexity_weight = 0.20
+        total_weight += complexity_weight
+        if context.complexity_score > 0.7:
+            cot_indicators = ['step-by-step', 'step by step', 'think through',
+                              'reasoning', 'break down', 'analyze', 'explain']
+            if any(ind in prompt_lower for ind in cot_indicators):
+                score += complexity_weight
+            else:
+                score += complexity_weight * 0.3  # partial credit
+        else:
+            score += complexity_weight  # simple tasks always match
+
+        # 3. Urgency alignment
+        urgency_weight = 0.15
+        total_weight += urgency_weight
+        if context.urgency_level > 0.7:
+            urgency_indicators = ['urgent', 'important', 'priority', 'immediate',
+                                  'first', 'quickly', 'asap', 'critical']
+            if any(ind in prompt_lower for ind in urgency_indicators):
+                score += urgency_weight
+            else:
+                score += urgency_weight * 0.3
+        else:
+            score += urgency_weight
+
+        # 4. Domain alignment
+        domain_weight = 0.15
+        total_weight += domain_weight
+        if context.domain and context.domain.lower() in prompt_lower:
+            score += domain_weight
+        elif not context.domain:
+            score += domain_weight
+        else:
+            score += domain_weight * 0.2
+
+        # 5. Variable substitution success (already tracked elsewhere; proxy)
+        var_weight = 0.10
+        total_weight += var_weight
+        # If there are unresolved template variables like {var_name}, penalize
+        import re as _re
+        unresolved = _re.findall(r'\{[a-zA-Z_]\w*\}', rendered_prompt)
+        if not unresolved:
+            score += var_weight
+        else:
+            score += var_weight * max(0.0, 1.0 - len(unresolved) * 0.2)
+
+        # 6. Emotional tone alignment
+        tone_weight = 0.10
+        total_weight += tone_weight
+        if context.emotional_tone == 'frustrated':
+            empathy_indicators = ['understand', 'patient', 'help', 'sorry', 'assist']
+            if any(ind in prompt_lower for ind in empathy_indicators):
+                score += tone_weight
+            else:
+                score += tone_weight * 0.4
+        else:
+            score += tone_weight
+
+        return score / total_weight if total_weight > 0 else 0.0
         
     async def aggregate_performance(
         self,
@@ -1208,7 +1324,7 @@ class DynamicPromptAssembler:
         assembled = self._resolve_variables(assembled, variables)
         
         # Truncate if exceeds max tokens (rough estimate)
-        estimated_tokens = len(assembled.split()) // 0.75
+        estimated_tokens = int(len(assembled.split()) / 0.75)
         if estimated_tokens > max_tokens:
             assembled = self._truncate_to_tokens(assembled, max_tokens)
             

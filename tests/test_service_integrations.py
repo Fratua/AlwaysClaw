@@ -109,6 +109,8 @@ class TestServiceIntegrationManager:
         assert 'twilio' in status
         for name, info in status.items():
             assert 'type' in info
+            # Verify each status entry has expected fields
+            assert isinstance(info['type'], str)
 
     @pytest.mark.asyncio
     async def test_execute_unknown_service(self):
@@ -126,3 +128,44 @@ class TestServiceIntegrationManager:
         # Gmail is a valid service but 'nonexistent_action' is not
         with pytest.raises(ValueError, match="Unknown action"):
             await manager.execute("gmail", "nonexistent_action")
+
+
+class TestGmailIntegrationBehavior:
+    """Test GmailIntegration actual behavior patterns."""
+
+    @pytest.mark.asyncio
+    async def test_gmail_has_required_methods(self):
+        from service_integrations import GmailIntegration
+        gmail = GmailIntegration()
+        assert hasattr(gmail, 'send_email')
+        assert hasattr(gmail, 'check_new_emails')
+        assert hasattr(gmail, 'authenticated')
+
+    @pytest.mark.asyncio
+    async def test_send_email_error_contains_details(self):
+        from service_integrations import GmailIntegration
+        gmail = GmailIntegration()
+        result = await gmail.send_email("to@example.com", "Subject", "Body")
+        assert result.success is False
+        assert result.error is not None
+        assert len(result.error) > 0
+
+
+class TestBrowserIntegrationBehavior:
+    """Test BrowserControlIntegration actual behavior."""
+
+    def test_browser_state_tracking(self):
+        from service_integrations import BrowserControlIntegration
+        browser = BrowserControlIntegration(headless=True)
+        assert browser.headless is True
+        assert browser.browser is None
+        assert browser.pages == {}
+        assert browser.get_active_page() is None
+
+    @pytest.mark.asyncio
+    async def test_navigate_without_init_gives_clear_error(self):
+        from service_integrations import BrowserControlIntegration
+        browser = BrowserControlIntegration()
+        result = await browser.navigate("https://example.com")
+        assert result.success is False
+        assert result.error is not None

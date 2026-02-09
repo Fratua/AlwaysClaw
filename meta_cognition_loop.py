@@ -378,6 +378,7 @@ class Pattern:
     modification_strategies: List[str]
     frequency: float = 0.0
     success_rate: float = 0.5
+    metadata: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -511,7 +512,7 @@ class CognitivePerformanceMonitor:
             time_to_solution=sum(s.time_taken_ms for s in reasoning_trace.steps),
             token_efficiency=self._calculate_token_efficiency(reasoning_trace),
             computational_cost=len(reasoning_trace.steps) * 0.1,
-            memory_usage=len(reasoning_trace.working_memory) * 0.01,
+            memory_usage=len(reasoning_trace.final_state.working_memory) * 0.01,
             api_calls=len(reasoning_trace.used_tools)
         )
         
@@ -2350,7 +2351,107 @@ class MetaCognitionLoop:
         self.last_cycle_time: Optional[datetime] = None
         
         logger.info("MetaCognitionLoop initialized")
-    
+
+    async def run_cycle(
+        self,
+        task_description: str,
+        steps: Optional[List[ReasoningStep]] = None,
+        trigger: Optional[MetaCognitionTrigger] = None,
+        **execution_data: Any
+    ) -> MetaCognitionResult:
+        """
+        Top-level entry point for running a meta-cognition cycle.
+
+        Constructs a ReasoningTrace from the provided execution data and
+        delegates to execute_cycle().
+
+        Args:
+            task_description: Human-readable description of the task being reflected on.
+            steps: Optional list of ReasoningStep objects from actual loop execution.
+            trigger: Optional trigger that caused this cycle.
+            **execution_data: Additional keyword data forwarded to
+                create_reasoning_trace (e.g. used_tools, decision_points).
+
+        Returns:
+            MetaCognitionResult from the completed cycle.
+        """
+        trace = self.create_reasoning_trace(
+            task_description=task_description,
+            steps=steps or [],
+            **execution_data
+        )
+        return await self.execute_cycle(trace, trigger)
+
+    @staticmethod
+    def create_reasoning_trace(
+        task_description: str,
+        steps: Optional[List[ReasoningStep]] = None,
+        used_tools: Optional[List[ToolInvocation]] = None,
+        decision_points: Optional[List[DecisionPoint]] = None,
+        uncertainty_points: Optional[List[UncertaintyPoint]] = None,
+        retrieved_memories: Optional[List[Memory]] = None,
+        external_knowledge: Optional[List[KnowledgeSource]] = None,
+        backtrack_count: int = 0,
+        revision_count: int = 0,
+        trace_id: Optional[str] = None,
+        **_extra: Any
+    ) -> ReasoningTrace:
+        """
+        Factory method to create a ReasoningTrace from actual loop execution data.
+
+        If no steps are provided, a single placeholder REFLECTION step is created
+        so that downstream analysis methods still function.
+
+        Args:
+            task_description: What task was being performed.
+            steps: Actual ReasoningStep list from the execution.
+            used_tools: Tools that were invoked during the task.
+            decision_points: Decision points encountered.
+            uncertainty_points: Points of uncertainty.
+            retrieved_memories: Memories that were retrieved.
+            external_knowledge: External knowledge sources consulted.
+            backtrack_count: Number of backtracks during reasoning.
+            revision_count: Number of revisions made.
+            trace_id: Optional trace ID (auto-generated if not provided).
+
+        Returns:
+            A fully populated ReasoningTrace.
+        """
+        now = datetime.now()
+
+        if steps:
+            initial_state = steps[0].input_state
+            final_state = steps[-1].output_state
+            confidence_trajectory = [s.confidence for s in steps]
+        else:
+            # Create a minimal default state when no steps are provided
+            default_state = CognitiveState(
+                timestamp=now,
+                active_goals=[task_description[:80]],
+                working_memory={},
+                confidence_level=0.5,
+            )
+            initial_state = default_state
+            final_state = default_state
+            confidence_trajectory = [0.5]
+
+        return ReasoningTrace(
+            trace_id=trace_id or f"trace_{now.timestamp()}",
+            timestamp=now,
+            task_description=task_description,
+            steps=steps or [],
+            initial_state=initial_state,
+            final_state=final_state,
+            confidence_trajectory=confidence_trajectory,
+            uncertainty_points=uncertainty_points or [],
+            decision_points=decision_points or [],
+            retrieved_memories=retrieved_memories or [],
+            used_tools=used_tools or [],
+            external_knowledge=external_knowledge or [],
+            backtrack_count=backtrack_count,
+            revision_count=revision_count,
+        )
+
     async def execute_cycle(
         self,
         reasoning_trace: ReasoningTrace,

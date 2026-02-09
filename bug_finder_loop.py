@@ -194,11 +194,27 @@ class RealMetricsCollector:
 
     @staticmethod
     def _simulated_system_metrics(window_size: int = 10) -> Dict[str, List[float]]:
-        """Fallback simulated metrics."""
+        """Fallback baseline metrics when psutil is unavailable.
+
+        Returns deterministic, realistic baseline values instead of random noise
+        so that downstream anomaly detection models receive stable inputs.
+        """
+        # Deterministic baselines representing a lightly-loaded system
+        base_cpu = 25.0       # 25% CPU usage
+        base_memory = 55.0    # 55% memory usage
+        base_disk_io = 200.0  # 200 MB disk IO
+
+        # Small sawtooth variation to avoid perfectly flat signals
         return {
-            'cpu_percent': list(np.random.randn(window_size) * 10 + 50),
-            'memory_percent': list(np.random.randn(window_size) * 5 + 60),
-            'disk_io': list(np.random.randn(window_size) * 100 + 500)
+            'cpu_percent': [
+                base_cpu + (i % 5) * 1.0 for i in range(window_size)
+            ],
+            'memory_percent': [
+                base_memory + (i % 3) * 0.5 for i in range(window_size)
+            ],
+            'disk_io': [
+                base_disk_io + (i % 4) * 10.0 for i in range(window_size)
+            ],
         }
 
     def collect_all(self, window_size: int = 10) -> Dict[str, Any]:
@@ -209,7 +225,7 @@ class RealMetricsCollector:
         network_metrics = self.collect_network_metrics()
 
         agent_metrics = {
-            'loop_durations': list(np.random.randn(5) * 2 + 5),  # Still from runtime
+            'loop_durations': [5.0, 5.5, 5.2, 4.8, 5.1],  # Baseline loop durations (seconds)
             'api_errors': 0,
             'api_calls': 1,
             'queue_depth': 0,
@@ -486,31 +502,46 @@ class MLEnsembleDetector:
             Training metrics
         """
         logger.info(f"Fitting ensemble on {len(X)} samples")
-        
+
         metrics = {}
-        
-        # Scale features
+
+        # Scale features - required for all downstream models
+        if self.scalers['standard'] is None:
+            logger.warning("StandardScaler unavailable (scikit-learn missing); cannot fit ensemble")
+            return {'error': 'scikit-learn is required for ensemble training'}
         X_scaled = self.scalers['standard'].fit_transform(X)
-        
+
         # Fit Isolation Forest
-        logger.info("Training Isolation Forest...")
-        self.models['isolation_forest'].fit(X_scaled)
-        metrics['isolation_forest'] = {'status': 'trained'}
-        
+        if self.models['isolation_forest'] is not None:
+            logger.info("Training Isolation Forest...")
+            self.models['isolation_forest'].fit(X_scaled)
+            metrics['isolation_forest'] = {'status': 'trained'}
+        else:
+            logger.warning("Isolation Forest model is None (scikit-learn missing); skipping")
+            metrics['isolation_forest'] = {'status': 'skipped', 'reason': 'model unavailable'}
+
         # Fit One-Class SVM
-        logger.info("Training One-Class SVM...")
-        self.models['one_class_svm'].fit(X_scaled)
-        metrics['one_class_svm'] = {'status': 'trained'}
-        
+        if self.models['one_class_svm'] is not None:
+            logger.info("Training One-Class SVM...")
+            self.models['one_class_svm'].fit(X_scaled)
+            metrics['one_class_svm'] = {'status': 'trained'}
+        else:
+            logger.warning("One-Class SVM model is None (scikit-learn missing); skipping")
+            metrics['one_class_svm'] = {'status': 'skipped', 'reason': 'model unavailable'}
+
         # Fit XGBoost if labels available
         if y is not None:
-            logger.info("Training XGBoost classifier...")
-            self.models['xgboost'].fit(
-                X_scaled, y,
-                eval_set=[(X_scaled, y)],
-                verbose=False
-            )
-            metrics['xgboost'] = {'status': 'trained'}
+            if self.models['xgboost'] is not None:
+                logger.info("Training XGBoost classifier...")
+                self.models['xgboost'].fit(
+                    X_scaled, y,
+                    eval_set=[(X_scaled, y)],
+                    verbose=False
+                )
+                metrics['xgboost'] = {'status': 'trained'}
+            else:
+                logger.warning("XGBoost model is None (xgboost missing); skipping")
+                metrics['xgboost'] = {'status': 'skipped', 'reason': 'model unavailable'}
         
         # Fit LSTM Autoencoder
         logger.info("Training LSTM Autoencoder...")
@@ -882,19 +913,25 @@ class FeatureEngineer:
 
 class ConfidenceScorer:
     """
-    Multi-factor confidence scoring for predictions
+    Multi-factor confidence scoring for predictions.
+
+    Factor weights are configurable via the ``factor_weights`` constructor
+    parameter.  If not provided, sensible defaults are used.
     """
-    
-    FACTOR_WEIGHTS = {
+
+    DEFAULT_FACTOR_WEIGHTS = {
         'model_agreement': 0.25,
         'prediction_stability': 0.20,
         'historical_accuracy': 0.20,
         'data_quality': 0.15,
         'pattern_strength': 0.10,
-        'temporal_proximity': 0.10
+        'temporal_proximity': 0.10,
     }
-    
-    def __init__(self):
+
+    def __init__(self, factor_weights: Optional[Dict[str, float]] = None):
+        self.FACTOR_WEIGHTS = dict(self.DEFAULT_FACTOR_WEIGHTS)
+        if factor_weights:
+            self.FACTOR_WEIGHTS.update(factor_weights)
         self.prediction_history = deque(maxlen=1000)
         self.feedback_history = deque(maxlen=1000)
         
@@ -1082,8 +1119,17 @@ class ExplanationGenerator:
     
     def generate_shap_explanation(self,
                                  feature_array: np.ndarray) -> Optional[SHAPExplanation]:
-        """Generate SHAP explanation"""
+        """Generate SHAP explanation.
+
+        Returns None with a warning if the SHAP explainer has not been initialized
+        (e.g. the ``shap`` library is not installed or ``initialize()`` was not called).
+        """
         if self.shap_explainer is None:
+            logger.warning(
+                "SHAP explainer not initialized: returning None. "
+                "Call ExplanationGenerator.initialize() with a model and background data, "
+                "and ensure the 'shap' package is installed."
+            )
             return None
         
         # Calculate SHAP values

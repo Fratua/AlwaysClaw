@@ -47,31 +47,54 @@ class WebRTCConfig:
     channels: int = 1
     bitrate: int = 32000
     ptime: int = 20
-    
+    turn_server: Optional[str] = None
+    turn_username: Optional[str] = None
+    turn_credential: Optional[str] = None
+
     def __post_init__(self):
         if self.ice_servers is None:
             self.ice_servers = [
                 {"urls": "stun:stun.l.google.com:19302"},
                 {"urls": "stun:stun1.l.google.com:19302"},
             ]
+        # Add TURN server if configured
+        if self.turn_server:
+            turn_entry = {"urls": self.turn_server}
+            if self.turn_username:
+                turn_entry["username"] = self.turn_username
+            if self.turn_credential:
+                turn_entry["credential"] = self.turn_credential
+            self.ice_servers.append(turn_entry)
+        # Also pick up TURN from environment if not explicitly set
+        elif os.environ.get("TURN_SERVER_URL"):
+            turn_entry = {"urls": os.environ["TURN_SERVER_URL"]}
+            if os.environ.get("TURN_USERNAME"):
+                turn_entry["username"] = os.environ["TURN_USERNAME"]
+            if os.environ.get("TURN_CREDENTIAL"):
+                turn_entry["credential"] = os.environ["TURN_CREDENTIAL"]
+            self.ice_servers.append(turn_entry)
 
 
 class AudioTrackProcessor:
     """
-    Process incoming audio tracks from WebRTC
+    Process incoming audio tracks from WebRTC and optionally send
+    processed audio back through an outgoing track.
     """
-    
-    def __init__(self, track, on_frame: Callable[[np.ndarray], None]):
+
+    def __init__(self, track, on_frame: Callable[[np.ndarray], None],
+                 outgoing_track=None):
         self.track = track
         self.on_frame = on_frame
+        self.outgoing_track = outgoing_track  # aiortc AudioStreamTrack or similar
         self._is_running = False
         self._task = None
-        
+        self._outgoing_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+
     async def start(self):
         """Start processing audio frames"""
         self._is_running = True
         self._task = asyncio.create_task(self._process_frames())
-        
+
     async def stop(self):
         """Stop processing"""
         self._is_running = False
@@ -81,24 +104,57 @@ class AudioTrackProcessor:
                 await self._task
             except asyncio.CancelledError:
                 pass
-    
+
+    async def send_processed_audio(self, audio_data: np.ndarray):
+        """Queue processed audio to send back to the peer."""
+        try:
+            self._outgoing_queue.put_nowait(audio_data)
+        except asyncio.QueueFull:
+            logger.warning("Outgoing audio queue full, dropping frame")
+
     async def _process_frames(self):
         """Process incoming audio frames"""
         while self._is_running:
             try:
                 frame = await self.track.recv()
-                
+
                 # Convert frame to numpy array
                 audio_data = frame.to_ndarray()
-                
+
                 # Notify callback
                 if self.on_frame:
                     self.on_frame(audio_data)
-                    
+
+                # If there is queued processed audio and an outgoing track,
+                # send it back to the peer
+                if self.outgoing_track is not None:
+                    while not self._outgoing_queue.empty():
+                        try:
+                            out_data = self._outgoing_queue.get_nowait()
+                            await self._send_back(out_data, frame)
+                        except asyncio.QueueEmpty:
+                            break
+
             except (OSError, RuntimeError) as e:
                 if self._is_running:
                     logger.error(f"Audio track processing error: {e}")
                 break
+
+    async def _send_back(self, audio_data: np.ndarray, reference_frame):
+        """Send processed audio back through the outgoing track."""
+        try:
+            from av import AudioFrame as AvAudioFrame
+            out_frame = AvAudioFrame.from_ndarray(
+                audio_data.reshape(1, -1) if audio_data.ndim == 1 else audio_data.T,
+                format='s16',
+                layout='mono'
+            )
+            out_frame.sample_rate = reference_frame.sample_rate
+            out_frame.pts = reference_frame.pts
+            out_frame.time_base = reference_frame.time_base
+            self.outgoing_track._queue.put_nowait(out_frame)
+        except (ImportError, AttributeError, ValueError) as e:
+            logger.error(f"Error sending processed audio back: {e}")
 
 
 class WebRTCConnection:
@@ -181,9 +237,32 @@ class WebRTCConnection:
         """Handle incoming data channel"""
         logger.info(f"Received data channel: {channel.label}")
         self.data_channel = channel
-        
+
+        @channel.on("open")
+        def on_open():
+            logger.info(f"Data channel opened: {channel.label}")
+
+        @channel.on("close")
+        def on_close():
+            logger.info(f"Data channel closed: {channel.label}")
+
         @channel.on("message")
         def on_message(message):
+            # Attempt to parse structured JSON messages
+            try:
+                parsed = json.loads(message)
+                msg_type = parsed.get("type")
+                if msg_type == "ping":
+                    # Respond to pings for latency measurement
+                    pong = json.dumps({"type": "pong", "ts": parsed.get("ts")})
+                    if channel.readyState == "open":
+                        channel.send(pong)
+                    return
+                elif msg_type == "metadata":
+                    logger.debug(f"Received metadata: {parsed.get('data')}")
+            except (json.JSONDecodeError, TypeError):
+                pass  # Not JSON, treat as plain text
+
             if self.on_data_message:
                 self.on_data_message(message)
     
@@ -383,6 +462,8 @@ class WebRTCManager:
         self.connections: Dict[str, WebRTCConnection] = {}
         self.signaling: Optional[WebRTCSignalingServer] = None
         self.on_audio_frame: Optional[Callable[[str, np.ndarray], None]] = None
+        # Map signaling client_id -> connection_id for routing
+        self._client_connections: Dict[str, str] = {}
         
     async def start_signaling(self, host: str = "0.0.0.0", port: int = 8765):
         """Start the signaling server"""
@@ -393,9 +474,75 @@ class WebRTCManager:
         asyncio.create_task(self.signaling.start())
     
     async def _on_signaling_message(self, client_id: str, msg_type: str, data: dict):
-        """Handle signaling messages"""
+        """Handle signaling messages and wire up peer connections."""
         logger.debug(f"Signaling message from {client_id}: {msg_type}")
-    
+
+        if msg_type == "offer":
+            # A remote peer sent an offer -- create a server-side connection
+            # and reply with an answer
+            offer_data = data.get("data", {})
+            source_id = data.get("sourceId") or client_id
+
+            connection = await self.create_connection()
+            # Tag with the remote client id so we can route later
+            self._client_connections[source_id] = connection.connection_id
+
+            answer = await connection.create_answer(offer_data)
+
+            # Send answer back through signaling
+            if self.signaling and source_id in self.signaling.clients:
+                await self.signaling._send(
+                    self.signaling.clients[source_id],
+                    {"type": "answer", "sourceId": "server", "data": answer}
+                )
+
+        elif msg_type == "answer":
+            answer_data = data.get("data", {})
+            source_id = data.get("sourceId") or client_id
+            conn_id = self._client_connections.get(source_id)
+            if conn_id and conn_id in self.connections:
+                await self.connections[conn_id].set_answer(answer_data)
+
+        elif msg_type == "ice-candidate":
+            candidate_data = data.get("data", {})
+            source_id = data.get("sourceId") or client_id
+            conn_id = self._client_connections.get(source_id)
+            if conn_id and conn_id in self.connections:
+                await self.connections[conn_id].add_ice_candidate(candidate_data)
+
+    async def bridge_peers(self, client_id_a: str, client_id_b: str):
+        """Bridge two remote peers by relaying audio between their connections."""
+        conn_a_id = self._client_connections.get(client_id_a)
+        conn_b_id = self._client_connections.get(client_id_b)
+        if not conn_a_id or not conn_b_id:
+            logger.error(f"Cannot bridge: missing connections for {client_id_a}/{client_id_b}")
+            return
+
+        conn_a = self.connections.get(conn_a_id)
+        conn_b = self.connections.get(conn_b_id)
+        if not conn_a or not conn_b:
+            return
+
+        # Cross-wire audio: frames from A go to B and vice versa
+        original_a_handler = conn_a.on_audio_frame
+        original_b_handler = conn_b.on_audio_frame
+
+        def forward_a_to_b(frame):
+            if conn_b.track_processor:
+                asyncio.ensure_future(conn_b.track_processor.send_processed_audio(frame))
+            if original_a_handler:
+                original_a_handler(frame)
+
+        def forward_b_to_a(frame):
+            if conn_a.track_processor:
+                asyncio.ensure_future(conn_a.track_processor.send_processed_audio(frame))
+            if original_b_handler:
+                original_b_handler(frame)
+
+        conn_a.on_audio_frame = forward_a_to_b
+        conn_b.on_audio_frame = forward_b_to_a
+        logger.info(f"Bridged peers {client_id_a} <-> {client_id_b}")
+
     async def create_connection(self, config: WebRTCConfig = None) -> WebRTCConnection:
         """Create a new WebRTC connection"""
         connection = WebRTCConnection(config)
@@ -424,6 +571,7 @@ class WebRTCManager:
         for connection in list(self.connections.values()):
             await connection.close()
         self.connections.clear()
+        self._client_connections.clear()
 
 
 # Example usage

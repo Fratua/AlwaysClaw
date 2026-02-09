@@ -34,6 +34,7 @@ class JWTConfig:
     audience: Optional[str] = None
     require_expiration: bool = True
     allowed_algorithms: List[str] = field(default_factory=lambda: ["RS256", "ES256"])
+    allow_self_signed: bool = False  # Enable HS256 validation for local dev
 
 
 @dataclass
@@ -98,16 +99,18 @@ class JWTValidator:
         self,
         jwks_url: Optional[str] = None,
         public_key: Optional[str] = None,
-        config: Optional[JWTConfig] = None
+        config: Optional[JWTConfig] = None,
+        symmetric_key: Optional[str] = None,
     ):
         self.jwks_url = jwks_url
         self.public_key = public_key
         self.config = config or JWTConfig()
-        
+        self.symmetric_key = symmetric_key  # For HS256 local-dev validation
+
         self._jwks_cache: Optional[Dict] = None
         self._jwks_cache_time: Optional[datetime] = None
         self._jwks_cache_ttl = timedelta(hours=24)
-        
+
         self._lock = asyncio.Lock()
     
     async def validate_token(
@@ -139,7 +142,10 @@ class JWTValidator:
             key_id = unverified_header.get('kid')
             
             # Validate algorithm
-            if algorithm not in self.config.allowed_algorithms:
+            allowed = list(self.config.allowed_algorithms)
+            if self.config.allow_self_signed and "HS256" not in allowed:
+                allowed.append("HS256")
+            if algorithm not in allowed:
                 raise JWTError(
                     f"Algorithm not allowed: {algorithm}",
                     error_type="invalid_algorithm"
@@ -149,10 +155,14 @@ class JWTValidator:
             if algorithm.startswith('RS') or algorithm.startswith('ES'):
                 public_key = await self._get_public_key(key_id)
             elif algorithm.startswith('HS'):
-                raise JWTError(
-                    "Symmetric algorithms not supported for validation",
-                    error_type="invalid_algorithm"
-                )
+                if not self.config.allow_self_signed or not self.symmetric_key:
+                    raise JWTError(
+                        "Symmetric algorithms not supported for validation "
+                        "(set JWTConfig.allow_self_signed=True and provide symmetric_key for local dev)",
+                        error_type="invalid_algorithm"
+                    )
+                logger.warning("Validating JWT with symmetric HS256 key (local dev mode)")
+                public_key = self.symmetric_key
             else:
                 raise JWTError(
                     f"Unsupported algorithm: {algorithm}",

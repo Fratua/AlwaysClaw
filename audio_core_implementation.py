@@ -80,36 +80,52 @@ class RingBuffer:
         self._write_event = threading.Event()
         
     def write(self, data: np.ndarray) -> int:
-        """Write audio data to ring buffer"""
+        """Write audio data to ring buffer using vectorized numpy operations."""
         with self._lock:
             samples_to_write = min(len(data), self.capacity - self._available)
-            
-            for i in range(samples_to_write):
-                self._buffer[self._write_pos] = data[i]
-                self._write_pos = (self._write_pos + 1) % self.capacity
-            
+            if samples_to_write == 0:
+                return 0
+
+            # Handle wrap-around with at most two sliced copies
+            end_pos = self._write_pos + samples_to_write
+            if end_pos <= self.capacity:
+                self._buffer[self._write_pos:end_pos] = data[:samples_to_write]
+            else:
+                first_chunk = self.capacity - self._write_pos
+                self._buffer[self._write_pos:self.capacity] = data[:first_chunk]
+                remainder = samples_to_write - first_chunk
+                self._buffer[:remainder] = data[first_chunk:samples_to_write]
+
+            self._write_pos = end_pos % self.capacity
             self._available += samples_to_write
-            
-        if samples_to_write > 0:
-            self._write_event.set()
-            
+
+        self._write_event.set()
         return samples_to_write
-    
+
     def read(self, num_samples: int) -> np.ndarray:
-        """Read audio data from ring buffer"""
+        """Read audio data from ring buffer using vectorized numpy operations."""
         with self._lock:
             samples_to_read = min(num_samples, self._available)
-            
-            result = np.zeros((samples_to_read, self.channels), dtype=self.dtype)
-            for i in range(samples_to_read):
-                result[i] = self._buffer[self._read_pos]
-                self._read_pos = (self._read_pos + 1) % self.capacity
-            
+            if samples_to_read == 0:
+                return np.zeros((0, self.channels), dtype=self.dtype)
+
+            result = np.empty((samples_to_read, self.channels), dtype=self.dtype)
+
+            end_pos = self._read_pos + samples_to_read
+            if end_pos <= self.capacity:
+                result[:] = self._buffer[self._read_pos:end_pos]
+            else:
+                first_chunk = self.capacity - self._read_pos
+                result[:first_chunk] = self._buffer[self._read_pos:self.capacity]
+                remainder = samples_to_read - first_chunk
+                result[first_chunk:] = self._buffer[:remainder]
+
+            self._read_pos = end_pos % self.capacity
             self._available -= samples_to_read
-            
+
             if self._available == 0:
                 self._write_event.clear()
-                
+
             return result
     
     def available(self) -> int:
@@ -237,6 +253,10 @@ class AudioPlayback:
     Low-latency audio playback for Windows 10
     """
     
+    # Short fade-in ramp length (in samples) applied after an underflow to
+    # avoid hard transitions from silence to audio that cause pops/clicks.
+    _FADE_RAMP_SAMPLES = 64
+
     def __init__(self, config: AudioConfig = None, device: int = None):
         self.config = config or AudioConfig()
         self.device = device
@@ -244,23 +264,45 @@ class AudioPlayback:
         self._ring_buffer: Optional[RingBuffer] = None
         self._is_playing = False
         self._underflows = 0
-        
+        self._was_underflow = False  # tracks previous callback underflow state
+
     def _audio_callback(self, outdata: np.ndarray, frames: int,
                         time_info: dict, status: sd.CallbackFlags):
-        """SoundDevice playback callback"""
+        """SoundDevice playback callback with graceful underflow handling."""
         if status:
             if 'underflow' in str(status).lower():
                 self._underflows += 1
                 if self._underflows % 100 == 0:
-                    logger.warning(f"Audio underflows: {self._underflows}")
-        
-        # Read from ring buffer
-        if self._ring_buffer and self._ring_buffer.available() >= frames:
+                    logger.warning(f"Audio playback underflows: {self._underflows}")
+
+        available = self._ring_buffer.available() if self._ring_buffer else 0
+
+        if available >= frames:
             data = self._ring_buffer.read(frames)
             outdata[:] = data
+
+            # Apply a short fade-in ramp if we just recovered from underflow
+            # to avoid an abrupt jump from silence that causes clicks.
+            if self._was_underflow:
+                ramp_len = min(self._FADE_RAMP_SAMPLES, frames)
+                ramp = np.linspace(0.0, 1.0, ramp_len, dtype=np.float32)
+                outdata[:ramp_len] *= ramp[:, np.newaxis]
+                self._was_underflow = False
+        elif available > 0:
+            # Partial data available: read what we can, zero-pad the rest,
+            # and apply a fade-out at the boundary to soften the transition.
+            data = self._ring_buffer.read(available)
+            outdata[:available] = data
+            outdata[available:] = 0
+            # Fade out the last few samples of real data
+            fade_len = min(self._FADE_RAMP_SAMPLES, available)
+            fade = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+            outdata[available - fade_len:available] *= fade[:, np.newaxis]
+            self._was_underflow = True
         else:
-            # Output silence if not enough data
+            # No data at all -- output silence
             outdata[:] = 0
+            self._was_underflow = True
     
     def start(self) -> 'AudioPlayback':
         """Start audio playback"""
@@ -324,11 +366,52 @@ class AudioPlayback:
         return self._ring_buffer.capacity - self._ring_buffer.available()
 
 
+def _compute_voice_activity(frame: np.ndarray, sample_rate: int) -> float:
+    """Compute a voice-activity score for an audio frame.
+
+    Combines two features:
+    1. **RMS energy** -- captures overall loudness.
+    2. **Zero-crossing rate (ZCR)** -- speech typically has a moderate ZCR
+       compared to noise (very high) or silence (very low / undefined).
+
+    Returns a float in [0, 1] where higher values indicate stronger
+    likelihood of voice activity.
+    """
+    if frame.size == 0:
+        return 0.0
+
+    # Flatten to mono for analysis
+    mono = frame.mean(axis=1) if frame.ndim > 1 else frame
+
+    # RMS energy (normalised so 1.0 = full-scale)
+    rms = float(np.sqrt(np.mean(mono ** 2)))
+
+    # Zero-crossing rate (crossings per sample, normalised to [0,1])
+    signs = np.signbit(mono)
+    crossings = np.count_nonzero(signs[1:] != signs[:-1])
+    zcr = crossings / max(len(mono) - 1, 1)
+
+    # Speech ZCR typically falls in 0.02-0.15 range at 48kHz.
+    # We penalise very high ZCR (likely noise) and very low (silence).
+    # Map ZCR to a speech-likelihood factor via a simple triangular window.
+    zcr_low, zcr_peak, zcr_high = 0.01, 0.07, 0.25
+    if zcr < zcr_low or zcr > zcr_high:
+        zcr_factor = 0.0
+    elif zcr <= zcr_peak:
+        zcr_factor = (zcr - zcr_low) / (zcr_peak - zcr_low)
+    else:
+        zcr_factor = (zcr_high - zcr) / (zcr_high - zcr_peak)
+
+    # Final score: weighted combination (energy dominates, ZCR refines)
+    score = 0.7 * min(rms / 0.1, 1.0) + 0.3 * zcr_factor
+    return float(np.clip(score, 0.0, 1.0))
+
+
 class AudioMixer:
     """
     Real-time audio mixer for multiple input streams
     """
-    
+
     def __init__(self, config: AudioConfig = None):
         self.config = config or AudioConfig()
         self._streams: Dict[str, Dict[str, Any]] = {}
@@ -336,12 +419,12 @@ class AudioMixer:
         self._is_running = False
         self._mix_thread: Optional[threading.Thread] = None
         self._master_gain = 1.0
-        
-        # VAD and ducking
+
+        # Voice-activity detection and ducking
         self._vad_enabled = True
-        self._ducking_threshold = 0.05
+        self._ducking_threshold = 0.15
         self._ducking_attenuation = 0.3
-        
+
     def add_stream(self, stream_id: str, gain: float = 1.0):
         """Add an input stream"""
         self._streams[stream_id] = {
@@ -351,30 +434,32 @@ class AudioMixer:
             ),
             'gain': gain,
             'vad_level': 0.0,
-            'active': True
+            'active': True,
         }
         logger.info(f"Added stream: {stream_id}")
-    
+
     def remove_stream(self, stream_id: str):
         """Remove an input stream"""
         if stream_id in self._streams:
             del self._streams[stream_id]
             logger.info(f"Removed stream: {stream_id}")
-    
+
     def push_audio(self, stream_id: str, data: np.ndarray):
         """Push audio to a stream"""
         if stream_id not in self._streams:
             return
-        
+
         stream = self._streams[stream_id]
-        
+
         # Write to ring buffer
         stream['ring_buffer'].write(data)
-        
-        # Update VAD level
+
+        # Update voice activity level using energy + ZCR analysis
         if self._vad_enabled:
-            rms = np.sqrt(np.mean(data ** 2))
-            stream['vad_level'] = 0.9 * stream['vad_level'] + 0.1 * rms
+            instant = _compute_voice_activity(data, self.config.sample_rate)
+            # Exponential smoothing (attack ~10ms, release ~100ms at 20ms frames)
+            alpha = 0.3 if instant > stream['vad_level'] else 0.05
+            stream['vad_level'] = alpha * instant + (1 - alpha) * stream['vad_level']
     
     def set_stream_gain(self, stream_id: str, gain: float):
         """Set gain for a stream"""
@@ -386,59 +471,72 @@ class AudioMixer:
         self._master_gain = gain
     
     def _mix_loop(self):
-        """Main mixing loop"""
+        """Main mixing loop with drift-compensating timing.
+
+        Uses an absolute next-deadline approach so that processing jitter
+        in one iteration does not accumulate over time.
+        """
         block_duration = self.config.block_size / self.config.sample_rate
-        
+        next_deadline = time.perf_counter() + block_duration
+
         while self._is_running:
-            start_time = time.time()
-            
-            # Find dominant voice
+            # Find dominant voice for ducking decisions
             dominant_stream = None
-            max_vad = 0
-            
+            max_vad = 0.0
+
             if self._vad_enabled:
                 for stream_id, stream in self._streams.items():
                     if stream['vad_level'] > max_vad:
                         max_vad = stream['vad_level']
                         dominant_stream = stream_id
-            
+
             # Mix streams
-            mixed = np.zeros((self.config.block_size, self.config.channels), 
-                           dtype=np.float32)
+            mixed = np.zeros(
+                (self.config.block_size, self.config.channels), dtype=np.float32
+            )
             active_count = 0
-            
+
             for stream_id, stream in self._streams.items():
                 if stream['ring_buffer'].available() >= self.config.block_size:
                     data = stream['ring_buffer'].read(self.config.block_size)
                     gain = stream['gain']
-                    
-                    # Apply ducking
+
+                    # Apply ducking for non-dominant streams
                     if self._vad_enabled and dominant_stream != stream_id:
                         if max_vad > self._ducking_threshold:
                             gain *= self._ducking_attenuation
-                    
+
                     mixed += data * gain
                     active_count += 1
-            
+
             # Normalize
             if active_count > 1:
                 mixed /= np.sqrt(active_count)
-            
+
             # Apply master gain and clip
             mixed *= self._master_gain
-            mixed = np.clip(mixed, -1.0, 1.0)
-            
+            np.clip(mixed, -1.0, 1.0, out=mixed)
+
             # Output to callbacks
             for callback in self._output_callbacks:
                 try:
                     callback(mixed.copy())
                 except (OSError, ValueError, RuntimeError) as e:
                     logger.error(f"Mix callback error: {e}")
-            
-            # Sleep to maintain timing
-            elapsed = time.time() - start_time
-            sleep_time = max(0, block_duration - elapsed)
-            time.sleep(sleep_time)
+
+            # Sleep until the next deadline to maintain steady cadence
+            now = time.perf_counter()
+            sleep_time = next_deadline - now
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            else:
+                # We overran -- log a warning if drift is significant
+                if sleep_time < -block_duration:
+                    logger.warning(
+                        f"Mixer overran by {-sleep_time*1000:.1f}ms "
+                        f"(block duration {block_duration*1000:.1f}ms)"
+                    )
+            next_deadline += block_duration
     
     def register_output(self, callback: Callable[[np.ndarray], None]):
         """Register output callback"""

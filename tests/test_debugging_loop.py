@@ -76,13 +76,30 @@ class TestFixValidation:
         self.loop = DebuggingLoop()
 
     def test_valid_python(self):
-        assert self.loop._validate_fix("x = 1 + 2") is True
+        score = self.loop._validate_fix("x = 1 + 2")
+        assert score >= 0.5, f"Valid python should score >= 0.5, got {score}"
 
     def test_invalid_python(self):
-        assert self.loop._validate_fix("def foo(") is False
+        score = self.loop._validate_fix("def foo(")
+        assert score == 0.0, f"Invalid python should score 0.0, got {score}"
 
     def test_empty_string(self):
-        assert self.loop._validate_fix("") is True
+        score = self.loop._validate_fix("")
+        assert score >= 0.4, f"Empty string should score >= 0.4, got {score}"
+
+    def test_bare_except_penalty(self):
+        code = "try:\n    pass\nexcept:\n    pass"
+        score = self.loop._validate_fix(code)
+        assert score < 0.5, f"Bare except should be penalized below 0.5, got {score}"
+
+    def test_error_reference_bonus(self):
+        error = DetectedError(
+            error_id="e1", source="mymodule.py",
+            error_type="ValueError", message="invalid value in mymodule"
+        )
+        code = "# Fix for mymodule ValueError\nx = validate(value)"
+        score = self.loop._validate_fix(code, error=error)
+        assert score > 0.5, f"Error-referencing fix should score > 0.5, got {score}"
 
 
 class TestErrorDeduplication:

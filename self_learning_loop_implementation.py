@@ -251,12 +251,27 @@ class ElasticWeightConsolidation:
         """
         Compute gradients for experience using numerical differentiation.
 
-        Approximates the gradient of a loss function with respect to each
-        parameter using the experience's state, outcome, and importance.
+        Uses a linear policy model: predicted = dot(params, features).
+        The gradient of MSE loss w.r.t. each parameter is computed via
+        central finite differences, then scaled by experience importance.
+
+        Features are extracted from experience.content (state/observation dict)
+        and the target value from experience.outcome.
         """
-        # Extract features from the experience
-        state_data = experience.state if isinstance(experience.state, dict) else {}
-        outcome_val = float(experience.outcome) if isinstance(experience.outcome, (int, float)) else 0.0
+        # Extract features from the experience content dict
+        state_data = experience.content if isinstance(experience.content, dict) else {}
+        # Extract a scalar target from outcome dict (use 'score' or 'reward' key, or 0)
+        outcome_val = 0.0
+        if isinstance(experience.outcome, dict):
+            for key in ('score', 'reward', 'value', 'result'):
+                if key in experience.outcome:
+                    try:
+                        outcome_val = float(experience.outcome[key])
+                    except (TypeError, ValueError):
+                        pass
+                    break
+        elif isinstance(experience.outcome, (int, float)):
+            outcome_val = float(experience.outcome)
         importance = float(experience.importance)
 
         # Build a parameter vector from current optimal params or defaults
@@ -268,7 +283,7 @@ class ElasticWeightConsolidation:
             self.optimal_parameters.get(name, 0.0) for name in param_names
         ], dtype=np.float64)
 
-        # Build input features from experience state
+        # Build input features from experience content
         state_features = np.zeros(n_params, dtype=np.float64)
         if isinstance(state_data, dict):
             for i, (key, val) in enumerate(list(state_data.items())[:n_params]):
@@ -276,17 +291,11 @@ class ElasticWeightConsolidation:
                     state_features[i] = float(val)
                 except (TypeError, ValueError):
                     state_features[i] = hash(str(val)) % 100 / 100.0
-        elif isinstance(experience.state, (list, np.ndarray)):
-            arr = np.array(experience.state, dtype=np.float64).flatten()
-            state_features[:min(len(arr), n_params)] = arr[:n_params]
 
         # Loss function: MSE between predicted output and actual outcome
-        # predicted = dot(params, state_features), target = outcome
+        # predicted = dot(params, state_features), target = outcome_val
         epsilon = 1e-5
         gradients = {}
-
-        predicted = np.dot(params, state_features)
-        base_loss = (predicted - outcome_val) ** 2
 
         for i, name in enumerate(param_names):
             # Numerical gradient via central difference

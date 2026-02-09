@@ -56,14 +56,22 @@ class TestDashboardEndpoints:
         return TestClient(api.app)
 
     def test_root_endpoint(self, client):
-        """Test / returns HTML dashboard."""
+        """Test / returns HTML dashboard with expected content."""
         response = client.get("/")
         assert response.status_code == 200
+        # Root should return HTML content
+        content_type = response.headers.get("content-type", "")
+        body = response.text
+        assert "text/html" in content_type or "<" in body
 
     def test_api_overview(self, client):
-        """Test /api/overview endpoint."""
+        """Test /api/overview endpoint returns JSON with expected structure."""
         response = client.get("/api/overview")
         assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, dict)
+        # Overview should contain some system status info
+        assert len(data) > 0
 
 
 class TestNotificationSystem:

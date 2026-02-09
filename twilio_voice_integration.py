@@ -15,6 +15,7 @@ from typing import Optional, Callable, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
 import audioop
+from urllib.parse import urlparse
 import websockets
 
 # Twilio imports
@@ -241,7 +242,22 @@ class TwilioVoiceManager:
     Manages Twilio Voice operations
     """
     
+    @staticmethod
+    def _validate_webhook_url(url: str, label: str = "webhook_url"):
+        """Validate that a webhook URL is well-formed HTTPS."""
+        parsed = urlparse(url)
+        if parsed.scheme not in ("https", "wss"):
+            raise ValueError(
+                f"{label} must use HTTPS/WSS, got {parsed.scheme!r}: {url}"
+            )
+        if not parsed.hostname:
+            raise ValueError(f"{label} has no hostname: {url}")
+
     def __init__(self, config: TwilioConfig):
+        # Validate URLs before storing config
+        self._validate_webhook_url(config.webhook_url, "webhook_url")
+        self._validate_webhook_url(config.stream_url, "stream_url")
+
         self.config = config
         self.client = Client(config.account_sid, config.auth_token)
         
@@ -358,9 +374,14 @@ class TwilioVoiceManager:
                         
                         self.active_calls[call_info.call_sid] = call_info
                         
-                        # Create media stream handler
+                        # Create media stream handler with per-call audio callback
                         media_stream = TwilioMediaStream(call_info)
-                        media_stream.on_incoming_audio = self._on_incoming_audio
+                        sid = call_info.call_sid
+
+                        async def _per_call_audio(audio, _sid=sid):
+                            await self._on_incoming_audio(_sid, audio)
+
+                        media_stream.on_incoming_audio = _per_call_audio
                         media_stream.on_call_start = self._on_call_start
                         media_stream.on_call_end = self._on_call_end
                         
@@ -386,14 +407,14 @@ class TwilioVoiceManager:
             if call_info and call_info.call_sid in self.media_streams:
                 del self.media_streams[call_info.call_sid]
     
-    async def _on_incoming_audio(self, audio_data: np.ndarray):
-        """Handle incoming audio from call"""
-        # Find the call that sent this audio
-        for call_sid, media_stream in self.media_streams.items():
-            if media_stream.call_info.state == CallState.CONNECTED:
-                if self.on_call_audio:
-                    await self._safe_callback(self.on_call_audio, call_sid, audio_data)
-                break
+    async def _on_incoming_audio(self, call_sid: str, audio_data: np.ndarray):
+        """Handle incoming audio from a specific call.
+
+        Supports concurrent calls by routing via the explicit call_sid
+        rather than scanning for the first connected call.
+        """
+        if self.on_call_audio:
+            await self._safe_callback(self.on_call_audio, call_sid, audio_data)
     
     async def _on_call_start(self, call_info: CallInfo):
         """Handle call start"""
@@ -447,59 +468,131 @@ class TwilioVoiceManager:
 
 class TwilioConferenceBridge:
     """
-    Conference bridge for multiple Twilio calls
+    Conference bridge for multiple Twilio calls.
+
+    Supports two modes:
+    - Twilio-native: delegates mixing to Twilio's <Conference> TwiML verb
+    - Server-side: mixes audio locally and pushes the result to each participant
+      (useful when AI-generated audio needs to be injected)
     """
-    
-    def __init__(self, voice_manager: TwilioVoiceManager):
+
+    def __init__(self, voice_manager: TwilioVoiceManager,
+                 server_side_mix: bool = False):
         self.voice_manager = voice_manager
         self.conferences: Dict[str, List[str]] = {}  # conference_id -> [call_sids]
-        self.mixers: Dict[str, Any] = {}  # conference_id -> mixer
-    
+        self._server_side_mix = server_side_mix
+        # Per-conference accumulator: {conf_id: {call_sid: latest_audio}}
+        self._audio_buffers: Dict[str, Dict[str, np.ndarray]] = {}
+        self._mix_tasks: Dict[str, asyncio.Task] = {}
+
     async def create_conference(self, conference_id: str):
         """Create a new conference"""
         self.conferences[conference_id] = []
+        self._audio_buffers[conference_id] = {}
         logger.info(f"Conference created: {conference_id}")
-    
+
+        if self._server_side_mix:
+            self._mix_tasks[conference_id] = asyncio.create_task(
+                self._mix_loop(conference_id)
+            )
+
     async def add_to_conference(self, conference_id: str, call_sid: str):
         """Add a call to a conference"""
         if conference_id not in self.conferences:
             await self.create_conference(conference_id)
-        
+
         self.conferences[conference_id].append(call_sid)
-        
-        # Update Twilio call to join conference
-        try:
-            self.voice_manager.client.calls(call_sid).update(
-                twiml=f"""
-                <Response>
-                    <Dial>
-                        <Conference>{conference_id}</Conference>
-                    </Dial>
-                </Response>
-                """
-            )
-            logger.info(f"Call {call_sid} added to conference {conference_id}")
-        except (ConnectionError, TimeoutError, ValueError) as e:
-            logger.error(f"Error adding call to conference: {e}")
-    
+        self._audio_buffers.setdefault(conference_id, {})[call_sid] = None
+
+        if not self._server_side_mix:
+            # Twilio-native conference
+            try:
+                self.voice_manager.client.calls(call_sid).update(
+                    twiml=f"""
+                    <Response>
+                        <Dial>
+                            <Conference>{conference_id}</Conference>
+                        </Dial>
+                    </Response>
+                    """
+                )
+                logger.info(f"Call {call_sid} added to conference {conference_id}")
+            except (ConnectionError, TimeoutError, ValueError) as e:
+                logger.error(f"Error adding call to conference: {e}")
+        else:
+            logger.info(f"Call {call_sid} added to server-side conference {conference_id}")
+
+    def push_call_audio(self, conference_id: str, call_sid: str,
+                        audio: np.ndarray):
+        """Push incoming audio from a participant for server-side mixing."""
+        if conference_id in self._audio_buffers:
+            self._audio_buffers[conference_id][call_sid] = audio
+
+    async def _mix_loop(self, conference_id: str):
+        """Server-side audio mixing loop for a conference."""
+        interval = 0.020  # 20ms mix interval (matches typical ptime)
+        while conference_id in self.conferences:
+            await asyncio.sleep(interval)
+            buffers = self._audio_buffers.get(conference_id, {})
+            participants = self.conferences.get(conference_id, [])
+            if len(participants) < 2:
+                continue
+
+            # Gather available audio
+            audio_map: Dict[str, np.ndarray] = {}
+            for sid, audio in buffers.items():
+                if audio is not None:
+                    audio_map[sid] = audio
+                    buffers[sid] = None  # consume
+
+            if not audio_map:
+                continue
+
+            # For each participant, mix all *other* participants' audio
+            for target_sid in participants:
+                others = [a for sid, a in audio_map.items() if sid != target_sid]
+                if not others:
+                    continue
+                # Sum and normalize
+                mixed = np.sum(others, axis=0).astype(np.float64)
+                if len(others) > 1:
+                    mixed /= np.sqrt(len(others))
+                mixed = np.clip(mixed, -1.0, 1.0).astype(np.float32)
+                # Send to participant
+                await self.voice_manager.send_audio_to_call(target_sid, mixed)
+
     async def remove_from_conference(self, conference_id: str, call_sid: str):
         """Remove a call from a conference"""
         if conference_id in self.conferences:
             if call_sid in self.conferences[conference_id]:
                 self.conferences[conference_id].remove(call_sid)
-                
+
+                if conference_id in self._audio_buffers:
+                    self._audio_buffers[conference_id].pop(call_sid, None)
+
                 # Hang up the call
                 await self.voice_manager.hangup_call(call_sid)
-                
+
                 logger.info(f"Call {call_sid} removed from conference {conference_id}")
-    
+
     async def end_conference(self, conference_id: str):
         """End a conference and hang up all calls"""
         if conference_id in self.conferences:
             for call_sid in self.conferences[conference_id]:
                 await self.voice_manager.hangup_call(call_sid)
-            
+
             del self.conferences[conference_id]
+            self._audio_buffers.pop(conference_id, None)
+
+            # Cancel mix task if running
+            task = self._mix_tasks.pop(conference_id, None)
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
             logger.info(f"Conference ended: {conference_id}")
 
 

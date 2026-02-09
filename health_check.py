@@ -61,10 +61,24 @@ class SystemHealthReport:
         return "\n".join(lines)
 
 
+class StartupBlockedError(RuntimeError):
+    """Raised when a critical health check fails and block_on_critical is True."""
+
+
 class SystemHealthCheck:
     """Probes all optional dependencies and reports system health."""
 
-    def __init__(self):
+    # Components whose failure should block startup when block_on_critical=True
+    CRITICAL_COMPONENTS = {"python", "sqlite"}
+
+    def __init__(self, critical_components: Optional[List[str]] = None):
+        """
+        Args:
+            critical_components: Override the set of component names whose
+                failure blocks startup. Defaults to CRITICAL_COMPONENTS.
+        """
+        if critical_components is not None:
+            self.CRITICAL_COMPONENTS = set(critical_components)
         self._checks: List[callable] = [
             self._check_python_version,
             self._check_redis,
@@ -82,8 +96,14 @@ class SystemHealthCheck:
             self._check_numpy,
         ]
 
-    def run_all(self) -> SystemHealthReport:
-        """Run all health checks and return report."""
+    def run_all(self, block_on_critical: bool = False) -> SystemHealthReport:
+        """
+        Run all health checks and return report.
+
+        Args:
+            block_on_critical: If True, raise StartupBlockedError when any
+                component listed in CRITICAL_COMPONENTS is UNAVAILABLE.
+        """
         components = []
         for check in self._checks:
             try:
@@ -107,6 +127,21 @@ class SystemHealthCheck:
 
         report = SystemHealthReport(overall_status=overall, components=components)
         logger.info(report.to_log_string())
+
+        # Block startup if critical components failed
+        if block_on_critical:
+            failed_critical = [
+                c for c in components
+                if c.name in self.CRITICAL_COMPONENTS
+                and c.status in (HealthStatus.UNAVAILABLE, HealthStatus.UNKNOWN)
+            ]
+            if failed_critical:
+                names = ", ".join(c.name for c in failed_critical)
+                raise StartupBlockedError(
+                    f"Critical health check(s) failed: {names}. "
+                    f"Startup blocked. Details:\n{report.to_log_string()}"
+                )
+
         return report
 
     def _check_python_version(self) -> ComponentHealth:
@@ -136,9 +171,49 @@ class SystemHealthCheck:
     def _check_postgresql(self) -> ComponentHealth:
         try:
             import asyncpg
-            return ComponentHealth(name="postgresql", status=HealthStatus.DEGRADED, message="asyncpg installed, connection not tested")
         except ImportError:
             return ComponentHealth(name="postgresql", status=HealthStatus.UNAVAILABLE, message="asyncpg not installed")
+
+        # Attempt actual connection using env config
+        dsn = os.environ.get("DATABASE_URL", "")
+        pg_host = os.environ.get("PG_HOST", "localhost")
+        pg_port = os.environ.get("PG_PORT", "5432")
+        pg_user = os.environ.get("PG_USER", "")
+        pg_db = os.environ.get("PG_DATABASE", "")
+
+        if not dsn and not pg_user:
+            return ComponentHealth(
+                name="postgresql",
+                status=HealthStatus.DEGRADED,
+                message="asyncpg installed but no connection config (set DATABASE_URL or PG_HOST/PG_USER/PG_DATABASE)",
+            )
+
+        import asyncio
+
+        async def _try_connect():
+            if dsn:
+                conn = await asyncpg.connect(dsn, timeout=5)
+            else:
+                conn = await asyncpg.connect(
+                    host=pg_host, port=int(pg_port),
+                    user=pg_user, database=pg_db, timeout=5,
+                )
+            version = await conn.fetchval("SELECT version()")
+            await conn.close()
+            return version
+
+        try:
+            version = asyncio.get_event_loop().run_until_complete(_try_connect())
+            short_ver = str(version).split(",")[0] if version else "unknown"
+            return ComponentHealth(
+                name="postgresql", status=HealthStatus.HEALTHY,
+                message=f"Connected: {short_ver}",
+            )
+        except Exception as e:
+            return ComponentHealth(
+                name="postgresql", status=HealthStatus.UNAVAILABLE,
+                message=f"asyncpg installed but connection failed: {e}",
+            )
 
     def _check_sqlite(self) -> ComponentHealth:
         import sqlite3
@@ -148,9 +223,25 @@ class SystemHealthCheck:
     def _check_playwright(self) -> ComponentHealth:
         try:
             from playwright.sync_api import sync_playwright
-            return ComponentHealth(name="playwright", status=HealthStatus.HEALTHY, message="Playwright available")
         except ImportError:
             return ComponentHealth(name="playwright", status=HealthStatus.UNAVAILABLE, message="playwright not installed")
+
+        # Verify at least one browser is installed
+        try:
+            with sync_playwright() as p:
+                # Try chromium first (most common)
+                browser = p.chromium.launch(headless=True)
+                version = browser.version
+                browser.close()
+                return ComponentHealth(
+                    name="playwright", status=HealthStatus.HEALTHY,
+                    message=f"Chromium {version} available",
+                )
+        except Exception as e:
+            return ComponentHealth(
+                name="playwright", status=HealthStatus.DEGRADED,
+                message=f"Playwright installed but browser launch failed (run 'playwright install'): {e}",
+            )
 
     def _check_pywin32(self) -> ComponentHealth:
         if sys.platform != 'win32':
@@ -181,12 +272,37 @@ class SystemHealthCheck:
     def _check_twilio(self) -> ComponentHealth:
         try:
             from twilio.rest import Client
-            has_creds = bool(os.environ.get('TWILIO_ACCOUNT_SID') and os.environ.get('TWILIO_AUTH_TOKEN'))
-            if has_creds:
-                return ComponentHealth(name="twilio", status=HealthStatus.HEALTHY, message="Installed with credentials")
-            return ComponentHealth(name="twilio", status=HealthStatus.DEGRADED, message="Installed but no credentials in env")
         except ImportError:
             return ComponentHealth(name="twilio", status=HealthStatus.UNAVAILABLE, message="Not installed")
+
+        import re
+        sid = os.environ.get('TWILIO_ACCOUNT_SID', '')
+        token = os.environ.get('TWILIO_AUTH_TOKEN', '')
+
+        if not sid or not token:
+            return ComponentHealth(
+                name="twilio", status=HealthStatus.DEGRADED,
+                message="Installed but TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set",
+            )
+
+        # Validate SID format: starts with AC and is 34 chars
+        warnings = []
+        if not re.match(r'^AC[0-9a-fA-F]{32}$', sid):
+            warnings.append("TWILIO_ACCOUNT_SID format invalid (expected AC + 32 hex chars)")
+        # Auth token should be 32 hex chars
+        if not re.match(r'^[0-9a-fA-F]{32}$', token):
+            warnings.append("TWILIO_AUTH_TOKEN format invalid (expected 32 hex chars)")
+
+        if warnings:
+            return ComponentHealth(
+                name="twilio", status=HealthStatus.DEGRADED,
+                message=f"Credential format issues: {'; '.join(warnings)}",
+            )
+
+        return ComponentHealth(
+            name="twilio", status=HealthStatus.HEALTHY,
+            message="Installed with valid credential format",
+        )
 
     def _check_gmail(self) -> ComponentHealth:
         try:
@@ -230,10 +346,20 @@ class SystemHealthCheck:
             return ComponentHealth(name="numpy", status=HealthStatus.UNAVAILABLE, message="Not installed")
 
 
-def run_startup_health_check() -> SystemHealthReport:
-    """Convenience function to run health check on startup."""
-    checker = SystemHealthCheck()
-    report = checker.run_all()
+def run_startup_health_check(
+    block_on_critical: bool = False,
+    critical_components: Optional[List[str]] = None,
+) -> SystemHealthReport:
+    """
+    Convenience function to run health check on startup.
+
+    Args:
+        block_on_critical: Raise StartupBlockedError if any critical component
+            is unavailable.
+        critical_components: Override which component names are considered critical.
+    """
+    checker = SystemHealthCheck(critical_components=critical_components)
+    report = checker.run_all(block_on_critical=block_on_critical)
 
     # Write JSON report
     report_path = os.path.join(os.path.dirname(__file__), 'health_report.json')

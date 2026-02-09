@@ -989,100 +989,166 @@ class LLMTaskExecutor(TaskExecutor):
 
 
 class ShellTaskExecutor(TaskExecutor):
-    """Executor for shell command tasks."""
-    
+    """Executor for shell command tasks with logging and optional retry."""
+
     async def execute(
         self,
         task: TaskDefinition,
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Execute shell command."""
+        """Execute shell command with retry support on transient OS errors."""
         import subprocess
-        
+
         config = task.config
         command = config.get('command', '')
-        
-        logger.info(f"Executing shell task: {task.name}")
-        
-        try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=config.get('timeout', 60)
-            )
-            
-            return {
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'returncode': result.returncode,
-                'success': result.returncode == 0
-            }
-        except subprocess.TimeoutExpired:
-            raise TaskExecutionError(f"Shell command timed out: {command}")
-        except OSError as e:
-            raise TaskExecutionError(f"Shell command failed: {e}")
+        max_retries = config.get('shell_retries', 0)
+        retry_delay = config.get('shell_retry_delay', 2.0)
+
+        logger.info(f"Executing shell task: {task.name} (command={command!r})")
+
+        last_error: Optional[OSError] = None
+        for attempt in range(max_retries + 1):
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=config.get('timeout', 60)
+                )
+
+                return {
+                    'stdout': result.stdout,
+                    'stderr': result.stderr,
+                    'returncode': result.returncode,
+                    'success': result.returncode == 0,
+                }
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    f"Shell command timed out after {config.get('timeout', 60)}s: {command}"
+                )
+                raise TaskExecutionError(f"Shell command timed out: {command}")
+            except OSError as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Shell command OS error (attempt {attempt + 1}/{max_retries + 1}), "
+                        f"retrying in {retry_delay}s: {e}"
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(
+                        f"Shell command failed after {attempt + 1} attempt(s): {e}"
+                    )
+
+        raise TaskExecutionError(f"Shell command failed: {last_error}")
 
 
 class PythonTaskExecutor(TaskExecutor):
-    """Executor for Python code tasks."""
-    
+    """Executor for Python code tasks with sandboxed execution."""
+
+    # Modules allowed inside sandboxed exec(); everything else is blocked.
+    _ALLOWED_MODULES = frozenset({
+        'math', 'json', 'datetime', 'collections', 'itertools',
+        'functools', 're', 'string', 'copy', 'textwrap', 'uuid',
+    })
+
+    # Builtins exposed to sandboxed code.  Dangerous functions like
+    # __import__, eval, exec, compile, open, globals, locals, etc.
+    # are deliberately excluded.
+    _SAFE_BUILTINS = {
+        'abs': abs, 'all': all, 'any': any, 'bool': bool,
+        'dict': dict, 'enumerate': enumerate, 'filter': filter,
+        'float': float, 'frozenset': frozenset, 'int': int,
+        'isinstance': isinstance, 'issubclass': issubclass,
+        'len': len, 'list': list, 'map': map, 'max': max,
+        'min': min, 'print': print, 'range': range, 'repr': repr,
+        'reversed': reversed, 'round': round, 'set': set,
+        'sorted': sorted, 'str': str, 'sum': sum, 'tuple': tuple,
+        'type': type, 'zip': zip,
+        'True': True, 'False': False, 'None': None,
+    }
+
+    @classmethod
+    def _restricted_import(cls, name, *args, **kwargs):
+        """Import guard that only allows whitelisted modules."""
+        if name not in cls._ALLOWED_MODULES:
+            raise ImportError(
+                f"Import of '{name}' is not allowed in sandboxed Python tasks. "
+                f"Allowed modules: {sorted(cls._ALLOWED_MODULES)}"
+            )
+        return __builtins__['__import__'](name, *args, **kwargs) if isinstance(
+            __builtins__, dict
+        ) else __import__(name, *args, **kwargs)
+
     async def execute(
         self,
         task: TaskDefinition,
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Execute Python code."""
+        """Execute Python code in a sandboxed namespace."""
         config = task.config
         code = config.get('code', '')
-        
+
         logger.info(f"Executing Python task: {task.name}")
-        
-        # Create execution namespace with context
-        namespace = {
+
+        # Build a restricted builtins dict with a guarded __import__
+        restricted_builtins = dict(self._SAFE_BUILTINS)
+        restricted_builtins['__import__'] = self._restricted_import
+
+        # Create execution namespace with restricted builtins and context
+        namespace: Dict[str, Any] = {
+            '__builtins__': restricted_builtins,
             'context': context,
             'inputs': context.get('inputs', {}),
             'variables': context.get('variables', {}),
             'tasks': context.get('tasks', {}),
-            'result': None
+            'result': None,
         }
-        
+
         try:
-            exec(code, namespace)
+            exec(code, namespace)  # noqa: S102 – builtins are restricted above
             return {
                 'result': namespace.get('result'),
-                'variables': {k: v for k, v in namespace.items() 
-                             if not k.startswith('_') and k not in 
-                             ['context', 'inputs', 'variables', 'tasks']}
+                'variables': {
+                    k: v for k, v in namespace.items()
+                    if not k.startswith('_') and k not in
+                    ('context', 'inputs', 'variables', 'tasks')
+                },
             }
-        except (SyntaxError, NameError, TypeError, ValueError) as e:
+        except (SyntaxError, NameError, TypeError, ValueError, ImportError) as e:
             raise TaskExecutionError(f"Python execution failed: {e}")
 
 
 class HTTPTaskExecutor(TaskExecutor):
     """Executor for HTTP request tasks."""
-    
+
     async def execute(
         self,
         task: TaskDefinition,
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute HTTP request."""
-        import aiohttp
-        
+        try:
+            import aiohttp
+        except ImportError:
+            raise TaskExecutionError(
+                "HTTP task executor requires the 'aiohttp' package. "
+                "Install it with:  pip install aiohttp"
+            )
+
         config = task.config
         method = config.get('method', 'GET')
         url = config.get('url', '')
         headers = config.get('headers', {})
         body = config.get('body')
-        
+
         # Resolve variables
         evaluator = ExpressionEvaluator(context)
         url = self._resolve_template(url, evaluator)
-        
+
         logger.info(f"Executing HTTP task: {method} {url}")
-        
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.request(
@@ -1095,7 +1161,7 @@ class HTTPTaskExecutor(TaskExecutor):
                     return {
                         'status': response.status,
                         'headers': dict(response.headers),
-                        'data': await response.json() if response.content_type == 'application/json' 
+                        'data': await response.json() if response.content_type == 'application/json'
                                 else await response.text()
                     }
         except aiohttp.ClientError as e:

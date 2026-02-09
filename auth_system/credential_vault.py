@@ -915,15 +915,25 @@ def create_credential_vault(
     """
     if prefer_windows and platform.system() == 'Windows':
         try:
-            return WindowsCredentialVault(namespace)
+            vault = WindowsCredentialVault(namespace)
+            logger.info(
+                "Credential vault: using Windows Credential Manager "
+                "(namespace=%s, DPAPI-backed)", namespace,
+            )
+            return vault
         except (RuntimeError, ImportError, OSError) as e:
             logger.warning(f"Failed to create Windows vault: {e}")
-    
+
     # Fall back to encrypted file vault
     if storage_path is None:
         storage_path = Path.home() / '.openclaw' / 'credentials'
-    
-    return EncryptedFileVault(storage_path)
+
+    vault = EncryptedFileVault(storage_path)
+    logger.info(
+        "Credential vault: using encrypted file storage at %s "
+        "(AES-GCM encryption, PBKDF2 key derivation)", storage_path,
+    )
+    return vault
 
 
 # Convenience functions
