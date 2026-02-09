@@ -17,6 +17,5 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm audit --audit-level=high
       - run: pip install safety && safety check -r requirements.txt
-        continue-on-error: true
       - run: python -m pytest tests/ -v
       - run: npx tsc --noEmit

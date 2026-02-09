@@ -416,10 +416,31 @@ class ControlServer {
     this.readJsonBody(req, res, (data) => {
       const alerts = Array.isArray(data.alerts) ? data.alerts : [];
       logger.info(`[ControlServer] Received ${alerts.length} alert(s) from alertmanager`);
+
+      const processed = [];
       for (const alert of alerts) {
-        logger.info(`[ControlServer] Alert: ${alert.status || 'unknown'} - ${alert.labels?.alertname || 'unnamed'}`, alert);
+        const alertname = alert.labels?.alertname || 'unnamed';
+        const severity = alert.labels?.severity || 'unknown';
+        const status = alert.status || 'unknown';
+        logger.info(`[ControlServer] Alert: ${status} - ${alertname} (${severity})`, alert);
+
+        // Forward to daemon for processing
+        if (this.daemon) {
+          this.daemon.emit('alert', {
+            alertname,
+            severity,
+            status,
+            description: alert.annotations?.description || '',
+            summary: alert.annotations?.summary || '',
+            labels: alert.labels || {},
+            startsAt: alert.startsAt,
+            endsAt: alert.endsAt,
+          });
+        }
+        processed.push({ alertname, severity, status });
       }
-      this.sendJson(res, 200, { received: true, alerts: alerts.length });
+
+      this.sendJson(res, 200, { received: true, alerts: alerts.length, processed });
     });
   }
 

@@ -515,6 +515,164 @@ class TTSNotifier(BaseNotifier):
             logger.warning(f"[TTS] pyttsx3 not available, cannot speak: {message[:80]}")
 
 
+class SlackNotifier(BaseNotifier):
+    """Slack webhook notification handler"""
+
+    def __init__(self, config: Dict):
+        super().__init__(config)
+        self.webhook_url = os.environ.get('SLACK_WEBHOOK_URL') or config.get('webhook')
+        self.channels = config.get('channels', {})
+        self.include_graph = config.get('include_graph', True)
+        self.include_runbook = config.get('include_runbook', True)
+        self.mention_on_critical = config.get('mention_on_critical', '@channel')
+        self.timeout = config.get('timeout', 30)
+
+    async def send(self, alert: Alert) -> bool:
+        """Send Slack notification via webhook"""
+        if not self.enabled or not self.webhook_url:
+            return False
+
+        try:
+            # Determine channel based on severity
+            severity_channel_map = {
+                SeverityLevel.CRITICAL: self.channels.get('critical', '#alerts-critical'),
+                SeverityLevel.HIGH: self.channels.get('warning', '#alerts-warning'),
+                SeverityLevel.MEDIUM: self.channels.get('warning', '#alerts-warning'),
+                SeverityLevel.LOW: self.channels.get('info', '#deployments'),
+                SeverityLevel.INFO: self.channels.get('info', '#deployments'),
+            }
+            channel = severity_channel_map.get(alert.severity, '#alerts')
+
+            severity_colors = {
+                SeverityLevel.CRITICAL: '#dc3545',
+                SeverityLevel.HIGH: '#fd7e14',
+                SeverityLevel.MEDIUM: '#ffc107',
+                SeverityLevel.LOW: '#17a2b8',
+                SeverityLevel.INFO: '#6c757d',
+            }
+            color = severity_colors.get(alert.severity, '#6c757d')
+
+            # Build Slack message payload
+            text = ''
+            if alert.severity == SeverityLevel.CRITICAL and self.mention_on_critical:
+                text = f"{self.mention_on_critical} "
+            text += f"[{alert.severity.name}] {alert.site_name}: {alert.category}"
+
+            fields = [
+                {"title": "Severity", "value": alert.severity.name, "short": True},
+                {"title": "Category", "value": alert.category.title(), "short": True},
+                {"title": "Site", "value": alert.site_name, "short": True},
+                {"title": "Time", "value": alert.detected_at.strftime('%Y-%m-%d %H:%M:%S'), "short": True},
+            ]
+
+            if self.include_runbook:
+                fields.append({"title": "URL", "value": alert.site_url, "short": False})
+
+            payload = {
+                "channel": channel,
+                "attachments": [
+                    {
+                        "color": color,
+                        "title": f"{alert.severity.name} Alert - {alert.site_name}",
+                        "text": alert.description,
+                        "fields": fields,
+                        "footer": "OpenClaw Web Monitor",
+                        "ts": int(alert.detected_at.timestamp()),
+                    }
+                ],
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.webhook_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ) as response:
+                    if response.status == 200:
+                        alert.channels_sent.append('slack')
+                        return True
+                    else:
+                        body = await response.text()
+                        logger.warning(f"Slack webhook returned status {response.status}: {body}")
+                        return False
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.error(f"Slack notification failed: {e}")
+            return False
+
+
+class PagerDutyNotifier(BaseNotifier):
+    """PagerDuty Events API v2 notification handler"""
+
+    EVENTS_API_URL = "https://events.pagerduty.com/v2/enqueue"
+
+    def __init__(self, config: Dict):
+        super().__init__(config)
+        self.service_key = os.environ.get('PAGERDUTY_SERVICE_KEY') or config.get('service_key')
+        self.severity_mapping = config.get('severity_mapping', {
+            'critical': 'critical',
+            'warning': 'warning',
+            'info': 'info',
+        })
+        self.timeout = config.get('timeout', 30)
+
+    async def send(self, alert: Alert) -> bool:
+        """Send PagerDuty event via Events API v2"""
+        if not self.enabled or not self.service_key:
+            return False
+
+        try:
+            # Map severity to PagerDuty severity
+            pd_severity = self.severity_mapping.get(
+                alert.severity.name.lower(), 'warning'
+            )
+
+            payload = {
+                "routing_key": self.service_key,
+                "event_action": "trigger",
+                "payload": {
+                    "summary": f"[{alert.severity.name}] {alert.site_name}: {alert.description[:200]}",
+                    "source": "openclaw-web-monitor",
+                    "severity": pd_severity,
+                    "component": alert.site_name,
+                    "group": alert.category,
+                    "class": alert.change_type,
+                    "custom_details": {
+                        "site_url": alert.site_url,
+                        "change_type": alert.change_type,
+                        "category": alert.category,
+                        "detected_at": alert.detected_at.isoformat(),
+                        "alert_id": alert.id,
+                    },
+                },
+                "dedup_key": f"openclaw-{alert.site_id}-{alert.category}",
+                "links": [
+                    {
+                        "href": alert.site_url,
+                        "text": f"View {alert.site_name}",
+                    }
+                ],
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.EVENTS_API_URL,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ) as response:
+                    if response.status == 202:
+                        alert.channels_sent.append('pagerduty')
+                        return True
+                    else:
+                        body = await response.text()
+                        logger.warning(f"PagerDuty API returned status {response.status}: {body}")
+                        return False
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.error(f"PagerDuty notification failed: {e}")
+            return False
+
+
 class WebhookNotifier(BaseNotifier):
     """Webhook notification handler"""
     
@@ -667,6 +825,12 @@ class AlertManager:
         if 'webhook' in channels_config:
             self.channels['webhook'] = WebhookNotifier(self.config.get('webhook', {}))
 
+        if 'slack' in channels_config:
+            self.channels['slack'] = SlackNotifier(self.config.get('slack', {}))
+
+        if 'pagerduty' in channels_config:
+            self.channels['pagerduty'] = PagerDutyNotifier(self.config.get('pagerduty', {}))
+
         if 'log' in channels_config:
             self.channels['log'] = LogNotifier(self.config.get('log', {}))
 
@@ -714,13 +878,90 @@ class AlertManager:
         else:
             return SeverityLevel.INFO
     
+    def _is_inhibited(self, alert: Alert) -> bool:
+        """Check if alert is inhibited by a higher-severity alert for the same source."""
+        alerting_config = _load_alerting_config()
+        inhibit_rules = alerting_config.get('management', {}).get('inhibit_rules', [])
+
+        for rule in inhibit_rules:
+            source_severity = rule.get('source_match', {}).get('severity')
+            target_severity = rule.get('target_match', {}).get('severity')
+            equal_fields = rule.get('equal', [])
+
+            if not source_severity or not target_severity:
+                continue
+
+            # Check if this alert matches the target
+            if alert.severity.name.lower() != target_severity:
+                continue
+
+            # Check if there's a recent active source alert matching on equal fields
+            for past_alert in self.alert_history[-100:]:
+                if past_alert.severity.name.lower() != source_severity:
+                    continue
+                if past_alert.status == 'throttled':
+                    continue
+                # Check that equal fields match
+                match = True
+                for field_name in equal_fields:
+                    if field_name == 'alertname':
+                        if past_alert.category != alert.category:
+                            match = False
+                    elif field_name == 'instance':
+                        if past_alert.site_id != alert.site_id:
+                            match = False
+                if match and (datetime.now() - past_alert.detected_at).total_seconds() < 3600:
+                    return True
+
+        return False
+
+    def _get_time_based_channels(self, severity: SeverityLevel) -> Optional[List[str]]:
+        """Get channels based on time-of-day routing rules."""
+        alerting_config = _load_alerting_config()
+        time_routing = alerting_config.get('routing', {}).get('time_based', {})
+
+        if not time_routing:
+            return None
+
+        now = datetime.now()
+        day_name = now.strftime('%A').lower()
+
+        business_hours = time_routing.get('business_hours', {})
+        bh_days = business_hours.get('days', [])
+        bh_hours = business_hours.get('hours', [9, 17])
+
+        if day_name in bh_days and len(bh_hours) == 2 and bh_hours[0] <= now.hour < bh_hours[1]:
+            routing = business_hours.get('routing', {})
+        else:
+            routing = time_routing.get('after_hours', {}).get('routing', {})
+
+        if not routing:
+            return None
+
+        return routing.get(severity.name.lower())
+
+    def _group_key(self, alert: Alert) -> str:
+        """Generate a grouping key for the alert based on config."""
+        alerting_config = _load_alerting_config()
+        group_by = alerting_config.get('management', {}).get('group_by', ['alertname', 'severity'])
+
+        parts = []
+        for field_name in group_by:
+            if field_name == 'alertname':
+                parts.append(alert.category)
+            elif field_name == 'severity':
+                parts.append(alert.severity.name)
+            elif field_name == 'instance':
+                parts.append(alert.site_id)
+        return ':'.join(parts)
+
     async def process_change(self, change_data: Dict) -> Optional[Alert]:
         """Process a detected change and send alerts"""
         import uuid
-        
+
         # Create alert
         severity = self.determine_severity(change_data)
-        
+
         alert = Alert(
             id=str(uuid.uuid4())[:12],
             change_id=change_data.get('id', str(uuid.uuid4())[:12]),
@@ -734,26 +975,34 @@ class AlertManager:
             diff_data=change_data.get('diff_data', {}),
             detected_at=datetime.now()
         )
-        
+
+        # Check inhibition - suppress lower-severity alerts when matching higher-severity exists
+        if self._is_inhibited(alert):
+            alert.status = "inhibited"
+            self.alert_history.append(alert)
+            return alert
+
         # Check throttling
         if not self.throttler.should_send_alert(alert):
             alert.status = "throttled"
             self.alert_history.append(alert)
             return alert
-        
-        # Determine channels to use
-        channels_to_use = self.CHANNEL_SEVERITY_MAP.get(severity, [])
-        
+
+        # Determine channels: time-based routing overrides default severity map
+        channels_to_use = self._get_time_based_channels(severity)
+        if channels_to_use is None:
+            channels_to_use = self.CHANNEL_SEVERITY_MAP.get(severity, [])
+
         # Send through each channel
         for channel_name in channels_to_use:
             if channel_name in self.channels:
                 success = await self.channels[channel_name].send(alert)
                 if not success:
                     logger.warning(f"Failed to send alert through {channel_name}")
-        
+
         alert.status = "sent"
         self.alert_history.append(alert)
-        
+
         return alert
     
     def get_alert_history(self, site_id: Optional[str] = None, 

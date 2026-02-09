@@ -247,13 +247,13 @@ class WebRTCSignalingServer:
 
 ### 4.1 Windows 10 Low-Latency Audio APIs
 
-**Primary API:** Windows Audio Session API (WASAPI) via `IAudioClient3`
+**Primary API:** PortAudio via `sounddevice` Python library (may use WASAPI as backend on Windows)
 
 **Key Features:**
-- Buffer sizes as low as 3ms (with updated drivers)
+- Cross-platform audio I/O via PortAudio
+- On Windows 10, PortAudio can use WASAPI as its host API backend
+- Low-latency shared mode; exclusive mode available via `sd.WasapiSettings(exclusive=True)`
 - Automatic format negotiation
-- Event-driven capture mode
-- Exclusive and shared modes
 
 ### 4.2 Python Audio Capture Implementation
 

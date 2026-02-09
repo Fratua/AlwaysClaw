@@ -26,15 +26,24 @@ class OpenAIClient:
 
     _instance: Optional['OpenAIClient'] = None
 
+    VALID_THINKING_MODES = ('none', 'low', 'medium', 'high', 'xhigh')
+
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         try:
             import openai
         except ImportError:
-            raise ImportError("openai package not installed. Run: pip install openai>=1.0.0")
+            raise ImportError("openai package not installed. Run: pip install openai>=1.60.0")
 
         self.api_key = api_key or os.environ.get('OPENAI_API_KEY', '')
         self.model = model or os.environ.get('OPENAI_MODEL', 'gpt-5.2')
-        self.thinking_mode = os.environ.get('OPENAI_THINKING_MODE', 'high')
+        raw_thinking = os.environ.get('OPENAI_THINKING_MODE', 'high')
+        if raw_thinking not in self.VALID_THINKING_MODES:
+            logger.warning(
+                f"Invalid OPENAI_THINKING_MODE '{raw_thinking}', "
+                f"must be one of {self.VALID_THINKING_MODES}. Defaulting to 'high'."
+            )
+            raw_thinking = 'high'
+        self.thinking_mode = raw_thinking
         self._disabled = False
 
         if not self.api_key:

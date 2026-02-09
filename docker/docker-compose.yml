@@ -12,8 +12,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - agent
     networks:
@@ -50,7 +50,6 @@ services:
       - GPT52_MODEL=${GPT52_MODEL:-gpt-5.2}
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://postgres:${DB_PASSWORD}@postgres:5432/openclaw
-      - RABBITMQ_URL=amqp://rabbitmq:${RABBITMQ_PASSWORD}@rabbitmq:5672
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-production}
     volumes:
@@ -60,7 +59,6 @@ services:
     depends_on:
       - redis
       - postgres
-      - rabbitmq
     networks:
       - openclaw-network
     restart: unless-stopped
@@ -102,7 +100,7 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - openclaw-network
     restart: unless-stopped
@@ -112,29 +110,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # RabbitMQ Message Broker
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: openclaw-rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"  # Management UI
-    environment:
-      - RABBITMQ_DEFAULT_USER=openclaw
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
-      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
-    networks:
-      - openclaw-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   # Prometheus Metrics
   prometheus:
     image: prom/prometheus:latest
@@ -142,8 +117,8 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -169,8 +144,8 @@ services:
       - GF_SERVER_ROOT_URL=${GRAFANA_URL:-http://localhost:3000}
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../grafana/datasources:/etc/grafana/provisioning/datasources:ro
     depends_on:
       - prometheus
     networks:
@@ -238,7 +213,7 @@ services:
     ports:
       - "9093:9093"
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ../alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
@@ -268,8 +243,6 @@ volumes:
   redis-data:
     driver: local
   postgres-data:
-    driver: local
-  rabbitmq-data:
     driver: local
   prometheus-data:
     driver: local

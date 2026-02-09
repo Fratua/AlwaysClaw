@@ -7,6 +7,7 @@ including capture, playback, mixing, and streaming capabilities.
 """
 
 import asyncio
+import sys
 import numpy as np
 import sounddevice as sd
 import threading
@@ -18,6 +19,15 @@ from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Configure WASAPI backend on Windows for low-latency audio
+if sys.platform == 'win32':
+    try:
+        wasapi_settings = sd.WasapiSettings(exclusive=False)
+        sd.default.extra_settings = wasapi_settings
+        logger.info("Audio: WASAPI backend configured (shared mode)")
+    except (AttributeError, sd.PortAudioError) as e:
+        logger.debug(f"Audio: WASAPI configuration not available: {e}")
 
 
 class AudioFormat(Enum):

@@ -4,11 +4,14 @@ Cron-based and adaptive scheduling for web monitoring
 """
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduleType(Enum):
@@ -439,7 +442,7 @@ class CronScheduler:
                         self.adaptive.record_change(monitor_id)
                         
         except (RuntimeError, ValueError, TypeError) as e:
-            print(f"Error running check for {monitor_id}: {e}")
+            logger.error(f"Error running check for {monitor_id}: {e}")
     
     def stop(self):
         """Stop scheduler"""

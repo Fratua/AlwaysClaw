@@ -34,6 +34,7 @@ networkx>=3.0
 # MACHINE LEARNING
 # ============================================
 scikit-learn>=1.3.0
+xgboost>=2.0.0
 # PyTorch (optional, for advanced ML)
 # torch>=2.0.0
 # transformers>=4.30.0
@@ -67,7 +68,7 @@ azure-keyvault-secrets>=4.7.0
 # ============================================
 # OPENAI (GPT-5.2)
 # ============================================
-openai>=1.0.0
+openai>=1.60.0
 
 # ============================================
 # SEARCH ENGINES
@@ -87,13 +88,20 @@ lxml>=4.9.0
 # ============================================
 mail-parser>=3.15.0
 email-validator>=2.0.0
+html2text>=2020.1.16
 
 # ============================================
 # DATABASE
 # ============================================
-# asyncpg>=0.29.0            # Uncomment for PostgreSQL cold storage (postgres_store.py)
+asyncpg>=0.29.0
+alembic>=1.13.0
 # sqlalchemy>=2.0.0          # Uncomment if database ORM is needed
 # neo4j>=5.14.0              # Uncomment for knowledge graph support
+
+# ============================================
+# CACHE (Redis)
+# ============================================
+redis[hiredis]>=5.0.0
 
 # ============================================
 # SECURITY
@@ -150,28 +158,33 @@ flake8>=6.0.0
 isort>=5.12.0
 
 # ============================================
+# AUDIO
+# ============================================
+sounddevice>=0.4.6
+pyttsx3>=2.90
+
+# ============================================
+# NLP DEPENDENCIES
+# ============================================
+sentence-transformers>=2.2.0
+tiktoken>=0.5.0
+elevenlabs>=0.2.0
+# google-generativeai>=0.3.0   # Uncomment for Google AI
+
+# ============================================
+# SERVICE INTEGRATIONS
+# ============================================
+twilio>=8.5.0
+watchdog>=3.0.0
+playwright>=1.40.0
+# selenium>=4.15.0               # Uncomment for Selenium-based browser control
+
+# ============================================
 # OPTIONAL ML DEPENDENCIES (for bug_finder_loop)
 # ============================================
 # tensorflow>=2.14.0  # Uncomment for advanced bug detection
-# xgboost>=2.0.0      # Uncomment for gradient boosting
 # shap>=0.43.0         # Uncomment for model explanations
 # lime>=0.2.0          # Uncomment for local interpretable explanations
 # statsmodels>=0.14.0  # Uncomment for time series analysis
 # prophet>=1.1.0       # Uncomment for forecasting
 # prefixspan>=0.5.2   # Uncomment for pattern learning (pattern_learning.py)
-
-# ============================================
-# OPTIONAL NLP DEPENDENCIES
-# ============================================
-# sentence-transformers>=2.2.0  # Uncomment for discovery loop
-# tiktoken>=0.5.0               # Uncomment for context management
-# elevenlabs>=0.2.0             # Uncomment for ElevenLabs TTS
-# google-generativeai>=0.3.0   # Uncomment for Google AI
-
-# ============================================
-# OPTIONAL SERVICE INTEGRATIONS
-# ============================================
-twilio>=8.5.0
-# watchdog>=3.0.0                # Uncomment for file system monitoring (self_updating_loop)
-playwright>=1.40.0
-# selenium>=4.15.0               # Uncomment for Selenium-based browser control

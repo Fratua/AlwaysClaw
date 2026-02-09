@@ -11,10 +11,45 @@ import asyncio
 import atexit
 import logging
 import os
+import time
 import traceback
 from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+# ── Prometheus metrics ────────────────────────────────────────────────
+try:
+    from prometheus_client import Counter, Gauge, Histogram
+
+    LOOPS_RUNNING = Gauge(
+        'openclaw_agent_loops_running',
+        'Number of agent loops currently running',
+    )
+    LOOP_STATUS = Gauge(
+        'openclaw_loop_status',
+        'Status of each loop (1=ok, 0=error)',
+        ['loop'],
+    )
+    LOOP_CYCLE_DURATION = Histogram(
+        'openclaw_loop_cycle_duration_seconds',
+        'Duration of loop cycle execution',
+        ['loop'],
+        buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300],
+    )
+    LOOP_RESTARTS = Counter(
+        'openclaw_loop_restarts_total',
+        'Total number of loop restarts',
+        ['loop'],
+    )
+    GPT_RESPONSE_DURATION = Histogram(
+        'openclaw_gpt_response_duration_seconds',
+        'Duration of GPT-5.2 API calls',
+        buckets=[0.5, 1, 2, 3, 5, 10, 20, 30, 60],
+    )
+    _METRICS_AVAILABLE = True
+except ImportError:
+    _METRICS_AVAILABLE = False
+    logger.debug("prometheus_client not available, metrics disabled")
 
 # ── Singleton loop instances ──────────────────────────────────────────
 
@@ -257,7 +292,7 @@ def _get_debugging_loop():
     if 'debugging' not in _loop_instances:
         try:
             from debugging_loop import DebuggingLoop
-            _loop_instances['debugging'] = DebuggingLoop(llm_client=_get_llm() if _llm_client else None)
+            _loop_instances['debugging'] = DebuggingLoop(llm_client=_get_llm())
             logger.info("DebuggingLoop initialized")
         except (ImportError, RuntimeError, OSError, ValueError) as e:
             logger.error(f"Failed to initialize DebuggingLoop: {e}")
@@ -276,8 +311,14 @@ def _get_web_monitor_loop():
                     self.name = "openclaw-agent"
                     self.config = {}
 
-                async def process(self, *args, **kwargs):
-                    return {"status": "ok"}
+                async def process(self, prompt: str = "", **kwargs):
+                    try:
+                        llm = _get_llm()
+                        result = llm.generate(prompt or "Analyze the current state.")
+                        return {"status": "ok", "content": result}
+                    except (EnvironmentError, RuntimeError) as e:
+                        logger.debug(f"MinimalAgentCore LLM call skipped: {e}")
+                        return {"status": "ok"}
 
             _loop_instances['web_monitor'] = WebMonitoringAgentLoop(agent_core=MinimalAgentCore())
             logger.info("WebMonitoringAgentLoop initialized")
@@ -293,15 +334,25 @@ def _get_web_monitor_loop():
 
 def _safe_run(loop_name: str, getter, runner) -> Dict[str, Any]:
     """Safely initialize and run a loop cycle with per-loop timeout."""
+    start = time.monotonic()
     try:
         instance = getter()
         result = runner(instance)
+        elapsed = time.monotonic() - start
+        if _METRICS_AVAILABLE:
+            LOOP_CYCLE_DURATION.labels(loop=loop_name).observe(elapsed)
+            LOOP_STATUS.labels(loop=loop_name).set(1)
         return {
             "loop": loop_name,
             "success": True,
             "result": result if isinstance(result, dict) else {"output": str(result)},
         }
     except (ImportError, RuntimeError, OSError, ValueError, KeyError) as e:
+        elapsed = time.monotonic() - start
+        if _METRICS_AVAILABLE:
+            LOOP_CYCLE_DURATION.labels(loop=loop_name).observe(elapsed)
+            LOOP_STATUS.labels(loop=loop_name).set(0)
+            LOOP_RESTARTS.labels(loop=loop_name).inc()
         logger.error(f"[{loop_name}] Cycle error: {e}\n{traceback.format_exc()}")
         return {
             "loop": loop_name,
@@ -459,6 +510,9 @@ def get_loop_handlers(llm_client=None) -> Dict[str, Callable]:
         'loop.debugging.run_cycle': run_debugging_cycle,
         'loop.web_monitor.run_cycle': run_web_monitor_cycle,
     }
+
+    if _METRICS_AVAILABLE:
+        LOOPS_RUNNING.set(len(handlers))
 
     logger.info(f"Loop adapters: {len(handlers)} handlers prepared")
     return handlers

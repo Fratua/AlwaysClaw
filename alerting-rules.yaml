@@ -23,18 +23,18 @@ alerts:
       description: "The error rate has exceeded 1% over the last 5 minutes"
       
     - name: "AgentLoopFailure"
-      condition: "openclaw_agent_loops_running < 16"
+      condition: "openclaw_agent_loops_running < 15"
       duration: "30s"
       severity: critical
       summary: "Agent loop failure detected"
-      description: "Fewer than 16 agent loops are running"
+      description: "Fewer than 15 agent loops are running"
       
-    - name: "CoreOrchestratorDown"
-      condition: "openclaw_loop_status{loop='core_orchestrator'} == 0"
+    - name: "RalphLoopDown"
+      condition: "openclaw_loop_status{loop='ralph'} == 0"
       duration: "30s"
       severity: critical
-      summary: "Core orchestrator is down"
-      description: "The core orchestrator loop has stopped"
+      summary: "Ralph loop is down"
+      description: "The Ralph (main orchestrator) loop has stopped"
       
     - name: "MemoryExhaustion"
       condition: "windows_memory_available_bytes / windows_memory_total_bytes < 0.1"
