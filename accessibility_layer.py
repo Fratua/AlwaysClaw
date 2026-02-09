@@ -12,14 +12,48 @@ This module implements comprehensive accessibility features including:
 """
 
 import asyncio
+import os
 import re
+import sys
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable, Set
+from typing import Dict, List, Optional, Any, Callable, Set, Tuple
 from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Screen reader integration -- optional native dependencies
+# ---------------------------------------------------------------------------
+_comtypes_available = False
+_nvda_available = False
+_nvda_controller = None
+_sapi_available = False
+
+if sys.platform == 'win32':
+    try:
+        import comtypes
+        import comtypes.client
+        _comtypes_available = True
+    except ImportError:
+        pass
+
+    try:
+        import ctypes
+        _nvda_dll_path = r"C:\Program Files (x86)\NVDA\nvdaControllerClient64.dll"
+        if os.path.exists(_nvda_dll_path):
+            _nvda_controller = ctypes.windll.LoadLibrary(_nvda_dll_path)
+            _nvda_available = True
+    except Exception:
+        _nvda_controller = None
+
+    try:
+        import win32com.client  # noqa: F401
+        _sapi_available = True
+    except ImportError:
+        pass
 
 
 # =============================================================================
@@ -157,7 +191,244 @@ class AccessibleElement:
 
 
 # =============================================================================
-# SCREEN READER INTEGRATION
+# SCREEN READER BRIDGE  (native Win32 integration)
+# =============================================================================
+
+class ScreenReaderBridge:
+    """
+    Low-level bridge to native screen readers on Windows.
+
+    Supports NVDA (controller client DLL), JAWS (COM automation),
+    Windows Narrator (UI Automation notification), and a SAPI TTS
+    fallback.
+    """
+
+    def __init__(self):
+        self._available_readers: List[str] = []
+        self._active_reader: Optional[str] = None
+        self._available_readers = self.detect_screen_readers()
+        self._active_reader = self.get_active_reader()
+
+    # -- detection -----------------------------------------------------------
+
+    def detect_screen_readers(self) -> List[str]:
+        """Return names of screen readers detected on the system."""
+        detected: List[str] = []
+
+        # NVDA -- check via controller DLL
+        if _nvda_available and _nvda_controller is not None:
+            try:
+                result = _nvda_controller.nvdaController_testIfRunning()
+                if result == 0:
+                    detected.append("nvda")
+            except (OSError, AttributeError):
+                pass
+
+        # JAWS -- check via COM
+        if _comtypes_available:
+            try:
+                import comtypes.client as _cc
+                _cc.CreateObject("FreedomSci.JawsApi")
+                detected.append("jaws")
+            except Exception:
+                pass
+
+        # Narrator -- check running process
+        if sys.platform == 'win32':
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['powershell', '-Command',
+                     'Get-Process Narrator -ErrorAction SilentlyContinue'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    detected.append("narrator")
+            except (OSError, FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+
+        # SAPI is always available if win32com is importable
+        if _sapi_available:
+            detected.append("sapi")
+
+        return detected
+
+    def get_active_reader(self) -> Optional[str]:
+        """Return the first detected reader (preference: nvda > jaws > narrator > sapi)."""
+        for preferred in ("nvda", "jaws", "narrator", "sapi"):
+            if preferred in self._available_readers:
+                return preferred
+        return None
+
+    # -- announcement --------------------------------------------------------
+
+    def announce(self, text: str, interrupt: bool = False) -> bool:
+        """
+        Send *text* to the active screen reader.
+
+        Returns True on success, False otherwise.
+        """
+        if not self._active_reader:
+            return False
+
+        dispatch = {
+            "nvda": self._announce_nvda,
+            "jaws": self._announce_jaws,
+            "narrator": self._announce_narrator,
+            "sapi": self._announce_sapi,
+        }
+
+        handler = dispatch.get(self._active_reader)
+        if handler:
+            return handler(text, interrupt) if self._active_reader != "narrator" else handler(text)
+        return False
+
+    def _announce_nvda(self, text: str, interrupt: bool) -> bool:
+        """Use NVDA controller client DLL (nvdaControllerClient_speakText)."""
+        if not _nvda_available or _nvda_controller is None:
+            return False
+        try:
+            if interrupt:
+                _nvda_controller.nvdaController_cancelSpeech()
+            _nvda_controller.nvdaController_speakText(text)
+            return True
+        except (OSError, AttributeError) as exc:
+            logger.error("NVDA announce failed: %s", exc)
+            return False
+
+    def _announce_jaws(self, text: str, interrupt: bool) -> bool:
+        """Use COM automation (JFW.Application -> SayString)."""
+        if not _comtypes_available:
+            return False
+        try:
+            import comtypes.client as _cc
+            jaws = _cc.CreateObject("FreedomSci.JawsApi")
+            jaws.SayString(text, int(interrupt))
+            return True
+        except Exception as exc:
+            logger.error("JAWS announce failed: %s", exc)
+            return False
+
+    def _announce_narrator(self, text: str) -> bool:
+        """Use Windows UI Automation RaiseNotificationEvent via UIAutomationBridge."""
+        bridge = UIAutomationBridge()
+        try:
+            bridge.raise_notification(text)
+            return True
+        except Exception as exc:
+            logger.error("Narrator announce failed: %s", exc)
+            return False
+
+    def _announce_sapi(self, text: str) -> bool:
+        """Fallback to Windows SAPI TTS via win32com.client.Dispatch('SAPI.SpVoice')."""
+        if not _sapi_available:
+            return False
+        try:
+            import win32com.client
+            voice = win32com.client.Dispatch("SAPI.SpVoice")
+            voice.Speak(text)
+            return True
+        except Exception as exc:
+            logger.error("SAPI announce failed: %s", exc)
+            return False
+
+
+# =============================================================================
+# UI AUTOMATION BRIDGE
+# =============================================================================
+
+class UIAutomationBridge:
+    """
+    Bridge to the Windows UI Automation framework (via comtypes).
+
+    Provides notification events, focus queries, and focus setting for
+    accessible UI elements.
+    """
+
+    # UIA COM CLSID / IID constants
+    _CLSID_CUIAutomation = "{FF48DBA4-60EF-4201-AA87-54103EEF594E}"
+    _IID_IUIAutomation = "{30CBE57D-D9D0-452A-AB13-7AC5AC4825EE}"
+
+    def __init__(self):
+        self._uia = None
+        self._init_uia()
+
+    def _init_uia(self):
+        """CoCreateInstance for CUIAutomation."""
+        if not _comtypes_available:
+            return
+        try:
+            import comtypes  # noqa: F811
+            import comtypes.client
+            self._uia = comtypes.CoCreateInstance(
+                comtypes.GUID(self._CLSID_CUIAutomation),
+                interface=None,
+                clsctx=comtypes.CLSCTX_INPROC_SERVER,
+            )
+        except Exception as exc:
+            logger.debug("UI Automation init failed: %s", exc)
+
+    def raise_notification(self, text: str):
+        """
+        Raise a UIA notification event so Narrator (or any listening AT)
+        can read *text*.
+
+        Falls back to SAPI if UIA is unavailable.
+        """
+        if self._uia is not None:
+            try:
+                # IUIAutomation::RaiseNotificationEvent is available in
+                # Windows 10 1709+.  The COM wrapper may not expose the
+                # method directly, so we attempt and fall through.
+                root = self._uia.GetRootElement()
+                # AutomationNotificationKind_ActionCompleted = 4
+                # AutomationNotificationProcessing_ImportantAll = 2
+                self._uia.RaiseNotificationEvent(root, 4, 2, text, "")
+                return
+            except (AttributeError, Exception) as exc:
+                logger.debug("UIA RaiseNotificationEvent unavailable: %s", exc)
+
+        # Fallback -- use SAPI if available
+        if _sapi_available:
+            try:
+                import win32com.client
+                voice = win32com.client.Dispatch("SAPI.SpVoice")
+                voice.Speak(text)
+            except Exception as exc:
+                logger.error("SAPI fallback failed: %s", exc)
+
+    def get_focused_element(self) -> Optional[Any]:
+        """Return the currently focused UI Automation element, or None."""
+        if self._uia is None:
+            return None
+        try:
+            return self._uia.GetFocusedElement()
+        except Exception as exc:
+            logger.debug("GetFocusedElement failed: %s", exc)
+            return None
+
+    def set_focus(self, element_id: str):
+        """
+        Set focus to a UI element identified by *element_id* (automation ID).
+
+        Searches from the desktop root using an automation-id property
+        condition.
+        """
+        if self._uia is None:
+            return
+        try:
+            root = self._uia.GetRootElement()
+            # UIA_AutomationIdPropertyId = 30011
+            condition = self._uia.CreatePropertyCondition(30011, element_id)
+            element = root.FindFirst(2, condition)  # TreeScope_Descendants = 2
+            if element is not None:
+                element.SetFocus()
+        except Exception as exc:
+            logger.debug("set_focus failed for %s: %s", element_id, exc)
+
+
+# =============================================================================
+# SCREEN READER INTEGRATION (async wrapper)
 # =============================================================================
 
 class ScreenReaderIntegration:
@@ -1021,14 +1292,16 @@ class AccessibilityManager:
     
     def __init__(self, settings: Optional[AccessibilitySettings] = None):
         self.settings = settings or AccessibilitySettings()
-        
+
         # Initialize subsystems
         self.screen_reader = ScreenReaderIntegration()
+        self.screen_reader_bridge = ScreenReaderBridge()
+        self.uia_bridge = UIAutomationBridge()
         self.keyboard = KeyboardNavigation(self.settings)
         self.color = ColorAccessibility(self.settings)
         self.motor = MotorAccessibility(self.settings)
         self.cognitive = CognitiveAccessibility(self.settings)
-        
+
         self.accessible_elements: Dict[str, AccessibleElement] = {}
         self.announcement_callbacks: List[Callable] = []
         

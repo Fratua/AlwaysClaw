@@ -1326,7 +1326,14 @@ class ExplorationLoop:
     """
     
     def __init__(self, config: Optional[Dict] = None):
-        self.config = {**DEFAULT_CONFIG, **(config or {})}
+        if config is None:
+            try:
+                from config_loader import get_config
+                yaml_cfg = get_config("config", "exploration_loop", None)
+                config = yaml_cfg if yaml_cfg else {}
+            except (ImportError, Exception):
+                config = {}
+        self.config = {**DEFAULT_CONFIG, **config}
         self.state = "initialized"
         
         # Initialize components

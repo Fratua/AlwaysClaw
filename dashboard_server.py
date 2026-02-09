@@ -7,12 +7,25 @@ import asyncio
 import json
 import logging
 import os
+import time as _time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    psutil = None  # type: ignore[assignment]
+    HAS_PSUTIL = False
+
+try:
+    from monitor_engine import MonitorEngine
+except ImportError:
+    MonitorEngine = None  # type: ignore[assignment,misc]
 
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
@@ -33,9 +46,18 @@ class DashboardAPI:
         self.scheduler = scheduler
         self.alert_manager = alert_manager
         self.config = config or {}
-        self.refresh_interval = config.get('refresh_interval', 5)
+        self.refresh_interval = self.config.get('refresh_interval', 5)
         self.connected_clients: List[WebSocket] = []
-        
+        self._start_time = _time.monotonic()
+
+        # Try to initialise a MonitorEngine for extra system data
+        self._monitor_engine: Optional[Any] = None
+        if MonitorEngine is not None:
+            try:
+                self._monitor_engine = engine if isinstance(engine, MonitorEngine) else MonitorEngine({})
+            except Exception as exc:
+                logger.warning("Could not initialize MonitorEngine: %s", exc)
+
         if HAS_FASTAPI:
             self.app = FastAPI(
                 title="OpenClaw Web Monitor",
@@ -673,19 +695,44 @@ class DashboardAPI:
 </html>
 """
     
+    def _get_system_metrics(self) -> Dict[str, Any]:
+        """Collect real system metrics via psutil."""
+        metrics: Dict[str, Any] = {}
+        if not HAS_PSUTIL:
+            return metrics
+        try:
+            metrics['cpu_percent'] = psutil.cpu_percent(interval=0)
+            mem = psutil.virtual_memory()
+            metrics['memory'] = {
+                'total': mem.total,
+                'available': mem.available,
+                'percent': mem.percent,
+            }
+            disk = psutil.disk_usage(os.path.abspath(os.sep))
+            metrics['disk'] = {
+                'total': disk.total,
+                'used': disk.used,
+                'free': disk.free,
+                'percent': disk.percent,
+            }
+            metrics['uptime_seconds'] = round(_time.monotonic() - self._start_time, 1)
+        except Exception as exc:
+            logger.debug("psutil metrics error: %s", exc)
+        return metrics
+
     def _get_overview_data(self) -> Dict:
-        """Get overview statistics"""
+        """Get overview statistics with real system metrics"""
         # Count alerts by severity
         alert_stats = self.alert_manager.get_statistics() if self.alert_manager else {}
-        
+
         # Count changes today
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         changes_today = sum(
             1 for change in self.engine.change_history
             if change.detected_at >= today
         )
-        
-        return {
+
+        overview = {
             'monitor_count': len(self.engine.monitors),
             'checks_run': self.engine.check_count,
             'changes_today': changes_today,
@@ -694,8 +741,13 @@ class DashboardAPI:
             'medium_alerts': alert_stats.get('by_severity', {}).get('MEDIUM', 0),
             'low_alerts': alert_stats.get('by_severity', {}).get('LOW', 0),
             'system_status': 'healthy' if self.engine.running else 'stopped',
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
         }
+
+        # Merge real system metrics
+        overview['system_metrics'] = self._get_system_metrics()
+
+        return overview
     
     def _get_sites_data(self) -> List[Dict]:
         """Get all monitored sites"""
@@ -814,23 +866,43 @@ class DashboardAPI:
         }
     
     async def _handle_websocket(self, websocket: WebSocket):
-        """Handle WebSocket connections"""
+        """Handle WebSocket connections with background metric pushes."""
         await websocket.accept()
         self.connected_clients.append(websocket)
-        
+
+        async def _push_metrics():
+            """Background task: push system metrics every 5 seconds."""
+            try:
+                while True:
+                    metrics = self._get_system_metrics()
+                    if metrics:
+                        await websocket.send_json({
+                            'type': 'system_metrics',
+                            'data': metrics,
+                            'timestamp': datetime.now().isoformat(),
+                        })
+                    await asyncio.sleep(5)
+            except (WebSocketDisconnect, OSError, RuntimeError):
+                pass
+
+        metrics_task = asyncio.create_task(_push_metrics())
+
         try:
             while True:
-                # Send periodic updates
+                # Send periodic overview updates
                 data = self._get_overview_data()
+                data['type'] = 'overview'
                 await websocket.send_json(data)
-                
+
                 # Wait before next update
                 await asyncio.sleep(self.refresh_interval)
-                
+
         except WebSocketDisconnect:
-            self.connected_clients.remove(websocket)
+            pass
         except (OSError, RuntimeError, ValueError) as e:
-            print(f"WebSocket error: {e}")
+            logger.warning("WebSocket error: %s", e)
+        finally:
+            metrics_task.cancel()
             if websocket in self.connected_clients:
                 self.connected_clients.remove(websocket)
     

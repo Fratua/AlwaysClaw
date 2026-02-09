@@ -35,6 +35,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _lazy_import(module_name: str, class_name: str):
+    """Deferred import that only loads on first use."""
+    try:
+        module = __import__(module_name)
+        return getattr(module, class_name)
+    except (ImportError, AttributeError) as e:
+        logger.warning(f"Optional dependency {module_name}.{class_name} not available: {e}")
+        return None
+
+
 class PythonBridge:
     """JSON-RPC server that dispatches to registered handlers."""
 
@@ -44,11 +54,12 @@ class PythonBridge:
         self.memory_manager = None
         self.db_connection = None
         self._gmail_client = None
-        self._gmail_import_failed = False
+        self._GmailClient = None  # lazy-loaded class reference
         self._tts_orchestrator = None
-        self._tts_import_failed = False
+        self._TTSOrchestrator = None  # lazy-loaded class reference
         self._twilio_manager = None
-        self._twilio_import_failed = False
+        self._TwilioVoiceManager = None  # lazy-loaded class reference
+        self._TwilioConfig = None  # lazy-loaded class reference
         self._stopping = False
         self._async_loop = None
         self._async_thread = None
@@ -344,54 +355,43 @@ class PythonBridge:
 
     def _get_gmail_client(self):
         """Lazy-initialize and cache the Gmail client."""
-        if self._gmail_client is None and not self._gmail_import_failed:
-            try:
-                from gmail_client_implementation import GmailClient
-                self._gmail_client = GmailClient()
-                logger.info("Gmail client initialized")
-            except ImportError:
-                self._gmail_import_failed = True
-                logger.warning("gmail_client_implementation not available")
-                raise
-        if self._gmail_import_failed:
-            raise ImportError("Gmail client not available")
+        if self._gmail_client is None:
+            if self._GmailClient is None:
+                self._GmailClient = _lazy_import('gmail_client_implementation', 'GmailClient')
+            if self._GmailClient is None:
+                raise ImportError("Gmail client not available")
+            self._gmail_client = self._GmailClient()
+            logger.info("Gmail client initialized")
         return self._gmail_client
 
     def _get_tts_orchestrator(self):
         """Lazy-initialize and cache the TTS orchestrator."""
-        if self._tts_orchestrator is None and not self._tts_import_failed:
-            try:
-                from tts_orchestrator import TTSOrchestrator
-                self._tts_orchestrator = TTSOrchestrator()
-                logger.info("TTS orchestrator initialized")
-            except ImportError:
-                self._tts_import_failed = True
-                logger.warning("tts_orchestrator not available")
-                raise
-        if self._tts_import_failed:
-            raise ImportError("TTS orchestrator not available")
+        if self._tts_orchestrator is None:
+            if self._TTSOrchestrator is None:
+                self._TTSOrchestrator = _lazy_import('tts_orchestrator', 'TTSOrchestrator')
+            if self._TTSOrchestrator is None:
+                raise ImportError("TTS orchestrator not available")
+            self._tts_orchestrator = self._TTSOrchestrator()
+            logger.info("TTS orchestrator initialized")
         return self._tts_orchestrator
 
     def _get_twilio_manager(self):
         """Lazy-initialize and cache the Twilio manager."""
-        if self._twilio_manager is None and not self._twilio_import_failed:
-            try:
-                from twilio_voice_integration import TwilioVoiceManager, TwilioConfig
-                config = TwilioConfig(
-                    account_sid=os.environ.get('TWILIO_ACCOUNT_SID', ''),
-                    auth_token=os.environ.get('TWILIO_AUTH_TOKEN', ''),
-                    phone_number=os.environ.get('TWILIO_PHONE_NUMBER', ''),
-                    webhook_url=os.environ.get('TWILIO_WEBHOOK_URL', ''),
-                    stream_url=os.environ.get('TWILIO_STREAM_URL', ''),
-                )
-                self._twilio_manager = TwilioVoiceManager(config)
-                logger.info("Twilio manager initialized")
-            except ImportError:
-                self._twilio_import_failed = True
-                logger.warning("twilio_voice_integration not available")
-                raise
-        if self._twilio_import_failed:
-            raise ImportError("Twilio manager not available")
+        if self._twilio_manager is None:
+            if self._TwilioVoiceManager is None:
+                self._TwilioVoiceManager = _lazy_import('twilio_voice_integration', 'TwilioVoiceManager')
+                self._TwilioConfig = _lazy_import('twilio_voice_integration', 'TwilioConfig')
+            if self._TwilioVoiceManager is None or self._TwilioConfig is None:
+                raise ImportError("Twilio manager not available")
+            config = self._TwilioConfig(
+                account_sid=os.environ.get('TWILIO_ACCOUNT_SID', ''),
+                auth_token=os.environ.get('TWILIO_AUTH_TOKEN', ''),
+                phone_number=os.environ.get('TWILIO_PHONE_NUMBER', ''),
+                webhook_url=os.environ.get('TWILIO_WEBHOOK_URL', ''),
+                stream_url=os.environ.get('TWILIO_STREAM_URL', ''),
+            )
+            self._twilio_manager = self._TwilioVoiceManager(config)
+            logger.info("Twilio manager initialized")
         return self._twilio_manager
 
     # ── Gmail handlers ───────────────────────────────────────────
@@ -401,7 +401,6 @@ class PythonBridge:
         if not to_addr or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', to_addr):
             return {"sent": False, "error": f"Invalid recipient address: {to_addr!r}"}
         try:
-            from gmail_client_implementation import GmailClient
             client = self._get_gmail_client()
             return client.messages.send_message(
                 to=to_addr,

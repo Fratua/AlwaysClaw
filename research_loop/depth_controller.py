@@ -3,10 +3,16 @@ Research Depth and Breadth Control System
 Manages research depth, adaptive research, and resource allocation.
 """
 
+import asyncio
 import logging
 import os
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime, timedelta
+
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore[assignment]
 
 from .models import (
     ResearchTask, ResearchConfig, CrawlConfig, ProgressStatus,
@@ -29,9 +35,19 @@ class DepthController:
     - Time budget management
     """
     
+    # Configurable resource thresholds
+    MEMORY_WARN: float = 75.0
+    MEMORY_CRITICAL: float = 90.0
+    CPU_WARN: float = 70.0
+    CPU_CRITICAL: float = 85.0
+
     def __init__(self, config: Optional[ResearchLoopConfig] = None):
         self.config = config or default_config
         self.active_research: Dict[str, Dict[str, Any]] = {}
+
+        # Token budget tracking
+        self._tokens_used: int = 0
+        self._token_budget: int = int(os.environ.get('TOKEN_BUDGET', '100000'))
     
     async def configure_research(
         self,
@@ -86,51 +102,124 @@ class DepthController:
         
         return config
     
+    # ------------------------------------------------------------------
+    # Token budget helpers
+    # ------------------------------------------------------------------
+    def track_tokens(self, count: int) -> None:
+        """Add *count* tokens to the running total."""
+        self._tokens_used += count
+
+    def tokens_remaining(self) -> int:
+        """Return how many tokens remain in the budget."""
+        return max(0, self._token_budget - self._tokens_used)
+
+    def reset_token_budget(self) -> None:
+        """Reset the token counter back to zero."""
+        self._tokens_used = 0
+
+    # ------------------------------------------------------------------
+    # psutil-backed resource checks
+    # ------------------------------------------------------------------
+    def _check_memory(self) -> Tuple[bool, float]:
+        """Return (ok, percent_used) using psutil.virtual_memory()."""
+        if psutil is None:
+            return True, 0.0
+        mem = psutil.virtual_memory()
+        ok = mem.percent < self.MEMORY_WARN
+        return ok, mem.percent
+
+    def _check_cpu(self) -> Tuple[bool, float]:
+        """Return (ok, percent_used) using psutil.cpu_percent()."""
+        if psutil is None:
+            return True, 0.0
+        cpu = psutil.cpu_percent(interval=0.1)
+        ok = cpu < self.CPU_WARN
+        return ok, cpu
+
     async def _check_resources(self) -> Dict[str, Any]:
         """Check actual system resources using psutil (with graceful fallback)."""
-        result = {
+        result: Dict[str, Any] = {
             "low_tokens": False,
             "rate_limited": False,
-            "memory_available": True
+            "memory_available": True,
+            "memory_percent": 0.0,
+            "cpu_percent": 0.0,
         }
 
-        try:
-            import psutil
+        # Token budget check
+        if self.tokens_remaining() < self._token_budget * 0.10:
+            result["low_tokens"] = True
 
-            # Check memory: flag if more than 85% used
-            mem = psutil.virtual_memory()
-            if mem.percent > 85:
-                result["memory_available"] = False
-                result["low_tokens"] = True  # Conserve resources when memory is tight
-                logger.warning(f"High memory usage: {mem.percent:.1f}%")
+        mem_ok, mem_pct = self._check_memory()
+        result["memory_percent"] = mem_pct
+        if not mem_ok:
+            result["memory_available"] = False
+            if mem_pct >= self.MEMORY_CRITICAL:
+                result["low_tokens"] = True
+                logger.warning("Critical memory usage: %.1f%%", mem_pct)
+            else:
+                logger.warning("High memory usage: %.1f%%", mem_pct)
 
-            # Check CPU: flag rate limiting if sustained high CPU
-            cpu_percent = psutil.cpu_percent(interval=0.5)
-            if cpu_percent > 90:
+        cpu_ok, cpu_pct = self._check_cpu()
+        result["cpu_percent"] = cpu_pct
+        if not cpu_ok:
+            if cpu_pct >= self.CPU_CRITICAL:
                 result["rate_limited"] = True
-                logger.warning(f"High CPU usage: {cpu_percent:.1f}%")
+                logger.warning("Critical CPU usage: %.1f%%", cpu_pct)
+            else:
+                logger.warning("High CPU usage: %.1f%%", cpu_pct)
 
-            # Check disk: flag if disk is nearly full (>95%)
+        # Disk check
+        if psutil is not None:
             try:
                 disk = psutil.disk_usage(os.path.abspath(os.sep))
                 if disk.percent > 95:
                     result["memory_available"] = False
-                    logger.warning(f"Disk nearly full: {disk.percent:.1f}%")
+                    logger.warning("Disk nearly full: %.1f%%", disk.percent)
             except OSError:
                 pass
-
-        except ImportError:
-            logger.debug("psutil not installed; resource checks skipped")
 
         return result
     
     def _reduce_depth_config(self, config: Any) -> Any:
-        """Reduce depth configuration for limited resources"""
+        """Reduce depth configuration for limited resources."""
         # Reduce all parameters by 50%
         config.max_sources = max(3, config.max_sources // 2)
         config.max_depth = max(1, config.max_depth // 2)
         config.max_pages_per_source = max(1, config.max_pages_per_source // 2)
         config.query_variants = max(2, config.query_variants // 2)
+        return config
+
+    async def apply_throttling(self, config: Any) -> Any:
+        """Apply dynamic throttling based on current resource state.
+
+        Call this periodically during depth evaluation to adaptively shrink
+        the research scope when the machine is under pressure.
+        """
+        _, mem_pct = self._check_memory()
+        _, cpu_pct = self._check_cpu()
+
+        # Memory-based throttling
+        if mem_pct >= self.MEMORY_CRITICAL:
+            config.max_depth = 1
+            config.max_sources = max(1, config.max_sources // 4)
+            logger.warning("Throttle: memory critical (%.1f%%), depth capped to 1", mem_pct)
+        elif mem_pct >= self.MEMORY_WARN:
+            config.max_depth = max(1, config.max_depth // 2)
+            logger.info("Throttle: memory warn (%.1f%%), depth halved", mem_pct)
+
+        # CPU-based throttling
+        if cpu_pct >= self.CPU_CRITICAL:
+            logger.warning("Throttle: CPU critical (%.1f%%), adding delay", cpu_pct)
+            await asyncio.sleep(2.0)
+
+        # Token budget throttling
+        remaining = self.tokens_remaining()
+        if remaining < self._token_budget * 0.10:
+            config.max_depth = max(1, config.max_depth // 2)
+            config.max_sources = max(1, config.max_sources // 2)
+            logger.info("Throttle: token budget low (%d remaining), reducing scope", remaining)
+
         return config
     
     async def monitor_progress(

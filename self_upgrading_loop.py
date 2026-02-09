@@ -1384,7 +1384,14 @@ class UpgradeOrchestrator:
     """
     
     def __init__(self, config: Dict = None):
-        self.config = config or {}
+        if config is None:
+            try:
+                from config_loader import get_config
+                self.config = get_config("self_upgrading_config", "self_upgrading", {})
+            except (ImportError, Exception):
+                self.config = {}
+        else:
+            self.config = config
         self.gap_analyzer = CapabilityGapAnalyzer(self.config.get('gap_analysis', {}))
         self.opportunity_identifier = OpportunityIdentifier(self.config.get('opportunity_scoring', {}))
         self.experimentation = FeatureExperimentationFramework(self.config.get('experimentation', {}))

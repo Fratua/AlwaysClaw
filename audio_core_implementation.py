@@ -27,15 +27,26 @@ class AudioFormat(Enum):
     INT32 = "int32"
 
 
+def _load_audio_defaults() -> dict:
+    """Load audio defaults from tts_config.yaml if available."""
+    try:
+        from config_loader import get_config
+        return get_config("tts_config", "tts.audio", {})
+    except (ImportError, Exception):
+        return {}
+
+_AUDIO_DEFAULTS = _load_audio_defaults()
+
+
 @dataclass
 class AudioConfig:
     """Audio configuration parameters"""
-    sample_rate: int = 48000
-    channels: int = 1
-    block_size: int = 960  # 20ms at 48kHz
+    sample_rate: int = _AUDIO_DEFAULTS.get('sample_rate', 48000)
+    channels: int = _AUDIO_DEFAULTS.get('channels', 1)
+    block_size: int = _AUDIO_DEFAULTS.get('buffer_size', 960)
     latency: str = "low"
     format: AudioFormat = AudioFormat.FLOAT32
-    
+
     @property
     def frame_duration_ms(self) -> float:
         """Calculate frame duration in milliseconds"""

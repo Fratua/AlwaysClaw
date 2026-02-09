@@ -4,6 +4,7 @@ Manages CPU, memory, and API quota allocation across users and tasks
 """
 
 import time
+import asyncio
 import threading
 import logging
 from typing import Dict, List, Optional, Callable, Tuple
@@ -11,6 +12,19 @@ from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
 import json
+import os
+
+try:
+    import psutil
+    _psutil_available = True
+except ImportError:
+    _psutil_available = False
+
+try:
+    import yaml
+    _yaml_available = True
+except ImportError:
+    _yaml_available = False
 
 logger = logging.getLogger(__name__)
 
@@ -539,6 +553,358 @@ class ResourceThrottler:
             "utilization": utilization,
             "retry_after": time.time() + (delay / 1000)
         }
+
+
+# ============================================================================
+# METRIC COLLECTION
+# ============================================================================
+
+class MetricCollector:
+    """Collects system metrics using psutil for auto-scaling decisions."""
+
+    def collect_cpu(self) -> float:
+        """Collect current CPU utilization percentage."""
+        if not _psutil_available:
+            logger.warning("psutil not available; returning 0 for CPU")
+            return 0.0
+        return psutil.cpu_percent(interval=1)
+
+    def collect_memory(self) -> float:
+        """Collect current memory utilization percentage."""
+        if not _psutil_available:
+            logger.warning("psutil not available; returning 0 for memory")
+            return 0.0
+        return psutil.virtual_memory().percent
+
+    def collect_disk_io(self) -> Dict[str, float]:
+        """Collect disk I/O counters."""
+        if not _psutil_available:
+            return {"read_bytes": 0, "write_bytes": 0}
+        counters = psutil.disk_io_counters()
+        if counters is None:
+            return {"read_bytes": 0, "write_bytes": 0}
+        return {
+            "read_bytes": counters.read_bytes,
+            "write_bytes": counters.write_bytes,
+            "read_count": counters.read_count,
+            "write_count": counters.write_count,
+        }
+
+    def collect_network(self) -> Dict[str, float]:
+        """Collect network I/O counters."""
+        if not _psutil_available:
+            return {"bytes_sent": 0, "bytes_recv": 0}
+        counters = psutil.net_io_counters()
+        if counters is None:
+            return {"bytes_sent": 0, "bytes_recv": 0}
+        return {
+            "bytes_sent": counters.bytes_sent,
+            "bytes_recv": counters.bytes_recv,
+            "packets_sent": counters.packets_sent,
+            "packets_recv": counters.packets_recv,
+        }
+
+    def collect_all(self) -> Dict[str, float]:
+        """Collect all key metrics in one dict."""
+        disk = self.collect_disk_io()
+        net = self.collect_network()
+        return {
+            "cpu_percent": self.collect_cpu(),
+            "memory_percent": self.collect_memory(),
+            "disk_read_bytes": disk.get("read_bytes", 0),
+            "disk_write_bytes": disk.get("write_bytes", 0),
+            "net_bytes_sent": net.get("bytes_sent", 0),
+            "net_bytes_recv": net.get("bytes_recv", 0),
+        }
+
+
+# ============================================================================
+# AUTO-SCALER
+# ============================================================================
+
+class AutoScaler:
+    """
+    Auto-scaling engine that reads policies from scaling_config.yaml,
+    collects metrics, evaluates policies respecting duration and cooldown,
+    and adjusts the worker pool size accordingly.
+    """
+
+    def __init__(self, config_path: str = "config/scaling_config.yaml"):
+        self._config_path = config_path
+        self._config: Dict = {}
+        self._load_config()
+
+        self._collector = MetricCollector()
+        self._metric_history: List[Dict] = []
+        self._last_scale_action: float = 0.0
+        self._last_policy_action: Dict[str, float] = {}
+
+        scaling_cfg = self._config.get("scaling", {})
+        self._current_instances: int = scaling_cfg.get("min_instances", 1)
+        self._min_instances: int = scaling_cfg.get("min_instances", 1)
+        self._max_instances: int = scaling_cfg.get("max_instances", 100)
+        self._running = False
+
+        logger.info(
+            "AutoScaler initialized: instances=%d min=%d max=%d",
+            self._current_instances, self._min_instances, self._max_instances,
+        )
+
+    # ------------------------------------------------------------------
+    # Config
+    # ------------------------------------------------------------------
+
+    def _load_config(self):
+        """Load scaling config from YAML file."""
+        if not _yaml_available:
+            logger.error("PyYAML not installed; cannot load scaling config")
+            self._config = {}
+            return
+        if not os.path.exists(self._config_path):
+            logger.warning("Scaling config not found at %s", self._config_path)
+            self._config = {}
+            return
+        with open(self._config_path, "r", encoding="utf-8") as fh:
+            self._config = yaml.safe_load(fh) or {}
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def current_instances(self) -> int:
+        return self._current_instances
+
+    # ------------------------------------------------------------------
+    # Policy evaluation
+    # ------------------------------------------------------------------
+
+    def _check_cooldown(self, policy: dict) -> bool:
+        """Return True if the cooldown for *policy* has elapsed."""
+        name = policy.get("name", "")
+        cooldown = policy.get("cooldown_seconds", 60)
+        last = self._last_policy_action.get(name, 0.0)
+        return (time.time() - last) >= cooldown
+
+    def _metric_sustained(self, policy: dict) -> bool:
+        """Check whether the threshold condition has been met for the
+        required *duration_seconds* using metric history."""
+        metric_name = policy.get("metric", "")
+        threshold = policy.get("threshold", 0)
+        comparison = policy.get("comparison", "gt")
+        duration = policy.get("duration_seconds", 60)
+        cutoff = time.time() - duration
+
+        relevant = [
+            h for h in self._metric_history if h.get("ts", 0) >= cutoff
+        ]
+        if not relevant:
+            return False
+
+        for snapshot in relevant:
+            value = snapshot.get(metric_name)
+            if value is None:
+                return False
+            if comparison == "gt" and value <= threshold:
+                return False
+            if comparison == "lt" and value >= threshold:
+                return False
+            if comparison == "gte" and value < threshold:
+                return False
+            if comparison == "lte" and value > threshold:
+                return False
+
+        return True
+
+    async def evaluate_policies(self, metrics: Dict) -> Optional[str]:
+        """Evaluate each configured policy against *metrics*.
+
+        Returns the name of the first triggered policy, or ``None``.
+        """
+        policies = (
+            self._config.get("auto_scaling", {}).get("policies", [])
+        )
+        # Sort by priority descending so higher-priority fires first
+        sorted_policies = sorted(
+            policies, key=lambda p: p.get("priority", 0), reverse=True
+        )
+
+        for policy in sorted_policies:
+            if not self._check_cooldown(policy):
+                continue
+            if not self._metric_sustained(policy):
+                continue
+
+            action = policy.get("action", "")
+            change = policy.get("instance_change", 1)
+            name = policy.get("name", action)
+
+            if action == "scale_out":
+                await self.scale_out(change)
+            elif action == "scale_in":
+                await self.scale_in(change)
+            elif action == "emergency":
+                await self.emergency_scale(change)
+            else:
+                logger.warning("Unknown scaling action: %s", action)
+                continue
+
+            self._last_policy_action[name] = time.time()
+            logger.info("Policy triggered: %s (action=%s, change=%d)", name, action, change)
+            return name
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Scaling actions
+    # ------------------------------------------------------------------
+
+    async def scale_out(self, count: int) -> int:
+        """Increase the worker pool by *count* instances (capped at max)."""
+        prev = self._current_instances
+        self._current_instances = min(
+            self._current_instances + count, self._max_instances
+        )
+        self._last_scale_action = time.time()
+        logger.info(
+            "scale_out: %d -> %d instances (+%d requested)",
+            prev, self._current_instances, count,
+        )
+        return self._current_instances
+
+    async def scale_in(self, count: int) -> int:
+        """Decrease the worker pool by *count* instances (respects min)."""
+        prev = self._current_instances
+        self._current_instances = max(
+            self._current_instances - count, self._min_instances
+        )
+        self._last_scale_action = time.time()
+        logger.info(
+            "scale_in: %d -> %d instances (-%d requested)",
+            prev, self._current_instances, count,
+        )
+        return self._current_instances
+
+    async def emergency_scale(self, count: int) -> int:
+        """Immediate scale-out with no cooldown check."""
+        prev = self._current_instances
+        self._current_instances = min(
+            self._current_instances + count, self._max_instances
+        )
+        self._last_scale_action = time.time()
+        # Reset all cooldowns so follow-up actions can fire quickly
+        self._last_policy_action.clear()
+        logger.warning(
+            "EMERGENCY scale: %d -> %d instances (+%d)",
+            prev, self._current_instances, count,
+        )
+        return self._current_instances
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    async def run_loop(self):
+        """Continuously collect metrics and evaluate policies."""
+        interval = (
+            self._config.get("auto_scaling", {})
+            .get("check_interval_seconds", 10)
+        )
+        self._running = True
+        logger.info("AutoScaler loop starting (interval=%ds)", interval)
+
+        while self._running:
+            try:
+                metrics = self._collector.collect_all()
+                metrics["ts"] = time.time()
+                self._metric_history.append(metrics)
+
+                # Trim history older than 30 minutes
+                cutoff = time.time() - 1800
+                self._metric_history = [
+                    h for h in self._metric_history if h.get("ts", 0) >= cutoff
+                ]
+
+                await self.evaluate_policies(metrics)
+            except Exception:
+                logger.exception("Error in AutoScaler loop iteration")
+
+            await asyncio.sleep(interval)
+
+    def stop(self):
+        """Signal the run loop to stop."""
+        self._running = False
+
+
+# ============================================================================
+# LOAD BALANCER
+# ============================================================================
+
+class LoadBalancer:
+    """
+    Dynamic weighted load balancer that selects the best instance
+    based on CPU, memory, and response-time metrics.
+    """
+
+    def __init__(self, config: dict):
+        self._algorithm = config.get("algorithm", "dynamic_weighted")
+        self._weight_factors = config.get("weight_factors", {
+            "cpu": 1.0,
+            "memory": 1.0,
+            "response_time": 1.0,
+        })
+
+    def calculate_weights(
+        self, instance_metrics: Dict[str, Dict]
+    ) -> Dict[str, float]:
+        """Calculate a score for each instance based on its metrics.
+
+        Lower resource usage and faster response time yield a *higher*
+        weight (more desirable).
+        """
+        weights: Dict[str, float] = {}
+        cpu_factor = self._weight_factors.get("cpu", 1.0)
+        mem_factor = self._weight_factors.get("memory", 1.0)
+        rt_factor = self._weight_factors.get("response_time", 1.0)
+
+        for instance_id, metrics in instance_metrics.items():
+            cpu = metrics.get("cpu_percent", 50.0)
+            mem = metrics.get("memory_percent", 50.0)
+            rt = metrics.get("response_time_ms", 100.0)
+
+            # Invert: lower utilization / latency = higher weight
+            cpu_score = max(0.0, (100.0 - cpu) / 100.0)
+            mem_score = max(0.0, (100.0 - mem) / 100.0)
+            rt_score = max(0.0, 1.0 / (1.0 + rt / 1000.0))
+
+            weight = (
+                cpu_score * cpu_factor
+                + mem_score * mem_factor
+                + rt_score * rt_factor
+            )
+            weights[instance_id] = weight
+
+        # Normalise so weights sum to 1.0
+        total = sum(weights.values())
+        if total > 0:
+            weights = {k: v / total for k, v in weights.items()}
+
+        return weights
+
+    def select_instance(self, instances: Dict[str, Dict]) -> str:
+        """Pick the best instance based on dynamic weights.
+
+        Returns the instance ID with the highest weight.
+        """
+        if not instances:
+            raise ValueError("No instances available for selection")
+
+        weights = self.calculate_weights(instances)
+        best = max(weights, key=weights.get)
+        logger.debug(
+            "LoadBalancer selected %s (weight=%.3f)", best, weights[best]
+        )
+        return best
 
 
 # Example usage

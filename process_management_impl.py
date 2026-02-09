@@ -344,11 +344,11 @@ class WorkerPool(ABC):
 
     async def start(self):
         """Start the pool."""
-        pass
+        logger.info(f"{self.__class__.__name__} '{self.name}' started")
 
     async def stop(self):
         """Stop the pool."""
-        pass
+        logger.info(f"{self.__class__.__name__} '{self.name}' stopped")
 
     @abstractmethod
     def submit(self, task: Callable, *args, **kwargs):

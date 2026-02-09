@@ -1187,8 +1187,16 @@ class RalphLoop:
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self.config = config or {}
-        
+        # Load from YAML if no config provided
+        if config is None:
+            try:
+                from config_loader import get_config
+                self.config = get_config("ralph_loop_config", "ralph_loop", {})
+            except (ImportError, Exception):
+                self.config = {}
+        else:
+            self.config = config
+
         # Initialize components
         self.layer_manager = RalphLayerManager(self.config.get('layers'))
         self.priority_queue = RalphPriorityQueue(self.layer_manager)
@@ -1201,7 +1209,7 @@ class RalphLoop:
         self.preemption_manager = PreemptionManager()
         self.metrics_collector = MetricsCollector()
         self.health_monitor = HealthMonitor()
-        
+
         # Storage
         db_path = self.config.get('storage', {}).get('db_path', 'ralph_queue.db')
         self.storage = PersistentQueueStorage(db_path)

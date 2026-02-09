@@ -6,11 +6,28 @@ Handles all user notifications about identity changes and evolution events.
 """
 
 import uuid
+import asyncio
+import logging
+import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import json
+
+logger = logging.getLogger(__name__)
+
+try:
+    from gmail_client_implementation import GmailClient
+    _gmail_available = True
+except ImportError:
+    _gmail_available = False
+
+try:
+    from twilio_voice_integration import TwilioVoiceManager, TwilioConfig
+    _twilio_available = True
+except ImportError:
+    _twilio_available = False
 
 # ============================================================================
 # NOTIFICATION MODELS
@@ -237,17 +254,24 @@ class UserNotificationSystem:
         self.pending_notifications: List[Any] = []
         self.sent_notifications: List[UserNotification] = []
         self.notification_handlers: Dict[str, callable] = {}
-        
+
+        # Delivery tracking
+        self._delivery_log: List[Dict] = []
+
+        # Cached client instances (lazy-init)
+        self._gmail_client = None
+        self._twilio_manager = None
+
         # Register default handlers
         self._register_default_handlers()
     
     def _register_default_handlers(self):
         """Register default notification handlers"""
         self.notification_handlers = {
-            'email': self._send_email_notification,
+            'email': self._deliver_email,
             'dashboard': self._send_dashboard_notification,
-            'sms': self._send_sms_notification,
-            'voice': self._send_voice_notification
+            'sms': self._deliver_sms,
+            'voice': self._deliver_voice,
         }
     
     def should_notify(self, change: Any) -> Tuple[bool, str]:
@@ -490,43 +514,195 @@ class UserNotificationSystem:
     
     def send_notification(self, notification: UserNotification) -> bool:
         """
-        Send notification through appropriate channels
+        Send notification through appropriate channels with delivery tracking.
         """
-        success = True
-        
+        results: List[bool] = []
+
         if notification.channel == NotificationChannel.ALL:
-            for channel in ['email', 'dashboard']:
-                if self.preferences.channels.get(channel, False):
-                    handler = self.notification_handlers.get(channel)
-                    if handler:
-                        handler(notification)
+            # Attempt all configured channels
+            channel_map = {
+                "email": self._deliver_email,
+                "sms": self._deliver_sms,
+                "voice": self._deliver_voice,
+                "dashboard": self._send_dashboard_notification,
+            }
+            for ch_name, deliver_fn in channel_map.items():
+                if self.preferences.channels.get(ch_name, False):
+                    ok = self._try_deliver(deliver_fn, notification, ch_name)
+                    results.append(ok)
         else:
-            handler = self.notification_handlers.get(notification.channel.value)
-            if handler:
-                handler(notification)
-        
+            channel_value = notification.channel.value
+            deliver_fn = {
+                "email": self._deliver_email,
+                "sms": self._deliver_sms,
+                "voice": self._deliver_voice,
+                "dashboard": self._send_dashboard_notification,
+            }.get(channel_value)
+
+            if deliver_fn:
+                ok = self._try_deliver(deliver_fn, notification, channel_value)
+                results.append(ok)
+            else:
+                logger.warning("No handler for channel: %s", channel_value)
+
         self.sent_notifications.append(notification)
-        return success
-    
-    def _send_email_notification(self, notification: UserNotification):
-        """Send email notification via GmailClient"""
+        return all(results) if results else True
+
+    # ------------------------------------------------------------------
+    # Delivery helpers
+    # ------------------------------------------------------------------
+
+    def _try_deliver(self, deliver_fn, notification: UserNotification, channel: str) -> bool:
+        """Attempt delivery, log result, and track in delivery log."""
+        ok = False
         try:
-            from gmail_client_implementation import GmailClient
-            client = GmailClient()
-            client.messages.send_message(
-                to=notification.metadata.get('email', 'user@example.com'),
+            ok = deliver_fn(notification)
+        except Exception as exc:
+            logger.exception("Delivery failed on channel %s: %s", channel, exc)
+            ok = False
+
+        self._delivery_log.append({
+            "timestamp": time.time(),
+            "channel": channel,
+            "success": ok,
+            "notification_id": notification.id,
+        })
+        logger.info(
+            "Notification %s via %s: %s",
+            notification.id, channel, "success" if ok else "failed",
+        )
+        return ok
+
+    def _deliver_email(self, notification: UserNotification) -> bool:
+        """Deliver notification via GmailClient."""
+        if not _gmail_available:
+            logger.info("Gmail client not available; email delivery skipped")
+            return False
+        try:
+            if self._gmail_client is None:
+                self._gmail_client = GmailClient()
+            recipient = "user@example.com"
+            if hasattr(notification, "metadata") and isinstance(
+                getattr(notification, "metadata", None), dict
+            ):
+                recipient = notification.metadata.get("email", recipient)
+            self._gmail_client.messages.send_message(
+                to=recipient,
                 subject=notification.title,
                 body=notification.message[:2000],
             )
-        except (ImportError, AttributeError, RuntimeError) as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Email notification failed: {e}")
-    
-    def _send_dashboard_notification(self, notification: UserNotification):
-        """Store dashboard notification in SQLite for frontend display"""
+            return True
+        except Exception as exc:
+            logger.warning("Email delivery failed: %s", exc)
+            return False
+
+    def _deliver_sms(self, notification: UserNotification) -> bool:
+        """Deliver notification via Twilio SMS."""
+        if not _twilio_available:
+            logger.info("Twilio client not available; SMS delivery skipped")
+            return False
+        try:
+            import os
+            manager = self._get_twilio_manager()
+            if manager is None:
+                return False
+            to_number = os.environ.get("TWILIO_TO_NUMBER", "")
+            if hasattr(notification, "metadata") and isinstance(
+                getattr(notification, "metadata", None), dict
+            ):
+                to_number = notification.metadata.get("phone", to_number)
+            if not to_number:
+                logger.warning("No SMS recipient configured")
+                return False
+            result = manager.send_sms(
+                to=to_number,
+                body=f"{notification.title}: {notification.message[:140]}",
+            )
+            return result.get("sent", False)
+        except Exception as exc:
+            logger.warning("SMS delivery failed: %s", exc)
+            return False
+
+    def _deliver_voice(self, notification: UserNotification) -> bool:
+        """Deliver notification via Twilio voice call."""
+        if not _twilio_available:
+            logger.info("Twilio client not available; voice delivery skipped")
+            return False
+        try:
+            import os
+            manager = self._get_twilio_manager()
+            if manager is None:
+                return False
+            to_number = os.environ.get("TWILIO_TO_NUMBER", "")
+            if hasattr(notification, "metadata") and isinstance(
+                getattr(notification, "metadata", None), dict
+            ):
+                to_number = notification.metadata.get("phone", to_number)
+            if not to_number:
+                logger.warning("No voice recipient configured")
+                return False
+            # Use the Twilio REST client directly for TwiML-based call
+            from twilio.twiml.voice_response import VoiceResponse
+            twiml = VoiceResponse()
+            twiml.say(
+                f"{notification.title}. {notification.message[:200]}",
+                voice="alice",
+            )
+            manager.client.calls.create(
+                twiml=str(twiml),
+                from_=manager.config.phone_number,
+                to=to_number,
+            )
+            return True
+        except Exception as exc:
+            logger.warning("Voice delivery failed: %s", exc)
+            return False
+
+    def _get_twilio_manager(self) -> Optional["TwilioVoiceManager"]:
+        """Lazily create a TwilioVoiceManager from env vars."""
+        if self._twilio_manager is not None:
+            return self._twilio_manager
+        import os
+        sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+        token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+        phone = os.environ.get("TWILIO_FROM_NUMBER", "")
+        webhook = os.environ.get("TWILIO_WEBHOOK_URL", "")
+        stream = os.environ.get("TWILIO_STREAM_URL", "")
+        if not (sid and token and phone):
+            logger.warning("Twilio credentials not configured in environment")
+            return None
+        cfg = TwilioConfig(
+            account_sid=sid,
+            auth_token=token,
+            phone_number=phone,
+            webhook_url=webhook,
+            stream_url=stream,
+        )
+        self._twilio_manager = TwilioVoiceManager(cfg)
+        return self._twilio_manager
+
+    async def _deliver_with_retry(
+        self, deliver_func, notification: UserNotification, max_retries: int = 3
+    ) -> bool:
+        """Attempt delivery with exponential back-off retries."""
+        for attempt in range(max_retries):
+            try:
+                if deliver_func(notification):
+                    return True
+            except Exception as exc:
+                logger.warning(
+                    "Delivery attempt %d/%d failed: %s",
+                    attempt + 1, max_retries, exc,
+                )
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+        return False
+
+    def _send_dashboard_notification(self, notification: UserNotification) -> bool:
+        """Store dashboard notification in SQLite for frontend display."""
         try:
             import sqlite3
-            conn = sqlite3.connect('alwaysclaw.db')
+            conn = sqlite3.connect("alwaysclaw.db")
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS notifications (
                     id TEXT PRIMARY KEY,
@@ -545,71 +721,19 @@ class UserNotificationSystem:
                     str(uuid.uuid4()),
                     notification.title,
                     notification.message,
-                    notification.priority.value if hasattr(notification.priority, 'value') else str(notification.priority),
-                    'dashboard',
+                    notification.priority.value
+                    if hasattr(notification.priority, "value")
+                    else str(notification.priority),
+                    "dashboard",
                     datetime.now().isoformat(),
                 ),
             )
             conn.commit()
             conn.close()
-        except (sqlite3.Error, OSError) as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Dashboard notification failed: {e}")
-    
-    def _send_sms_notification(self, notification: UserNotification):
-        """Send SMS notification via Twilio"""
-        try:
-            from twilio.rest import Client as TwilioClient
-            import os
-            account_sid = os.environ.get('TWILIO_ACCOUNT_SID', '')
-            auth_token = os.environ.get('TWILIO_AUTH_TOKEN', '')
-            from_number = os.environ.get('TWILIO_FROM_NUMBER', '')
-            to_number = notification.metadata.get('phone', os.environ.get('TWILIO_TO_NUMBER', ''))
-            if not (account_sid and auth_token and from_number and to_number):
-                import logging
-                logging.getLogger(__name__).warning("Twilio SMS credentials not configured")
-                return
-            client = TwilioClient(account_sid, auth_token)
-            client.messages.create(
-                body=f"{notification.title}: {notification.message[:140]}",
-                from_=from_number,
-                to=to_number,
-            )
-        except ImportError:
-            import logging
-            logging.getLogger(__name__).info("Twilio not installed; SMS notification skipped")
-        except (RuntimeError, ValueError) as e:
-            import logging
-            logging.getLogger(__name__).warning(f"SMS notification failed: {e}")
-    
-    def _send_voice_notification(self, notification: UserNotification):
-        """Send voice notification via TTS + Twilio call"""
-        try:
-            from twilio.rest import Client as TwilioClient
-            from twilio.twiml.voice_response import VoiceResponse
-            import os
-            account_sid = os.environ.get('TWILIO_ACCOUNT_SID', '')
-            auth_token = os.environ.get('TWILIO_AUTH_TOKEN', '')
-            from_number = os.environ.get('TWILIO_FROM_NUMBER', '')
-            to_number = notification.metadata.get('phone', os.environ.get('TWILIO_TO_NUMBER', ''))
-            if not (account_sid and auth_token and from_number and to_number):
-                import logging
-                logging.getLogger(__name__).warning("Twilio voice credentials not configured")
-                return
-            twiml = VoiceResponse()
-            twiml.say(f"{notification.title}. {notification.message[:200]}", voice='alice')
-            client = TwilioClient(account_sid, auth_token)
-            client.calls.create(
-                twiml=str(twiml),
-                from_=from_number,
-                to=to_number,
-            )
-        except ImportError:
-            import logging
-            logging.getLogger(__name__).info("Twilio not installed; voice notification skipped")
-        except (RuntimeError, ValueError) as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Voice notification failed: {e}")
+            return True
+        except Exception as exc:
+            logger.warning("Dashboard notification failed: %s", exc)
+            return False
     
     def generate_daily_summary(self) -> Optional[NotificationSummary]:
         """Generate daily summary of changes"""

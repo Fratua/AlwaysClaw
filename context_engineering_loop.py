@@ -1355,7 +1355,9 @@ class ContextEngineeringLoop:
     """
     
     def __init__(self, config: LoopConfig = None):
-        self.config = config or LoopConfig()
+        if config is None:
+            config = self._load_config_from_yaml()
+        self.config = config
         
         # Initialize components
         self.monitor = ContextMonitor(MonitorConfig(
@@ -1376,13 +1378,30 @@ class ContextEngineeringLoop:
         self.loop_active = False
         self.optimization_queue = asyncio.Queue()
         
+    @staticmethod
+    def _load_config_from_yaml() -> 'LoopConfig':
+        """Load LoopConfig from cpel_config.yaml using ConfigLoader."""
+        try:
+            from config_loader import get_config
+            cfg = get_config("cpel_config", "context_prompt_engineering_loop", {})
+            if not cfg:
+                return LoopConfig()
+            perf = cfg.get('performance', {})
+            opt = cfg.get('optimization', {})
+            return LoopConfig(
+                monitoring_interval=perf.get('collection_interval', 5.0),
+                warning_threshold=opt.get('improvement_threshold', 0.80),
+            )
+        except (ImportError, Exception):
+            return LoopConfig()
+
     async def start(self):
         """Start the Context Engineering Loop."""
         self.loop_active = True
-        
+
         # Start monitoring
         asyncio.create_task(self.monitor.start_monitoring())
-        
+
         logger.info("Context Engineering Loop started")
     
     async def stop(self):

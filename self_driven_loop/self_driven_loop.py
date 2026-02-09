@@ -108,13 +108,41 @@ class SelfDrivenLoop:
     """
     
     def __init__(self, config: Optional[LoopConfiguration] = None):
-        self.config = config or LoopConfiguration()
+        if config is None:
+            config = self._load_config_from_yaml()
+        self.config = config
         self.state = LoopState()
-        
+
         # Initialize all components
         self._initialize_components()
-        
+
         logger.info("SelfDrivenLoop initialized")
+
+    @staticmethod
+    def _load_config_from_yaml() -> LoopConfiguration:
+        """Load config from self_driven_loop_config.yaml via ConfigLoader."""
+        try:
+            from config_loader import get_config
+            cfg = get_config("self_driven_loop_config", "self_driven_loop", {})
+            if cfg:
+                kwargs = {}
+                field_map = {
+                    'loop_interval_seconds': float, 'motivation_check_interval': float,
+                    'goal_generation_interval': float, 'min_motivation_for_proactivity': float,
+                    'max_concurrent_goals': int, 'enable_proactive_triggers': bool,
+                    'enable_curiosity_exploration': bool, 'enable_motivation_maintenance': bool,
+                    'enable_goal_refinement': bool, 'intrinsic_motivation_weight': float,
+                    'user_value_weight': float, 'urgency_weight': float,
+                    'feasibility_weight': float, 'strategic_alignment_weight': float,
+                    'resource_efficiency_weight': float,
+                }
+                for key, typ in field_map.items():
+                    if key in cfg:
+                        kwargs[key] = typ(cfg[key])
+                return LoopConfiguration(**kwargs)
+        except (ImportError, Exception):
+            pass
+        return LoopConfiguration()
     
     def _initialize_components(self) -> None:
         """Initialize all system components."""

@@ -579,17 +579,24 @@ class PlanningConfig:
     @classmethod
     def from_yaml(cls, path: str = None) -> 'PlanningConfig':
         """Load PlanningConfig from YAML with fallback to defaults."""
-        if path is None:
-            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'planning_loop_config.yaml')
+        data = {}
+        # Try ConfigLoader first
         try:
-            with open(path, 'r') as f:
-                data = yaml.safe_load(f) or {}
-        except (OSError, yaml.YAMLError):
-            return cls()
+            from config_loader import get_config
+            data = get_config("planning_loop_config") or {}
+        except (ImportError, Exception):
+            if path is None:
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'planning_loop_config.yaml')
+            try:
+                with open(path, 'r') as f:
+                    data = yaml.safe_load(f) or {}
+            except (OSError, yaml.YAMLError):
+                return cls()
         pl = data.get('planning_loop', {})
+        replanning = pl.get('replanning', {})
         return cls(
-            replanning_cooldown=timedelta(seconds=pl.get('replanning', {}).get('cooldown_seconds', 30)),
-            max_replans=pl.get('replanning', {}).get('max_replans_per_execution', 10),
+            replanning_cooldown_seconds=replanning.get('cooldown_seconds', 30),
+            min_replanning_severity=replanning.get('min_severity', 5),
         )
 
 

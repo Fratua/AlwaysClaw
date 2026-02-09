@@ -23,6 +23,21 @@ from vector_store import VectorStore, VectorStoreConfig
 from context_manager import ContextWindowManager
 from memory_consolidator import MemoryConsolidator, ImportanceScorer
 
+try:
+    from redis_cache import RedisCache, RedisCacheConfig
+except ImportError:
+    RedisCache = None  # type: ignore[assignment,misc]
+    RedisCacheConfig = None  # type: ignore[assignment,misc]
+
+try:
+    from postgres_store import PostgresStore, PostgresStoreConfig
+except ImportError:
+    PostgresStore = None  # type: ignore[assignment,misc]
+    PostgresStoreConfig = None  # type: ignore[assignment,misc]
+
+import logging
+_tier_logger = logging.getLogger(__name__)
+
 
 class EmbeddingProvider:
     """
@@ -211,6 +226,10 @@ class MemoryManager:
         self.consolidator: Optional[MemoryConsolidator] = None
         self.importance_scorer = ImportanceScorer()
         
+        # Tier adapters (hot / cold)
+        self._redis_cache: Optional['RedisCache'] = None
+        self._postgres_store: Optional['PostgresStore'] = None
+
         # State
         self._initialized = False
         self._write_queue: List[Dict] = []
@@ -258,10 +277,13 @@ class MemoryManager:
         
         # Sync files to index
         await self._sync_files_to_index()
-        
+
+        # Initialize hot / cold tiers (Redis, PostgreSQL)
+        await self._init_tiers(self.config)
+
         # Start batch write timer
         self._start_batch_timer()
-        
+
         self._initialized = True
         print(f"Memory system initialized at {self.config.base_dir}")
     
@@ -641,20 +663,212 @@ class MemoryManager:
         
         return stats
     
+    # ------------------------------------------------------------------
+    # 3-Tier memory helpers (hot=Redis, warm=SQLite, cold=PostgreSQL)
+    # ------------------------------------------------------------------
+
+    async def _init_tiers(self, config) -> None:
+        """Optionally initialize Redis (hot) and PostgreSQL (cold) tiers."""
+        # --- Redis hot cache ---
+        if RedisCache is not None:
+            try:
+                raw = getattr(config, "redis", None) or {}
+                if isinstance(raw, dict):
+                    rc_cfg = RedisCacheConfig(**raw)
+                else:
+                    rc_cfg = RedisCacheConfig()
+                self._redis_cache = RedisCache(rc_cfg)
+                await self._redis_cache.connect()
+            except Exception as exc:
+                _tier_logger.warning("Redis tier init skipped: %s", exc)
+                self._redis_cache = None
+
+        # --- PostgreSQL cold store ---
+        if PostgresStore is not None:
+            try:
+                raw = getattr(config, "postgres", None) or {}
+                if isinstance(raw, dict):
+                    pg_cfg = PostgresStoreConfig(**raw)
+                else:
+                    pg_cfg = PostgresStoreConfig()
+                self._postgres_store = PostgresStore(pg_cfg)
+                await self._postgres_store.connect()
+            except Exception as exc:
+                _tier_logger.warning("PostgreSQL tier init skipped: %s", exc)
+                self._postgres_store = None
+
+        tiers = ["warm/SQLite"]
+        if self._redis_cache and self._redis_cache.available:
+            tiers.insert(0, "hot/Redis")
+        if self._postgres_store and self._postgres_store.available:
+            tiers.append("cold/PostgreSQL")
+        _tier_logger.info("Active memory tiers: %s", ", ".join(tiers))
+
+    async def _tiered_read(self, key: str) -> Optional[dict]:
+        """
+        Read through the tier hierarchy: Redis -> SQLite -> PostgreSQL.
+
+        Found entries are promoted to hotter tiers automatically.
+        """
+        # 1. Hot tier (Redis)
+        if self._redis_cache and self._redis_cache.available:
+            try:
+                hit = await self._redis_cache.get(key)
+                if hit is not None:
+                    return hit
+            except Exception as exc:
+                _tier_logger.warning("Redis read error: %s", exc)
+
+        # 2. Warm tier (SQLite / VectorStore)
+        warm_entry = None
+        if self.vector_store:
+            try:
+                mem = self.vector_store.get_memory(key)
+                if mem is not None:
+                    warm_entry = {
+                        "id": mem.id,
+                        "content": mem.content,
+                        "source_file": str(mem.source_file),
+                        "importance": mem.importance_score,
+                        "type": mem.type.value,
+                    }
+                    # Promote to Redis
+                    await self._promote_tier(key, warm_entry, from_tier="warm")
+                    return warm_entry
+            except Exception as exc:
+                _tier_logger.warning("SQLite read error: %s", exc)
+
+        # 3. Cold tier (PostgreSQL)
+        if self._postgres_store and self._postgres_store.available:
+            try:
+                cold_entry = await self._postgres_store.retrieve(key)
+                if cold_entry is not None:
+                    # Promote to Redis + SQLite
+                    await self._promote_tier(key, cold_entry, from_tier="cold")
+                    return cold_entry
+            except Exception as exc:
+                _tier_logger.warning("PostgreSQL read error: %s", exc)
+
+        return None
+
+    async def _tiered_write(self, key: str, entry: dict, importance: float = 0.5) -> None:
+        """
+        Write through the tier hierarchy based on importance.
+
+        High-importance entries stay in hot + warm tiers;
+        low-importance entries are additionally archived to cold storage.
+        """
+        # Hot tier -- TTL scales with importance (more important = longer TTL)
+        if self._redis_cache and self._redis_cache.available:
+            try:
+                ttl = int(self._redis_cache.config.default_ttl_seconds * max(importance, 0.1) * 2)
+                await self._redis_cache.set(key, entry, ttl=ttl)
+            except Exception as exc:
+                _tier_logger.warning("Redis write error: %s", exc)
+
+        # Warm tier (SQLite / VectorStore) -- always written via the existing
+        # remember / _write_immediate path, so nothing extra needed here.
+
+        # Cold tier -- archive low-importance entries
+        if importance < 0.3 and self._postgres_store and self._postgres_store.available:
+            try:
+                await self._postgres_store.store(
+                    entry_id=key,
+                    content=entry.get("content", ""),
+                    metadata=entry.get("metadata", {}),
+                    embedding=entry.get("embedding"),
+                    importance=importance,
+                )
+            except Exception as exc:
+                _tier_logger.warning("PostgreSQL write error: %s", exc)
+
+    async def _promote_tier(self, key: str, entry: dict, from_tier: str) -> None:
+        """Promote an entry to hotter tiers."""
+        try:
+            if from_tier in ("warm", "cold"):
+                # Promote to Redis
+                if self._redis_cache and self._redis_cache.available:
+                    importance = entry.get("importance", 0.5)
+                    ttl = int(self._redis_cache.config.default_ttl_seconds * max(importance, 0.1) * 2)
+                    await self._redis_cache.set(key, entry, ttl=ttl)
+
+            if from_tier == "cold":
+                # Promote to SQLite (warm) -- insert a lightweight record
+                # Full vector-indexed insert is skipped here to avoid
+                # requiring an embedding; the entry will be re-indexed on the
+                # next full sync if the source file exists.
+                pass
+        except Exception as exc:
+            _tier_logger.warning("Tier promotion error for %s: %s", key, exc)
+
+    async def _demote_stale(self, max_age_hours: int = 24) -> None:
+        """
+        Demote stale entries to cooler tiers.
+
+        - Remove entries from Redis that have not been accessed recently.
+        - Archive old low-importance SQLite entries to PostgreSQL.
+        """
+        cutoff = datetime.now() - timedelta(hours=max_age_hours)
+
+        # 1. Evict stale Redis entries (relies on TTL, but we can also
+        #    explicitly scan for anything we track).
+        # Redis TTL handles most of this automatically; nothing extra needed.
+
+        # 2. Archive stale low-importance SQLite entries to PostgreSQL
+        if self.vector_store and self._postgres_store and self._postgres_store.available:
+            try:
+                cursor = self.vector_store.db.execute(
+                    """
+                    SELECT id, content, importance_score, type, source_file
+                    FROM memory_entries
+                    WHERE importance_score < 0.3
+                      AND (last_accessed IS NULL OR last_accessed < ?)
+                    """,
+                    (cutoff.isoformat(),),
+                )
+                rows = cursor.fetchall()
+                if rows:
+                    batch = [
+                        {
+                            "id": r["id"],
+                            "content": r["content"],
+                            "metadata": {"type": r["type"], "source_file": r["source_file"]},
+                            "importance": r["importance_score"],
+                        }
+                        for r in rows
+                    ]
+                    await self._postgres_store.archive_batch(batch)
+                    _tier_logger.info("Demoted %d stale entries to cold storage", len(batch))
+            except Exception as exc:
+                _tier_logger.warning("Demotion scan error: %s", exc)
+
     async def close(self) -> None:
         """Shutdown memory system."""
         # Flush pending writes
         if self._write_queue:
             await self._flush_write_queue()
-        
+
         # Cancel batch timer
         if self._batch_timer:
             self._batch_timer.cancel()
-        
+
         # Close vector store
         if self.vector_store:
             self.vector_store.close()
-        
+
+        # Close tier adapters
+        if self._redis_cache:
+            try:
+                await self._redis_cache.disconnect()
+            except Exception as exc:
+                _tier_logger.warning("Redis disconnect error: %s", exc)
+
+        if self._postgres_store:
+            try:
+                await self._postgres_store.disconnect()
+            except Exception as exc:
+                _tier_logger.warning("PostgreSQL disconnect error: %s", exc)
+
         self._initialized = False
 
 

@@ -1463,8 +1463,16 @@ class ContextPromptEngineeringLoop:
     """
     
     def __init__(self, config: Optional[Dict] = None):
-        self.config = config or {}
-        
+        # Load from YAML if no config provided
+        if config is None:
+            try:
+                from config_loader import get_config
+                self.config = get_config("cpel_config", "context_prompt_engineering_loop", {})
+            except (ImportError, Exception):
+                self.config = {}
+        else:
+            self.config = config
+
         # Initialize components
         self.registry = PromptRegistry()
         self.context_engine = ContextEngine()
@@ -1474,7 +1482,7 @@ class ContextPromptEngineeringLoop:
         self.assembler = DynamicPromptAssembler()
         self.ab_tester = ABTestFramework()
         self.version_control = PromptVersionControl()
-        
+
         # State
         self._initialized = False
         

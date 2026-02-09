@@ -18,9 +18,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import random
+import time
 import numpy as np
 import networkx as nx
 from sentence_transformers import SentenceTransformer
+
+try:
+    from openai_client import OpenAIClient
+except ImportError:
+    OpenAIClient = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +149,7 @@ class ExplorationStrategy(Enum):
 
 class BreadthFirstExplorer:
     """BFS Strategy for systematic territory coverage"""
-    
+
     CONFIG = {
         "max_depth": 5,
         "max_nodes": 100,
@@ -151,38 +157,59 @@ class BreadthFirstExplorer:
         "parallel_workers": 3,
         "exploration_timeout": 300,
         "territory_cache_ttl": 3600,
-        "novelty_threshold": 0.5
+        "novelty_threshold": 0.5,
+        "min_api_interval": 1.0,  # Minimum seconds between API calls
     }
-    
+
     def __init__(self, novelty_detector=None):
         self.novelty_detector = novelty_detector
         self.max_depth = self.CONFIG["max_depth"]
         self.max_nodes = self.CONFIG["max_nodes"]
-        
+        self._llm_client: Optional[OpenAIClient] = None
+        self._last_api_call: float = 0.0
+
+    def _init_llm_client(self) -> None:
+        """Create OpenAIClient instance if not already initialized."""
+        if self._llm_client is not None:
+            return
+        if OpenAIClient is None:
+            return
+        try:
+            self._llm_client = OpenAIClient.get_instance()
+        except (RuntimeError, EnvironmentError, Exception) as exc:
+            logger.warning("Could not initialize LLM client for BFS explorer: %s", exc)
+            self._llm_client = None
+
+    async def _rate_limit_check(self) -> None:
+        """Async sleep if needed to respect minimum interval between API calls."""
+        elapsed = time.monotonic() - self._last_api_call
+        wait = self.CONFIG["min_api_interval"] - elapsed
+        if wait > 0:
+            await asyncio.sleep(wait)
+
     async def explore(self, seed_topics: List[str]) -> ExplorationResult:
         """Execute BFS exploration from seed topics"""
         visited = set()
         frontier = deque([(topic, 0) for topic in seed_topics])
         discoveries = []
-        
+
         while frontier and len(discoveries) < self.max_nodes:
             current_topic, depth = frontier.popleft()
-            
+
             if current_topic in visited or depth > self.max_depth:
                 continue
-                
+
             visited.add(current_topic)
-            
-            # Discover neighbors (simulated)
+
             neighbors = await self._discover_neighbors(current_topic)
-            
+
             for neighbor in neighbors:
                 if neighbor not in visited:
-                    novelty_score = 0.7  # Simulated
+                    novelty_score = 0.7
                     if self.novelty_detector:
                         novelty = await self.novelty_detector.score(neighbor)
                         novelty_score = novelty.overall
-                        
+
                     if novelty_score > self.CONFIG["novelty_threshold"]:
                         frontier.append((neighbor, depth + 1))
                         discoveries.append(Discovery(
@@ -194,40 +221,77 @@ class BreadthFirstExplorer:
                             parent=current_topic,
                             strategy="bfs"
                         ))
-        
+
         return ExplorationResult(
             discoveries=discoveries,
             strategy="bfs"
         )
-    
+
     async def _discover_neighbors(self, topic: str) -> List[str]:
-        """Discover related sub-topics using LLM"""
-        try:
-            from openai_client import OpenAIClient
-            client = OpenAIClient.get_instance()
-            n = self.CONFIG["branching_factor"]
-            response = client.generate(
-                f"List exactly {n} related sub-topics for '{topic}'. "
-                f"Return one sub-topic per line, no numbering or bullets.",
-                max_tokens=200,
-            )
-            lines = [ln.strip() for ln in response.strip().splitlines() if ln.strip()]
-            return lines[:n] if lines else [f"{topic}_subtopic_{i}" for i in range(n)]
-        except (ImportError, RuntimeError, EnvironmentError):
-            return [f"{topic}_subtopic_{i}" for i in range(self.CONFIG["branching_factor"])]
+        """Discover related sub-topics using GPT-5.2 with rate limiting and fallback."""
+        self._init_llm_client()
+
+        if self._llm_client is not None:
+            try:
+                await self._rate_limit_check()
+                n = self.CONFIG["branching_factor"]
+                prompt = (
+                    f"Given the topic '{topic}', list {n} related subtopics worth exploring. "
+                    f"Return each subtopic on a new line, with a brief description after a colon."
+                )
+                response = self._llm_client.generate(prompt, max_tokens=300)
+                self._last_api_call = time.monotonic()
+                lines = []
+                for raw_line in response.strip().splitlines():
+                    raw_line = raw_line.strip()
+                    if not raw_line:
+                        continue
+                    # Extract the subtopic name (before the colon description)
+                    subtopic = raw_line.split(":")[0].strip().lstrip("-•*0123456789.) ")
+                    if subtopic:
+                        lines.append(subtopic)
+                if lines:
+                    return lines[:n]
+            except (RuntimeError, EnvironmentError, Exception) as exc:
+                logger.warning("LLM neighbor discovery failed, falling back to simulation: %s", exc)
+
+        # Fallback: simulated neighbors
+        return [f"{topic}_subtopic_{i}" for i in range(self.CONFIG["branching_factor"])]
 
 class DepthFirstExplorer:
     """DFS Strategy for deep territory investigation"""
-    
+
     CONFIG = {
         "max_depth": 10,
         "min_relevance": 0.7,
         "backtrack_threshold": 0.3,
-        "exploration_timeout": 600
+        "exploration_timeout": 600,
+        "min_api_interval": 1.0,
     }
-    
+
     def __init__(self, novelty_detector=None):
         self.novelty_detector = novelty_detector
+        self._llm_client: Optional[OpenAIClient] = None
+        self._last_api_call: float = 0.0
+
+    def _init_llm_client(self) -> None:
+        """Create OpenAIClient instance if not already initialized."""
+        if self._llm_client is not None:
+            return
+        if OpenAIClient is None:
+            return
+        try:
+            self._llm_client = OpenAIClient.get_instance()
+        except (RuntimeError, EnvironmentError, Exception) as exc:
+            logger.warning("Could not initialize LLM client for DFS explorer: %s", exc)
+            self._llm_client = None
+
+    async def _rate_limit_check(self) -> None:
+        """Async sleep if needed to respect minimum interval between API calls."""
+        elapsed = time.monotonic() - self._last_api_call
+        wait = self.CONFIG["min_api_interval"] - elapsed
+        if wait > 0:
+            await asyncio.sleep(wait)
         
     async def explore(self, start_topic: str, target_depth: int = None) -> ExplorationResult:
         """Execute DFS exploration from start topic"""
@@ -295,19 +359,32 @@ class DepthFirstExplorer:
         )
     
     async def _discover_children(self, topic: str) -> List[str]:
-        """Discover child sub-topics using LLM"""
-        try:
-            from openai_client import OpenAIClient
-            client = OpenAIClient.get_instance()
-            response = client.generate(
-                f"List 5 narrower sub-topics under '{topic}'. "
-                f"One per line, no numbering.",
-                max_tokens=150,
-            )
-            lines = [ln.strip() for ln in response.strip().splitlines() if ln.strip()]
-            return lines[:5] if lines else [f"{topic}_child_{i}" for i in range(5)]
-        except (ImportError, RuntimeError, EnvironmentError):
-            return [f"{topic}_child_{i}" for i in range(5)]
+        """Discover child sub-topics using GPT-5.2 with rate limiting and fallback."""
+        self._init_llm_client()
+
+        if self._llm_client is not None:
+            try:
+                await self._rate_limit_check()
+                prompt = (
+                    f"Given the topic '{topic}', list 5 related subtopics worth exploring. "
+                    f"Return each subtopic on a new line, with a brief description after a colon."
+                )
+                response = self._llm_client.generate(prompt, max_tokens=200)
+                self._last_api_call = time.monotonic()
+                lines = []
+                for raw_line in response.strip().splitlines():
+                    raw_line = raw_line.strip()
+                    if not raw_line:
+                        continue
+                    subtopic = raw_line.split(":")[0].strip().lstrip("-•*0123456789.) ")
+                    if subtopic:
+                        lines.append(subtopic)
+                if lines:
+                    return lines[:5]
+            except (RuntimeError, EnvironmentError, Exception) as exc:
+                logger.warning("LLM child discovery failed, falling back to simulation: %s", exc)
+
+        return [f"{topic}_child_{i}" for i in range(5)]
 
 class InterestDrivenExplorer:
     """Exploration guided by user interests"""

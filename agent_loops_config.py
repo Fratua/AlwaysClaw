@@ -523,6 +523,24 @@ COGNITIVE_LOOP_CONFIGS = {
 }
 
 
+def _apply_yaml_overrides():
+    """Apply any overrides from config.yaml to the loop configs."""
+    try:
+        from config_loader import get_config
+        overrides = get_config("config", "agent_loops", None)
+        if overrides and isinstance(overrides, dict):
+            for loop_name, loop_overrides in overrides.items():
+                if loop_name in AGENT_LOOP_CONFIGS and isinstance(loop_overrides, dict):
+                    AGENT_LOOP_CONFIGS[loop_name].update(loop_overrides)
+                if loop_name in COGNITIVE_LOOP_CONFIGS and isinstance(loop_overrides, dict):
+                    COGNITIVE_LOOP_CONFIGS[loop_name].update(loop_overrides)
+    except (ImportError, Exception):
+        pass
+
+# Apply YAML overrides on module load
+_apply_yaml_overrides()
+
+
 def get_cognitive_loop_config(name: str) -> dict:
     """Get configuration for a specific cognitive loop."""
     return COGNITIVE_LOOP_CONFIGS.get(name, {})

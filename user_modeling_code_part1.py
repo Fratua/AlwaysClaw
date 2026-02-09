@@ -11,7 +11,15 @@ from collections import defaultdict, deque
 from pathlib import Path
 import json
 import hashlib
+import logging
 import numpy as np
+
+try:
+    from cryptography.fernet import Fernet
+except ImportError:
+    Fernet = None
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # PROFILE MANAGEMENT
@@ -71,6 +79,11 @@ class UserProfileManager:
         
     def _load_or_generate_key(self) -> bytes:
         """Load existing encryption key or generate new one"""
+        if Fernet is None:
+            raise ImportError(
+                "cryptography package required for encryption. "
+                "Install it: pip install cryptography"
+            )
         key_path = self.base_path / ".master_key"
         if key_path.exists():
             return key_path.read_bytes()
