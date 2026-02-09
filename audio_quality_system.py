@@ -545,17 +545,42 @@ class AudioEnhancementPipeline:
         return output
     
     def _highpass_filter(self, audio: np.ndarray, cutoff: float = 80) -> np.ndarray:
-        """Apply high-pass filter to remove low-frequency noise"""
-        # Simplified high-pass filter
-        # Real implementation would use scipy.signal.butter
-        return audio  # Placeholder
+        """Apply high-pass filter to remove low-frequency noise."""
+        try:
+            from scipy.signal import butter, lfilter
+            nyquist = self.sample_rate / 2
+            normalized_cutoff = cutoff / nyquist
+            if normalized_cutoff >= 1.0:
+                return audio
+            b, a = butter(4, normalized_cutoff, btype='high')
+            return lfilter(b, a, audio).astype(audio.dtype)
+        except ImportError:
+            # Fallback: simple DC removal
+            return audio - np.mean(audio)
     
     def _acoustic_echo_cancellation(self, microphone: np.ndarray,
                                      reference: np.ndarray) -> np.ndarray:
-        """Acoustic echo cancellation"""
-        # Placeholder for AEC implementation
-        # Real implementation would use adaptive filter + neural post-filter
-        return microphone
+        """Acoustic echo cancellation using NLMS adaptive filter."""
+        filter_length = min(512, len(reference))
+        if len(reference) < filter_length or len(microphone) == 0:
+            return microphone
+
+        # Normalized LMS adaptive filter
+        w = np.zeros(filter_length)
+        mu = 0.1  # Step size
+        output = np.zeros_like(microphone)
+
+        for n in range(filter_length, min(len(microphone), len(reference))):
+            x = reference[n - filter_length:n][::-1]
+            y_hat = np.dot(w, x)
+            e = microphone[n] - y_hat
+            norm = np.dot(x, x) + 1e-10
+            w += (mu / norm) * e * x
+            output[n] = e
+
+        # Copy early samples unchanged
+        output[:filter_length] = microphone[:filter_length]
+        return output
     
     def _noise_suppression(self, audio: np.ndarray) -> np.ndarray:
         """Noise suppression using spectral subtraction"""
@@ -581,10 +606,30 @@ class AudioEnhancementPipeline:
         return audio * gain_linear
     
     def _equalize(self, audio: np.ndarray) -> np.ndarray:
-        """Apply voice-optimized equalization"""
-        # Placeholder for EQ implementation
-        # Real implementation would use parametric EQ
-        return audio
+        """Apply voice-optimized equalization."""
+        try:
+            from scipy.signal import butter, lfilter
+            nyquist = self.sample_rate / 2
+
+            # Voice presence boost (2-4 kHz)
+            low = 2000 / nyquist
+            high = 4000 / nyquist
+            if high < 1.0 and low > 0:
+                b, a = butter(2, [low, high], btype='band')
+                presence = lfilter(b, a, audio)
+                audio = audio + 0.3 * presence  # Gentle boost
+
+            # Low-mid warmth (200-500 Hz)
+            low = 200 / nyquist
+            high = 500 / nyquist
+            if high < 1.0 and low > 0:
+                b, a = butter(2, [low, high], btype='band')
+                warmth = lfilter(b, a, audio)
+                audio = audio + 0.15 * warmth
+
+            return audio
+        except ImportError:
+            return audio
     
     def _peak_limiter(self, audio: np.ndarray, threshold: float = -3) -> np.ndarray:
         """Peak limiting to prevent clipping"""

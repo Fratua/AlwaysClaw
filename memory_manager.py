@@ -661,19 +661,19 @@ async def create_memory_manager(
 ) -> MemoryManager:
     """
     Create and initialize a memory manager.
-    
+
     Args:
         base_dir: Base directory for memory storage
         llm_client: LLM client for consolidation
-        
+
     Returns:
         Initialized MemoryManager
     """
-    config = MemoryConfig()
+    config = MemoryConfig.from_yaml()
     if base_dir:
         config.base_dir = base_dir
-    
+
     manager = MemoryManager(config)
     await manager.initialize(llm_client)
-    
+
     return manager

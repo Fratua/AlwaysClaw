@@ -574,15 +574,37 @@ class EncryptedFileVault:
     def _encrypt_master_key(self, key: bytes) -> bytes:
         """Encrypt master key using platform-specific method."""
         if platform.system() == 'Windows':
-            # Use Windows DPAPI
             try:
                 import ctypes
-                from ctypes import wintypes
+                import ctypes.wintypes
 
-                # DPAPI encryption
-                DATA_BLOB = ctypes.Structure
-                # Simplified - in production use proper DPAPI
-                return key  # Placeholder
+                class DATA_BLOB(ctypes.Structure):
+                    _fields_ = [
+                        ('cbData', ctypes.wintypes.DWORD),
+                        ('pbData', ctypes.POINTER(ctypes.c_char)),
+                    ]
+
+                blob_in = DATA_BLOB()
+                blob_in.cbData = len(key)
+                blob_in.pbData = ctypes.cast(
+                    ctypes.c_char_p(key), ctypes.POINTER(ctypes.c_char)
+                )
+
+                blob_out = DATA_BLOB()
+
+                success = ctypes.windll.crypt32.CryptProtectData(
+                    ctypes.byref(blob_in),
+                    'CredentialVault',
+                    None, None, None, 0,
+                    ctypes.byref(blob_out)
+                )
+
+                if success:
+                    encrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+                    ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+                    return encrypted
+
+                logger.warning("DPAPI CryptProtectData failed, falling back to PBKDF2")
             except (ImportError, OSError, ValueError) as e:
                 logger.warning(f"DPAPI encryption failed, falling back to PBKDF2: {e}")
 

@@ -272,11 +272,26 @@ class CookieJarManager:
         self._load_jars()
     
     def _derive_key_from_system(self) -> bytes:
-        """Derive encryption key from system information."""
-        # In production, use Windows DPAPI or secure key storage
-        # This is a simplified version
-        system_info = f"{hashlib.sha256(secrets.token_bytes(32)).hexdigest()}"
-        return hashlib.sha256(system_info.encode()).digest()
+        """Derive encryption key from machine-specific information."""
+        import platform
+        machine_id = f"{platform.node()}:{platform.machine()}:{platform.system()}"
+        # Add Windows-specific UUID if available
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['wmic', 'csproduct', 'get', 'UUID'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                uuid_line = [
+                    l.strip() for l in result.stdout.strip().split('\n')
+                    if l.strip() and l.strip() != 'UUID'
+                ]
+                if uuid_line:
+                    machine_id += f":{uuid_line[0]}"
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return hashlib.sha256(machine_id.encode()).digest()
     
     def _load_jars(self) -> None:
         """Load cookie jars from storage."""

@@ -459,16 +459,11 @@ Content: {event.content}
         facts: List[Fact]
     ) -> str:
         """Insert new section into appropriate part of MEMORY.md."""
-        # For now, append to "Consolidated Events" section
-        # In production, this would be more sophisticated
-        
-        # Find "Consolidated Events" section
+        # Find "Consolidated Events" section and insert after its header
         if '## Consolidated Events' in content:
-            # Insert after section header
             parts = content.split('## Consolidated Events', 1)
             return parts[0] + '## Consolidated Events' + new_section + parts[1]
         else:
-            # Append to end
             return content + new_section
     
     async def _archive_log(self, log_file: Path) -> None:

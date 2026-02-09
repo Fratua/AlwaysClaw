@@ -202,18 +202,17 @@ class ScreenReaderIntegration:
             return False
     
     async def _detect_screen_reader(self) -> ScreenReaderType:
-        """Detect active screen reader"""
+        """Detect active screen reader by scanning running processes"""
         try:
-            # In production, use psutil to check running processes
-            # import psutil
-            # for reader_type, processes in self.READER_PROCESSES.items():
-            #     for proc in psutil.process_iter(['name']):
-            #         if proc.info['name'].lower() in [p.lower() for p in processes]:
-            #             return reader_type
-            
-            # Placeholder - check Windows registry for default
+            import psutil
+            for reader_type, processes in self.READER_PROCESSES.items():
+                for proc in psutil.process_iter(['name']):
+                    try:
+                        if proc.info['name'] and proc.info['name'].lower() in [p.lower() for p in processes]:
+                            return reader_type
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
             return ScreenReaderType.SYSTEM
-            
         except (OSError, ImportError) as e:
             logger.error(f"Error detecting screen reader: {e}")
             return ScreenReaderType.NONE
@@ -237,50 +236,81 @@ class ScreenReaderIntegration:
             return False
     
     async def _connect_nvda(self) -> bool:
-        """Connect to NVDA screen reader"""
+        """Connect to NVDA screen reader via controller client DLL"""
         try:
-            # In production:
-            # import nvda_client
-            # self.reader_handle = nvda_client.initialize()
-            logger.info("Connected to NVDA")
-            return True
+            import ctypes
+            nvda_client = ctypes.windll.LoadLibrary('nvdaControllerClient64.dll')
+            result = nvda_client.nvdaController_testIfRunning()
+            if result == 0:
+                self.reader_handle = nvda_client
+                logger.info("Connected to NVDA via controller client")
+                return True
+            logger.warning(f"NVDA not running (error code: {result})")
+            return False
         except (OSError, ImportError, AttributeError) as e:
             logger.error(f"NVDA connection failed: {e}")
             return False
     
     async def _connect_jaws(self) -> bool:
-        """Connect to JAWS screen reader"""
+        """Connect to JAWS screen reader via COM"""
         try:
-            # In production:
-            # import jaws_client
-            # self.reader_handle = jaws_client.initialize()
-            logger.info("Connected to JAWS")
+            import comtypes.client
+            jaws = comtypes.client.CreateObject("FreedomSci.JawsApi")
+            self.reader_handle = jaws
+            logger.info("Connected to JAWS via COM")
             return True
-        except (OSError, ImportError, AttributeError) as e:
+        except ImportError as e:
+            logger.error(f"JAWS connection failed (comtypes not installed): {e}")
+            return False
+        except (OSError, AttributeError) as e:
             logger.error(f"JAWS connection failed: {e}")
             return False
+        except Exception as e:
+            if 'COMError' in type(e).__name__:
+                logger.error(f"JAWS COM connection failed: {e}")
+                return False
+            raise
     
     async def _connect_narrator(self) -> bool:
         """Connect to Windows Narrator"""
         try:
-            # In production:
-            # Use UI Automation to interact with Narrator
-            logger.info("Connected to Narrator")
+            import subprocess
+            result = subprocess.run(
+                ['powershell', '-Command', 'Get-Process Narrator -ErrorAction SilentlyContinue'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                self.reader_handle = 'narrator'
+                logger.info("Connected to Narrator")
+                return True
+            logger.info("Narrator not running, starting it")
+            subprocess.Popen(['narrator.exe'], shell=True)
+            self.reader_handle = 'narrator'
             return True
-        except (OSError, ImportError, AttributeError) as e:
+        except (OSError, ImportError, AttributeError, subprocess.TimeoutExpired) as e:
             logger.error(f"Narrator connection failed: {e}")
             return False
     
     async def _connect_system(self) -> bool:
-        """Connect to system default accessibility"""
+        """Connect to system default accessibility via pyttsx3 or SAPI"""
         try:
-            # In production:
-            # Use Windows UI Automation API
-            logger.info("Connected to system accessibility")
+            import pyttsx3
+            engine = pyttsx3.init()
+            self.reader_handle = engine
+            logger.info("Connected to system TTS via pyttsx3")
             return True
-        except (OSError, ImportError, AttributeError) as e:
-            logger.error(f"System accessibility connection failed: {e}")
-            return False
+        except (OSError, ImportError, RuntimeError) as e:
+            logger.warning(f"pyttsx3 not available, falling back to SAPI: {e}")
+            try:
+                import subprocess
+                subprocess.run(['powershell', '-Command', 'Add-Type -AssemblyName System.Speech'],
+                              capture_output=True, timeout=5)
+                self.reader_handle = 'sapi'
+                logger.info("Connected to system SAPI")
+                return True
+            except (OSError, subprocess.TimeoutExpired) as e2:
+                logger.error(f"System accessibility connection failed: {e2}")
+                return False
     
     async def announce(
         self,
@@ -332,40 +362,54 @@ class ScreenReaderIntegration:
                 logger.error(f"Error processing announcement: {e}")
     
     async def _announce_nvda(self, announcement: Dict) -> None:
-        """Announce via NVDA"""
+        """Announce via NVDA controller client"""
         try:
-            # In production:
-            # import speech
-            # speech.speakMessage(announcement['message'])
-            logger.debug(f"NVDA: {announcement['message']}")
-        except (OSError, RuntimeError, ImportError) as e:
+            import ctypes
+            if self.reader_handle and hasattr(self.reader_handle, 'nvdaController_speakText'):
+                self.reader_handle.nvdaController_speakText(announcement['message'])
+            else:
+                logger.debug(f"NVDA: {announcement['message']}")
+        except (OSError, RuntimeError, ctypes.WinError) as e:
             logger.error(f"NVDA announcement failed: {e}")
     
     async def _announce_jaws(self, announcement: Dict) -> None:
-        """Announce via JAWS"""
+        """Announce via JAWS COM API"""
         try:
-            # In production:
-            # Use JAWS COM API
-            logger.debug(f"JAWS: {announcement['message']}")
-        except (OSError, RuntimeError, ImportError) as e:
+            if self.reader_handle and hasattr(self.reader_handle, 'SayString'):
+                self.reader_handle.SayString(announcement['message'], False)
+            else:
+                logger.debug(f"JAWS: {announcement['message']}")
+        except (OSError, RuntimeError, AttributeError) as e:
             logger.error(f"JAWS announcement failed: {e}")
     
     async def _announce_narrator(self, announcement: Dict) -> None:
-        """Announce via Narrator"""
+        """Announce via Narrator using PowerShell SAPI"""
         try:
-            # In production:
-            # Use Windows UI Automation
-            logger.debug(f"Narrator: {announcement['message']}")
-        except (OSError, RuntimeError, ImportError) as e:
+            import subprocess
+            text = announcement['message'].replace("'", "''")
+            subprocess.Popen(
+                ['powershell', '-Command', f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{text}')"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except (OSError, RuntimeError) as e:
             logger.error(f"Narrator announcement failed: {e}")
     
     async def _announce_system(self, announcement: Dict) -> None:
-        """Announce via system default"""
+        """Announce via system default (pyttsx3 or SAPI)"""
         try:
-            # In production:
-            # Use Windows Text-to-Speech
-            logger.debug(f"System: {announcement['message']}")
-        except (OSError, RuntimeError, ImportError) as e:
+            if self.reader_handle and hasattr(self.reader_handle, 'say'):
+                self.reader_handle.say(announcement['message'])
+                self.reader_handle.runAndWait()
+            elif self.reader_handle == 'sapi':
+                import subprocess
+                text = announcement['message'].replace("'", "''")
+                subprocess.Popen(
+                    ['powershell', '-Command', f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{text}')"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            else:
+                logger.debug(f"System: {announcement['message']}")
+        except (OSError, RuntimeError) as e:
             logger.error(f"System announcement failed: {e}")
     
     def _format_for_screen_reader(self, message: str) -> str:

@@ -1,12 +1,13 @@
 """
-Service Integration Layer
-Windows 10 OpenClaw-Inspired AI Agent System
+Service Integration Layer - Python-native API for direct Python callers.
 
-This module implements integrations with external services:
-- Gmail API
-- Twilio Voice/SMS
-- Browser Control (Playwright/Selenium)
+This module provides async Python classes for integrating with external services:
+- Gmail API (via gmail_client_implementation)
+- Twilio Voice/SMS (via twilio_voice_integration)
+- Browser Control (via Playwright)
 - Windows System Integration
+
+For the Node.js-to-Python JSON-RPC interface, see python_bridge.py instead.
 """
 
 import asyncio
@@ -118,10 +119,6 @@ class GmailIntegration:
     async def initialize(self) -> bool:
         """Initialize Gmail API connection"""
         try:
-            # In production, this would use Google API client
-            # from googleapiclient.discovery import build
-            # from google.oauth2.credentials import Credentials
-            
             logger.info("Initializing Gmail integration...")
 
             from gmail_client_implementation import GmailClient
@@ -332,19 +329,17 @@ class TwilioIntegration:
     async def initialize(self) -> bool:
         """Initialize Twilio client"""
         try:
-            # In production:
-            # from twilio.rest import Client
-            # self.client = Client(self.account_sid, self.auth_token)
-            
             logger.info("Initializing Twilio integration...")
-            
-            # Placeholder
+            from twilio_voice_integration import TwilioVoiceManager, TwilioConfig
+            twilio_config = TwilioConfig(
+                account_sid=self.account_sid or '',
+                auth_token=self.auth_token or '',
+                phone_number=self.phone_number or '',
+            )
+            self.client = TwilioVoiceManager(twilio_config)
             self.authenticated = True
-            self.client = {"status": "connected"}
-            
             logger.info("Twilio integration initialized successfully")
             return True
-            
         except (OSError, ImportError, ValueError) as e:
             logger.error(f"Failed to initialize Twilio: {e}")
             return False
@@ -382,26 +377,18 @@ class TwilioIntegration:
     <Say voice="{voice}" language="{language}">{message}</Say>
 </Response>"""
             
-            # In production:
-            # call = self.client.calls.create(
-            #     twiml=twiml,
-            #     to=to_number,
-            #     from_=self.phone_number,
-            #     record=record
-            # )
-            
-            # Placeholder
-            call = type('obj', (object,), {
-                'sid': f'CA{datetime.now().timestamp()}',
-                'status': 'queued'
-            })()
-            
-            logger.info(f"Call initiated: {call.sid}")
-            
+            call = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.client.make_call(to_number, message)
+            )
+            call_sid = getattr(call, 'sid', f'CA{datetime.now().timestamp()}')
+            call_status = getattr(call, 'status', 'queued')
+
+            logger.info(f"Call initiated: {call_sid}")
+
             return CallResult(
                 success=True,
-                call_sid=call.sid,
-                status=call.status
+                call_sid=call_sid,
+                status=call_status
             )
             
         except (ConnectionError, TimeoutError, ValueError) as e:
@@ -431,26 +418,18 @@ class TwilioIntegration:
         try:
             logger.info(f"Sending SMS to: {to_number}")
             
-            # In production:
-            # sms = self.client.messages.create(
-            #     body=message,
-            #     to=to_number,
-            #     from_=self.phone_number,
-            #     media_url=media_urls
-            # )
-            
-            # Placeholder
-            sms = type('obj', (object,), {
-                'sid': f'SM{datetime.now().timestamp()}',
-                'status': 'queued'
-            })()
-            
-            logger.info(f"SMS sent: {sms.sid}")
-            
+            sms = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.client.send_sms(to_number, message)
+            )
+            sms_sid = getattr(sms, 'sid', f'SM{datetime.now().timestamp()}')
+            sms_status = getattr(sms, 'status', 'queued')
+
+            logger.info(f"SMS sent: {sms_sid}")
+
             return SMSResult(
                 success=True,
-                message_sid=sms.sid,
-                status=sms.status
+                message_sid=sms_sid,
+                status=sms_status
             )
             
         except (ConnectionError, TimeoutError, ValueError) as e:
@@ -480,29 +459,18 @@ class TwilioIntegration:
         try:
             logger.info(f"Sending MMS to: {to_number}")
             
-            # Upload media to accessible URL (in production)
-            # media_url = await self._upload_media(media_path)
-            
-            # In production:
-            # sms = self.client.messages.create(
-            #     body=message,
-            #     to=to_number,
-            #     from_=self.phone_number,
-            #     media_url=[media_url]
-            # )
-            
-            # Placeholder
-            sms = type('obj', (object,), {
-                'sid': f'MM{datetime.now().timestamp()}',
-                'status': 'queued'
-            })()
-            
-            logger.info(f"MMS sent: {sms.sid}")
-            
+            mms = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.client.send_mms(to_number, message, media_path)
+            )
+            mms_sid = getattr(mms, 'sid', f'MM{datetime.now().timestamp()}')
+            mms_status = getattr(mms, 'status', 'queued')
+
+            logger.info(f"MMS sent: {mms_sid}")
+
             return SMSResult(
                 success=True,
-                message_sid=sms.sid,
-                status=sms.status
+                message_sid=mms_sid,
+                status=mms_status
             )
             
         except (ConnectionError, TimeoutError, ValueError) as e:
@@ -515,20 +483,13 @@ class TwilioIntegration:
             return {'error': 'Not authenticated'}
         
         try:
-            # In production:
-            # call = self.client.calls(call_sid).fetch()
-            # return {
-            #     'sid': call.sid,
-            #     'status': call.status,
-            #     'duration': call.duration,
-            #     'price': call.price
-            # }
-            
-            return {
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.client.get_call_status(call_sid)
+            )
+            return result if isinstance(result, dict) else {
                 'sid': call_sid,
-                'status': 'completed',
-                'duration': '60',
-                'price': '0.50'
+                'status': getattr(result, 'status', 'unknown'),
+                'duration': getattr(result, 'duration', '0'),
             }
             
         except (ConnectionError, TimeoutError, ValueError) as e:
@@ -556,20 +517,13 @@ class BrowserControlIntegration:
     async def initialize(self) -> bool:
         """Initialize browser"""
         try:
-            # In production:
-            # from playwright.async_api import async_playwright
-            # self.playwright = await async_playwright().start()
-            # self.browser = await self.playwright.chromium.launch(headless=self.headless)
-            # self.context = await self.browser.new_context()
-            
             logger.info("Initializing browser control...")
-            
-            # Placeholder
-            self.browser = {"status": "connected"}
-            
+            from playwright.async_api import async_playwright
+            self._playwright = await async_playwright().start()
+            self.browser = await self._playwright.chromium.launch(headless=self.headless)
+            self.context = await self.browser.new_context()
             logger.info("Browser control initialized successfully")
             return True
-            
         except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to initialize browser: {e}")
             return False
@@ -597,22 +551,17 @@ class BrowserControlIntegration:
         try:
             logger.info(f"Navigating to: {url}")
             
-            # In production:
-            # page = await self.context.new_page()
-            # await page.goto(url, wait_until=wait_until, timeout=timeout)
-            # page_id = f"page_{len(self.pages)}"
-            # self.pages[page_id] = page
-            # self.active_page_id = page_id
-            
-            # Placeholder
+            page = await self.context.new_page()
+            await page.goto(url, wait_until=wait_until, timeout=timeout)
             page_id = f"page_{len(self.pages)}"
-            self.pages[page_id] = {"url": url, "title": "Loaded Page"}
+            self.pages[page_id] = page
             self.active_page_id = page_id
-            
+            title = await page.title()
+
             return BrowserResult(
                 success=True,
                 page=page_id,
-                title="Loaded Page"
+                title=title
             )
             
         except (OSError, RuntimeError, TimeoutError, ValueError) as e:
@@ -639,23 +588,21 @@ class BrowserControlIntegration:
         try:
             logger.info(f"Executing action: {action.type}")
             
-            # In production:
-            # if action.type == 'click':
-            #     await page.click(action.selector)
-            # elif action.type == 'type':
-            #     await page.fill(action.selector, action.text)
-            # elif action.type == 'screenshot':
-            #     screenshot = await page.screenshot()
-            #     return BrowserResult(success=True, screenshot=screenshot)
-            # elif action.type == 'extract':
-            #     content = await page.eval_on_selector(action.selector, 'el => el.textContent')
-            #     return BrowserResult(success=True, content=content)
-            # elif action.type == 'navigate':
-            #     await page.goto(action.url)
-            # elif action.type == 'scroll':
-            #     await page.evaluate('window.scrollBy(0, 500)')
-            
-            # Placeholder
+            if action.type == 'click':
+                await page.click(action.selector)
+            elif action.type == 'type':
+                await page.fill(action.selector, action.text or '')
+            elif action.type == 'screenshot':
+                screenshot = await page.screenshot()
+                return BrowserResult(success=True, screenshot=screenshot)
+            elif action.type == 'extract':
+                content = await page.eval_on_selector(action.selector, 'el => el.textContent')
+                return BrowserResult(success=True, content=content)
+            elif action.type == 'navigate':
+                await page.goto(action.url)
+            elif action.type == 'scroll':
+                await page.evaluate('window.scrollBy(0, 500)')
+
             return BrowserResult(success=True)
             
         except (OSError, RuntimeError, TimeoutError, ValueError) as e:
@@ -689,17 +636,18 @@ class BrowserControlIntegration:
         try:
             logger.info("Taking screenshot...")
             
-            # In production:
-            # page = self.get_active_page()
-            # if selector:
-            #     element = await page.query_selector(selector)
-            #     screenshot = await element.screenshot()
-            # else:
-            #     screenshot = await page.screenshot(full_page=full_page)
-            # return screenshot
-            
-            # Placeholder - return empty bytes
-            return b''
+            page = self.get_active_page()
+            if not page:
+                return None
+            if selector:
+                element = await page.query_selector(selector)
+                if element:
+                    screenshot = await element.screenshot()
+                else:
+                    return None
+            else:
+                screenshot = await page.screenshot(full_page=full_page)
+            return screenshot
             
         except (OSError, RuntimeError) as e:
             logger.error(f"Failed to take screenshot: {e}")
@@ -726,20 +674,19 @@ class BrowserControlIntegration:
         try:
             logger.info(f"Extracting data: {selector}")
             
-            # In production:
-            # page = self.get_active_page()
-            # elements = await page.query_selector_all(selector)
-            # results = []
-            # for element in elements:
-            #     if attribute:
-            #         value = await element.get_attribute(attribute)
-            #     else:
-            #         value = await element.text_content()
-            #     results.append(value)
-            # return results
-            
-            # Placeholder
-            return ["extracted_data_1", "extracted_data_2"]
+            page = self.get_active_page()
+            if not page:
+                return []
+            elements = await page.query_selector_all(selector)
+            results = []
+            for element in elements:
+                if attribute:
+                    value = await element.get_attribute(attribute)
+                else:
+                    value = await element.text_content()
+                if value is not None:
+                    results.append(value)
+            return results
             
         except (OSError, RuntimeError, ValueError) as e:
             logger.error(f"Failed to extract data: {e}")
@@ -748,13 +695,13 @@ class BrowserControlIntegration:
     async def close(self) -> None:
         """Close browser"""
         try:
-            # In production:
-            # await self.context.close()
-            # await self.browser.close()
-            # await self.playwright.stop()
-            
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+            if hasattr(self, '_playwright') and self._playwright:
+                await self._playwright.stop()
             logger.info("Browser closed")
-            
         except (OSError, RuntimeError) as e:
             logger.error(f"Error closing browser: {e}")
 
@@ -776,21 +723,17 @@ class WindowsSystemIntegration:
         """Initialize system integration"""
         try:
             logger.info("Initializing Windows system integration...")
-            
-            # In production, would use:
-            # - ctypes for Windows API calls
-            # - psutil for process management
-            # - WMI for system queries
-            # - pywin32 for COM integration
-            
+            import psutil
+            import platform
+            self._psutil = psutil
+            self._platform = platform
             self.initialized = True
             logger.info("Windows system integration initialized")
             return True
-            
         except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to initialize system integration: {e}")
             return False
-    
+
     async def execute_command(
         self,
         command: str,
@@ -799,43 +742,38 @@ class WindowsSystemIntegration:
     ) -> SystemResult:
         """
         Execute system command.
-        
+
         Args:
             command: Command to execute
             shell: Use shell execution
             timeout: Timeout in seconds
-            
+
         Returns:
             SystemResult: Result of command execution
         """
         try:
+            import subprocess
             logger.info(f"Executing command: {command}")
-            
-            # In production:
-            # import subprocess
-            # result = subprocess.run(
-            #     command,
-            #     shell=shell,
-            #     capture_output=True,
-            #     text=True,
-            #     timeout=timeout
-            # )
-            
-            # Placeholder
-            return SystemResult(
-                success=True,
-                output="Command executed successfully",
-                exit_code=0
+            result = subprocess.run(
+                command,
+                shell=shell,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
-            
-        except (OSError, RuntimeError, TimeoutError, PermissionError) as e:
+            return SystemResult(
+                success=result.returncode == 0,
+                output=result.stdout,
+                error=result.stderr if result.returncode != 0 else None,
+                exit_code=result.returncode,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error(f"Command timed out after {timeout}s: {command}")
+            return SystemResult(success=False, error="Command timed out", exit_code=1)
+        except (OSError, RuntimeError, PermissionError) as e:
             logger.error(f"Command execution failed: {e}")
-            return SystemResult(
-                success=False,
-                error=str(e),
-                exit_code=1
-            )
-    
+            return SystemResult(success=False, error=str(e), exit_code=1)
+
     async def launch_application(
         self,
         app_path: str,
@@ -843,103 +781,87 @@ class WindowsSystemIntegration:
     ) -> SystemResult:
         """
         Launch application.
-        
+
         Args:
             app_path: Path to application
             arguments: Command line arguments
-            
+
         Returns:
             SystemResult: Result of launch
         """
         try:
+            import subprocess
             logger.info(f"Launching application: {app_path}")
-            
-            # In production:
-            # import subprocess
-            # subprocess.Popen([app_path] + (arguments or []))
-            
+            proc = subprocess.Popen([app_path] + (arguments or []))
             return SystemResult(
                 success=True,
-                output=f"Launched: {app_path}"
+                output=f"Launched: {app_path} (PID {proc.pid})"
             )
-            
         except (OSError, PermissionError, FileNotFoundError) as e:
             logger.error(f"Failed to launch application: {e}")
             return SystemResult(success=False, error=str(e))
-    
+
     async def get_system_info(self) -> Dict:
         """Get system information"""
         try:
-            # In production:
-            # import psutil
-            # import platform
-            
-            info = {
-                'platform': 'Windows-10',
-                'processor': 'Unknown',
-                'memory_total': '16 GB',
-                'memory_available': '8 GB',
-                'disk_usage': '50%',
-                'uptime': '24 hours'
+            import psutil
+            import platform
+            mem = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            boot = datetime.fromtimestamp(psutil.boot_time())
+            uptime = datetime.now() - boot
+            return {
+                'platform': platform.platform(),
+                'processor': platform.processor() or platform.machine(),
+                'memory_total': f"{mem.total / (1024**3):.1f} GB",
+                'memory_available': f"{mem.available / (1024**3):.1f} GB",
+                'disk_usage': f"{disk.percent}%",
+                'uptime': str(uptime).split('.')[0],
             }
-            
-            return info
-            
         except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to get system info: {e}")
             return {'error': str(e)}
-    
+
     async def get_running_processes(self) -> List[Dict]:
         """Get list of running processes"""
         try:
-            # In production:
-            # import psutil
-            # processes = []
-            # for proc in psutil.process_iter(['pid', 'name', 'status']):
-            #     processes.append(proc.info)
-            # return processes
-            
-            # Placeholder
-            return [
-                {'pid': 1234, 'name': 'chrome.exe', 'status': 'running'},
-                {'pid': 5678, 'name': 'notepad.exe', 'status': 'running'}
-            ]
-            
+            import psutil
+            processes = []
+            for proc in psutil.process_iter(['pid', 'name', 'status']):
+                try:
+                    processes.append(proc.info)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            return processes
         except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to get processes: {e}")
             return []
-    
+
     async def kill_process(self, pid: int) -> bool:
         """Kill process by PID"""
         try:
+            import psutil
             logger.info(f"Killing process: {pid}")
-            
-            # In production:
-            # import psutil
-            # process = psutil.Process(pid)
-            # process.terminate()
-            
+            process = psutil.Process(pid)
+            process.terminate()
             return True
-            
         except (OSError, PermissionError, ProcessLookupError) as e:
             logger.error(f"Failed to kill process: {e}")
             return False
-    
+        except ImportError:
+            logger.error("psutil not available for kill_process")
+            return False
+
     async def take_screenshot(self) -> Optional[bytes]:
         """Take system screenshot"""
         try:
+            import io
             logger.info("Taking system screenshot...")
-            
-            # In production:
-            # from PIL import ImageGrab
-            # screenshot = ImageGrab.grab()
-            # buffer = io.BytesIO()
-            # screenshot.save(buffer, format='PNG')
-            # return buffer.getvalue()
-            
-            # Placeholder
-            return b''
-            
+            from PIL import ImageGrab
+            screenshot = ImageGrab.grab()
+            buffer = io.BytesIO()
+            screenshot.save(buffer, format='PNG')
+            return buffer.getvalue()
         except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to take screenshot: {e}")
             return None
@@ -948,33 +870,25 @@ class WindowsSystemIntegration:
         """Set system volume (0.0 - 1.0)"""
         try:
             logger.info(f"Setting volume to: {level}")
-            
-            # In production:
-            # from ctypes import cast, POINTER
-            # from comtypes import CLSCTX_ALL
-            # from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            # devices = AudioUtilities.GetSpeakers()
-            # interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            # volume = cast(interface, POINTER(IAudioEndpointVolume))
-            # volume.SetMasterVolumeLevelScalar(level, None)
-            
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            volume.SetMasterVolumeLevelScalar(level, None)
             return True
-            
         except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to set volume: {e}")
             return False
-    
+
     async def get_active_window(self) -> Dict:
         """Get information about active window"""
         try:
-            # In production:
-            # import win32gui
-            # hwnd = win32gui.GetForegroundWindow()
-            # title = win32gui.GetWindowText(hwnd)
-            # return {'hwnd': hwnd, 'title': title}
-            
-            return {'hwnd': 12345, 'title': 'Active Window'}
-            
+            import win32gui
+            hwnd = win32gui.GetForegroundWindow()
+            title = win32gui.GetWindowText(hwnd)
+            return {'hwnd': hwnd, 'title': title}
         except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to get active window: {e}")
             return {}

@@ -438,24 +438,40 @@ class ResourceMonitor:
         return resources
     
     async def _check_token_availability(self) -> int:
-        """Check available tokens"""
-        # Would check actual token budget
-        return 100000  # Placeholder
+        """Check available tokens from budget tracking."""
+        import os
+        budget = int(os.environ.get('TOKEN_BUDGET', '100000'))
+        used = sum(getattr(r, 'tokens_used', 0) for r in self.usage_history) if self.usage_history else 0
+        return max(0, budget - used)
     
     async def _check_rate_limits(self) -> bool:
-        """Check if rate limits are approaching"""
-        # Would check actual rate limit status
-        return True
+        """Check if rate limits are approaching."""
+        import os
+        if not self.usage_history:
+            return True
+        one_minute_ago = datetime.now() - timedelta(minutes=1)
+        recent = [r for r in self.usage_history
+                  if getattr(r, 'timestamp', datetime.min) > one_minute_ago]
+        max_rpm = int(os.environ.get('MAX_REQUESTS_PER_MINUTE', '60'))
+        return len(recent) < max_rpm
     
     async def _check_memory(self) -> bool:
-        """Check memory availability"""
-        # Would check actual memory
-        return True
+        """Check memory availability."""
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            return mem.percent < 90  # Available if less than 90% used
+        except ImportError:
+            return True
     
     async def _check_disk_space(self) -> bool:
-        """Check disk space availability"""
-        # Would check actual disk space
-        return True
+        """Check disk space availability."""
+        try:
+            import psutil
+            disk = psutil.disk_usage('/')
+            return disk.percent < 95  # Available if less than 95% used
+        except ImportError:
+            return True
     
     def get_usage_trends(self) -> Dict[str, Any]:
         """Get resource usage trends"""

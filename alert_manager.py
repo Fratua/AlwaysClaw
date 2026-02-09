@@ -8,6 +8,7 @@ import json
 import logging
 import smtplib
 import os
+import yaml
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
@@ -19,6 +20,17 @@ from enum import Enum
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+def _load_alerting_config() -> Dict:
+    """Load alerting rules from YAML with fallback."""
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'alerting-rules.yaml')
+    try:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning(f"Could not load alerting-rules.yaml: {e}")
+        return {}
 
 
 class SeverityLevel(Enum):
@@ -620,6 +632,17 @@ class AlertManager:
     
     def __init__(self, config: Dict):
         self.config = config
+        # Load alerting rules from YAML
+        alerting_config = _load_alerting_config()
+        routing = alerting_config.get('routing', {}).get('by_severity', {})
+        if routing:
+            self.CHANNEL_SEVERITY_MAP = {
+                SeverityLevel.CRITICAL: routing.get('critical', ['email', 'sms', 'voice', 'tts', 'webhook']),
+                SeverityLevel.HIGH: routing.get('warning', ['email', 'sms', 'tts', 'webhook']),
+                SeverityLevel.MEDIUM: routing.get('warning', ['email', 'webhook']),
+                SeverityLevel.LOW: routing.get('info', ['email']),
+                SeverityLevel.INFO: routing.get('info', ['webhook']),
+            }
         self.channels: Dict[str, BaseNotifier] = {}
         self.throttler = AlertThrottler(config.get('throttling', {}))
         self.alert_history: List[Alert] = []

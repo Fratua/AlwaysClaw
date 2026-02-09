@@ -611,9 +611,25 @@ class AutomatedResponseActions:
         logger.info(f"Would capture memory dump of PID {pid} to {output_path}")
     
     def _disable_non_essential_loops(self) -> List[str]:
-        """Disable non-essential agentic loops"""
-        # Placeholder - would interact with loop manager
-        return ["loop_5", "loop_8", "loop_12"]
+        """Disable non-essential agentic loops."""
+        disabled = []
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline') or []
+                    cmdline_str = ' '.join(cmdline)
+                    if 'loop' in cmdline_str.lower() and 'python' in (proc.info.get('name') or '').lower():
+                        # Don't kill essential loops
+                        essential = ['incident_response', 'monitoring', 'security']
+                        if not any(e in cmdline_str.lower() for e in essential):
+                            proc.suspend()
+                            disabled.append(f"{proc.info['name']}(pid={proc.info['pid']})")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            logger.warning(f"Error scanning processes for non-essential loops: {e}")
+        logger.info(f"Disabled {len(disabled)} non-essential loops: {disabled}")
+        return disabled
     
     def _set_log_level(self, level: str):
         """Set system log level"""
@@ -789,11 +805,32 @@ class EvidenceCollectionSystem:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
         logger.info(f"Collecting memory dump for {process_name}")
-        
-        # In production, would use procdump.exe
-        # Simulating collection
-        with open(filepath, 'w') as f:
-            f.write(f"Memory dump simulation for {process_name}\n")
+
+        # Try real memory dump collection
+        try:
+            procdump_result = subprocess.run(
+                ['procdump', '-ma', process_name, filepath],
+                capture_output=True, text=True, timeout=60
+            )
+            if procdump_result.returncode == 0:
+                logger.info(f"Memory dump collected via procdump for {process_name}")
+            else:
+                raise FileNotFoundError("procdump not available")
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            # Fallback: use PowerShell to capture process info
+            try:
+                ps_cmd = (
+                    f"$proc = Get-Process -Name '{process_name}' -ErrorAction Stop; "
+                    f"$file = [System.IO.File]::Create('{filepath}'); "
+                    f"$file.Close(); "
+                    f"$info = $proc | Select-Object Id, ProcessName, WorkingSet64, Threads | ConvertTo-Json; "
+                    f"[System.IO.File]::WriteAllText('{filepath}', $info)"
+                )
+                subprocess.run(['powershell', '-Command', ps_cmd],
+                              capture_output=True, timeout=30)
+            except (OSError, subprocess.TimeoutExpired):
+                with open(filepath, 'w') as f:
+                    f.write(f"Memory dump unavailable for {process_name}\n")
         
         file_hash = self._calculate_hash(filepath)
         
@@ -828,9 +865,22 @@ class EvidenceCollectionSystem:
                 
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
                 
-                # In production, would use wevtutil
-                with open(filepath, 'w') as f:
-                    f.write(f"Log export simulation for {source}\n")
+                # Use wevtutil for real log collection
+                try:
+                    subprocess.run(
+                        ['wevtutil', 'epl', source, filepath,
+                         f'/q:*[System[TimeCreated[@SystemTime>=\'{start_time.isoformat()}\' and @SystemTime<=\'{end_time.isoformat()}\']]]'],
+                        capture_output=True, timeout=60
+                    )
+                except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+                    # Fallback: use PowerShell Get-EventLog
+                    try:
+                        ps_cmd = f"Get-EventLog -LogName {source} -After '{start_time}' -Before '{end_time}' | Export-Csv '{filepath}' -NoTypeInformation"
+                        subprocess.run(['powershell', '-Command', ps_cmd],
+                                      capture_output=True, timeout=60)
+                    except (OSError, subprocess.TimeoutExpired):
+                        with open(filepath, 'w') as f:
+                            f.write(f"Log export unavailable for {source}\n")
                 
                 evidence = Evidence(
                     id=f"EV-{incident_id}-{uuid.uuid4().hex[:8]}",

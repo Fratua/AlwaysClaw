@@ -109,8 +109,16 @@ class AuthenticationOrchestrator:
     
     def _init_session_manager(self) -> None:
         """Initialize session manager."""
-        # Session manager would be imported and initialized here
-        self.session_manager = None  # Placeholder
+        try:
+            self.session_manager = SessionManager(
+                session_timeout=getattr(self.config, 'session_timeout', 3600)
+            )
+        except (TypeError, AttributeError) as e:
+            self.session_manager = {
+                'sessions': {},
+                'timeout': getattr(self.config, 'session_timeout', 3600)
+            }
+            logger.warning(f"Using dict-based session manager fallback: {e}")
     
     def _init_credential_vault(self) -> None:
         """Initialize credential vault."""

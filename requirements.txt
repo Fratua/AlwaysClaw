@@ -53,9 +53,8 @@ google-auth-oauthlib>=1.0.0
 google-auth>=2.22.0
 
 # ============================================
-# TWILIO
+# TWILIO (moved to optional section below)
 # ============================================
-twilio>=8.5.0
 
 # ============================================
 # AZURE (Speech, etc.)
@@ -81,8 +80,6 @@ arxiv>=2.0.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
-selenium>=4.15.0
-playwright>=1.40.0
 
 # ============================================
 # EMAIL PROCESSING
@@ -93,9 +90,8 @@ email-validator>=2.0.0
 # ============================================
 # DATABASE
 # ============================================
-sqlalchemy>=2.0.0
-# Neo4j for knowledge graphs
-neo4j>=5.14.0
+# sqlalchemy>=2.0.0          # Uncomment if database ORM is needed
+# neo4j>=5.14.0              # Uncomment for knowledge graph support
 
 # ============================================
 # SECURITY
@@ -156,3 +152,10 @@ isort>=5.12.0
 # tiktoken>=0.5.0               # Uncomment for context management
 # elevenlabs>=0.2.0             # Uncomment for ElevenLabs TTS
 # google-generativeai>=0.3.0   # Uncomment for Google AI
+
+# ============================================
+# OPTIONAL SERVICE INTEGRATIONS
+# ============================================
+# twilio>=8.5.0                  # Uncomment for Twilio voice/SMS (service_integrations.py)
+# playwright>=1.40.0             # Uncomment for browser automation (service_integrations.py)
+# selenium>=4.15.0               # Uncomment for Selenium-based browser control

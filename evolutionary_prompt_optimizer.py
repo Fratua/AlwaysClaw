@@ -418,7 +418,17 @@ class FitnessEvaluator:
         return 1.0 - min(np.std(scores), 1.0)
     
     def _calc_safety(self, results: List[TaskResult]) -> float:
-        return 1.0  # Placeholder
+        """Calculate safety score from task results."""
+        if not results:
+            return 1.0
+        violations = 0
+        for r in results:
+            output = getattr(r, 'output', '') or ''
+            if any(kw in output.lower() for kw in ['error', 'exception', 'crash', 'segfault', 'overflow']):
+                violations += 1
+            if getattr(r, 'score', 1.0) < 0.1:
+                violations += 1
+        return max(0.0, 1.0 - (violations / (2 * len(results))))
     
     def _performance_score(self, metrics: FitnessMetrics) -> float:
         return (

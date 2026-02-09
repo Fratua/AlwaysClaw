@@ -519,7 +519,7 @@ class CognitivePerformanceMonitor:
         quality = QualityMetrics(
             response_coherence=self._assess_coherence(reasoning_trace),
             clarity_score=self._assess_clarity(reasoning_trace),
-            helpfulness_score=0.7,  # Placeholder
+            helpfulness_score=self._assess_helpfulness(reasoning_trace),
             creativity_score=self._assess_creativity(reasoning_trace),
             depth_score=self._assess_depth(reasoning_trace)
         )
@@ -529,8 +529,8 @@ class CognitivePerformanceMonitor:
             self_correction_rate=reasoning_trace.revision_count / max(len(reasoning_trace.steps), 1),
             confidence_accuracy_correlation=self._calculate_confidence_correlation(reasoning_trace),
             reflection_depth=self._measure_reflection_depth(reasoning_trace),
-            bias_detection_rate=0.5,  # Placeholder
-            learning_transfer_score=0.6  # Placeholder
+            bias_detection_rate=self._calculate_bias_detection_rate(reasoning_trace),
+            learning_transfer_score=self._calculate_learning_transfer(reasoning_trace),
         )
         
         # Calculate process metrics
@@ -726,7 +726,80 @@ class CognitivePerformanceMonitor:
             if s.step_type == StepType.REFLECTION
         )
         return min(1.0, reflection_steps / max(len(trace.steps) * 0.2, 1))
-    
+
+    def _assess_helpfulness(self, trace: ReasoningTrace) -> float:
+        """Assess helpfulness based on tool usage, uncertainty resolution, and completeness."""
+        if not trace.steps:
+            return 0.5
+        score = 0.0
+        total_weight = 0.0
+
+        # Tool usage effectiveness (did tools get used and produce results?)
+        if trace.used_tools:
+            tool_weight = 0.3
+            total_weight += tool_weight
+            # More tools used = more helpful (up to a point)
+            tool_score = min(len(trace.used_tools) / max(len(trace.steps), 1), 1.0)
+            score += tool_weight * tool_score
+
+        # Uncertainty resolution (did confidence increase over steps?)
+        confidences = [s.confidence for s in trace.steps if hasattr(s, 'confidence') and s.confidence > 0]
+        if len(confidences) >= 2:
+            uncertainty_weight = 0.3
+            total_weight += uncertainty_weight
+            improvement = confidences[-1] - confidences[0]
+            score += uncertainty_weight * max(0.0, min(1.0, 0.5 + improvement))
+
+        # Final confidence as proxy for conclusion completeness
+        if confidences:
+            completion_weight = 0.4
+            total_weight += completion_weight
+            score += completion_weight * confidences[-1]
+
+        return score / total_weight if total_weight > 0 else 0.5
+
+    def _calculate_bias_detection_rate(self, trace: ReasoningTrace) -> float:
+        """Calculate ratio of evidence-bearing steps where counter-evidence was addressed."""
+        if not trace.steps:
+            return 0.5
+        evidence_steps = 0
+        addressed_steps = 0
+        for step in trace.steps:
+            content = getattr(step, 'content', '') or ''
+            # Check if step involves evidence evaluation
+            evidence_keywords = ['evidence', 'suggests', 'indicates', 'shows', 'data', 'result']
+            if any(kw in content.lower() for kw in evidence_keywords):
+                evidence_steps += 1
+                # Check if counter-evidence or alternatives were considered
+                counter_keywords = ['however', 'alternatively', 'but', 'counter', 'on the other hand', 'limitation']
+                if any(kw in content.lower() for kw in counter_keywords):
+                    addressed_steps += 1
+        if evidence_steps == 0:
+            return 0.5
+        return addressed_steps / evidence_steps
+
+    def _calculate_learning_transfer(self, trace: ReasoningTrace) -> float:
+        """Measure confidence improvement after retrieval/learning steps."""
+        if len(trace.steps) < 2:
+            return 0.5
+        retrieval_improvements = []
+        for i, step in enumerate(trace.steps):
+            step_type = getattr(step, 'step_type', None) or getattr(step, 'type', '')
+            content = getattr(step, 'content', '') or ''
+            is_retrieval = (
+                str(step_type).lower() in ('retrieval', 'search', 'lookup', 'recall')
+                or any(kw in content.lower() for kw in ['retrieved', 'found', 'recalled', 'looked up'])
+            )
+            if is_retrieval and i + 1 < len(trace.steps):
+                conf_before = getattr(step, 'confidence', 0.5)
+                conf_after = getattr(trace.steps[i + 1], 'confidence', 0.5)
+                if conf_after > conf_before:
+                    retrieval_improvements.append(conf_after - conf_before)
+        if not retrieval_improvements:
+            return 0.5
+        avg_improvement = sum(retrieval_improvements) / len(retrieval_improvements)
+        return min(1.0, 0.5 + avg_improvement * 2)
+
     def _measure_exploration_breadth(self, trace: ReasoningTrace) -> float:
         """Measure exploration breadth"""
         if not trace.decision_points:
@@ -1494,11 +1567,18 @@ class DeepReflectionEngine:
             insight = await self._generate_insight(question, trace)
             insights.append(insight)
         
+        # Calculate confidence from insight quality
+        insight_confidences = [getattr(i, 'confidence', 0.5) for i in insights]
+        avg_confidence = sum(insight_confidences) / len(insight_confidences) if insight_confidences else 0.5
+        # Adjust based on number of questions answered
+        coverage = len(insights) / len(questions) if questions else 0.5
+        confidence = avg_confidence * 0.7 + coverage * 0.3
+
         return ReflectionPhase(
             phase_name=phase_name,
             questions=questions,
             insights=insights,
-            confidence=0.7  # Placeholder
+            confidence=confidence
         )
     
     async def _reflect_transformative(

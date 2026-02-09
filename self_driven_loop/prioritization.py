@@ -249,12 +249,16 @@ class GoalPrioritizer:
     def _check_resource_availability(self, goal: Any) -> float:
         """Check if required resources are available."""
         required_resources = getattr(goal, 'resources_needed', [])
-        
         if not required_resources:
             return 1.0
-        
-        # Placeholder - would check actual resource availability
-        return 0.8
+        try:
+            import psutil
+            cpu_avail = 1.0 - (psutil.cpu_percent(interval=0.1) / 100.0)
+            mem = psutil.virtual_memory()
+            mem_avail = mem.available / mem.total
+            return min(cpu_avail, mem_avail)
+        except (ImportError, OSError):
+            return 0.8
     
     def _assess_complexity_match(self, goal: Any,
                                 context: Dict[str, Any]) -> float:

@@ -15,9 +15,11 @@ This module implements the complete planning loop with:
 """
 
 import asyncio
+import os
 import uuid
 import json
 import logging
+import yaml
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from enum import Enum, auto
@@ -573,6 +575,22 @@ class PlanningConfig:
     def __post_init__(self):
         if self.deadline_warning_thresholds is None:
             self.deadline_warning_thresholds = [0.5, 0.75, 0.9, 0.95]
+
+    @classmethod
+    def from_yaml(cls, path: str = None) -> 'PlanningConfig':
+        """Load PlanningConfig from YAML with fallback to defaults."""
+        if path is None:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'planning_loop_config.yaml')
+        try:
+            with open(path, 'r') as f:
+                data = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError):
+            return cls()
+        pl = data.get('planning_loop', {})
+        return cls(
+            replanning_cooldown=timedelta(seconds=pl.get('replanning', {}).get('cooldown_seconds', 30)),
+            max_replans=pl.get('replanning', {}).get('max_replans_per_execution', 10),
+        )
 
 
 # =============================================================================
@@ -1311,16 +1329,38 @@ class PlanQualityAssessor:
     """
     
     def __init__(self):
-        self.dimension_weights = {
-            PlanQualityDimension.FEASIBILITY: 0.25,
-            PlanQualityDimension.EFFICIENCY: 0.15,
-            PlanQualityDimension.ROBUSTNESS: 0.15,
-            PlanQualityDimension.COMPLETENESS: 0.15,
-            PlanQualityDimension.CONSISTENCY: 0.10,
-            PlanQualityDimension.OPTIMALITY: 0.10,
-            PlanQualityDimension.SIMPLICITY: 0.05,
-            PlanQualityDimension.ADAPTABILITY: 0.05
-        }
+        # Load weights from planning_loop_config.yaml if available
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'planning_loop_config.yaml')
+        weights = None
+        try:
+            with open(config_path, 'r') as f:
+                data = yaml.safe_load(f) or {}
+            weights = data.get('planning_loop', {}).get('quality', {}).get('dimension_weights', {})
+        except (OSError, yaml.YAMLError):
+            pass
+
+        if weights:
+            self.dimension_weights = {
+                PlanQualityDimension.FEASIBILITY: weights.get('feasibility', 0.25),
+                PlanQualityDimension.EFFICIENCY: weights.get('efficiency', 0.15),
+                PlanQualityDimension.ROBUSTNESS: weights.get('robustness', 0.15),
+                PlanQualityDimension.COMPLETENESS: weights.get('completeness', 0.15),
+                PlanQualityDimension.CONSISTENCY: weights.get('consistency', 0.10),
+                PlanQualityDimension.OPTIMALITY: weights.get('optimality', 0.10),
+                PlanQualityDimension.SIMPLICITY: weights.get('simplicity', 0.05),
+                PlanQualityDimension.ADAPTABILITY: weights.get('adaptability', 0.05),
+            }
+        else:
+            self.dimension_weights = {
+                PlanQualityDimension.FEASIBILITY: 0.25,
+                PlanQualityDimension.EFFICIENCY: 0.15,
+                PlanQualityDimension.ROBUSTNESS: 0.15,
+                PlanQualityDimension.COMPLETENESS: 0.15,
+                PlanQualityDimension.CONSISTENCY: 0.10,
+                PlanQualityDimension.OPTIMALITY: 0.10,
+                PlanQualityDimension.SIMPLICITY: 0.05,
+                PlanQualityDimension.ADAPTABILITY: 0.05,
+            }
     
     async def assess_plan(self, plan: ExecutionPlan) -> QualityAssessment:
         """Assess the quality of a plan."""
@@ -1699,8 +1739,8 @@ class AdvancedPlanningLoop:
     """
     
     def __init__(self, config: PlanningConfig = None):
-        self.config = config or PlanningConfig()
-        
+        self.config = config or PlanningConfig.from_yaml()
+
         # Initialize components
         self.goal_manager = HierarchicalGoalManager()
         self.replanning_engine = DynamicReplanningEngine(self.config)

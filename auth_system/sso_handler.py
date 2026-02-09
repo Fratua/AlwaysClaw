@@ -146,10 +146,33 @@ class SAMLHandler:
     
     def _load_sp_keys(self) -> None:
         """Load Service Provider signing/encryption keys."""
-        # In production, load from secure storage
-        # For now, keys would be generated or loaded from files
-        self.sp_private_key = None
-        self.sp_public_cert = None
+        key_dir = getattr(self.config, 'key_directory', None) or os.path.join(
+            os.path.expanduser('~'), '.openclaw', 'auth', 'saml'
+        )
+
+        private_key_path = os.path.join(key_dir, 'sp_private.pem')
+        public_cert_path = os.path.join(key_dir, 'sp_public.crt')
+
+        try:
+            if os.path.exists(private_key_path):
+                with open(private_key_path, 'rb') as f:
+                    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+                    self.sp_private_key = load_pem_private_key(f.read(), password=None)
+            else:
+                self.sp_private_key = None
+                logger.info(f"SP private key not found at {private_key_path}")
+
+            if os.path.exists(public_cert_path):
+                with open(public_cert_path, 'rb') as f:
+                    from cryptography.x509 import load_pem_x509_certificate
+                    self.sp_public_cert = load_pem_x509_certificate(f.read())
+            else:
+                self.sp_public_cert = None
+                logger.info(f"SP public cert not found at {public_cert_path}")
+        except (OSError, ValueError, ImportError) as e:
+            logger.error(f"Failed to load SP keys: {e}")
+            self.sp_private_key = None
+            self.sp_public_cert = None
     
     def generate_authn_request(
         self,

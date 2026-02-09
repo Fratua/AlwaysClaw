@@ -1,7 +1,12 @@
 """
 Python Bridge - JSON-RPC server for Node.js <-> Python IPC.
-Reads newline-delimited JSON from stdin, writes JSON responses to stdout.
+
+This module is the Node.js-to-Python interface layer. It reads newline-delimited
+JSON from stdin, dispatches to Python handlers, and writes JSON responses to stdout.
 All logging goes to stderr only.
+
+For the Python-native service API (used by direct Python callers), see
+service_integrations.py instead.
 """
 
 import sys

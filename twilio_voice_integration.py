@@ -219,9 +219,17 @@ class TwilioMediaStream:
         try:
             # Resample to 8kHz if needed
             if len(audio_data) > 0:
-                # Simple downsampling (assuming 48kHz input)
-                # In production, use proper resampling
-                audio_8k = audio_data[::6]  # 48kHz -> 8kHz
+                # Proper resampling using scipy
+                try:
+                    from scipy.signal import resample
+                    target_len = int(len(audio_data) * 8000 / 48000)
+                    audio_8k = resample(audio_data, target_len)
+                except ImportError:
+                    # Fallback: linear interpolation
+                    ratio = 8000 / 48000
+                    target_len = int(len(audio_data) * ratio)
+                    indices = np.linspace(0, len(audio_data) - 1, target_len)
+                    audio_8k = np.interp(indices, np.arange(len(audio_data)), audio_data)
                 
                 self._outgoing_queue.put_nowait(audio_8k)
         except asyncio.QueueFull:

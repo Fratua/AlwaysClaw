@@ -29,6 +29,7 @@ class OpenAIClient:
 
         self.api_key = api_key or os.environ.get('OPENAI_API_KEY', '')
         self.model = model or os.environ.get('OPENAI_MODEL', 'gpt-5.2')
+        self.thinking_mode = os.environ.get('OPENAI_THINKING_MODE', 'high')
         self._disabled = False
 
         if not self.api_key:
@@ -52,6 +53,7 @@ class OpenAIClient:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        reasoning: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Send a completion request to GPT-5.2.
@@ -61,6 +63,8 @@ class OpenAIClient:
             system: System prompt (prepended as a system message)
             max_tokens: Maximum tokens in response
             temperature: Sampling temperature (0-2)
+            reasoning: Optional reasoning/thinking config, e.g. {"effort": "high"}.
+                       Defaults to {"effort": self.thinking_mode} when not provided.
 
         Returns:
             {"content": str, "model": str, "usage": {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}}
@@ -76,11 +80,17 @@ class OpenAIClient:
                 full_messages.append({"role": "system", "content": system})
             full_messages.extend(messages)
 
+            # Build reasoning config: explicit param > instance default
+            reasoning_config = reasoning if reasoning is not None else {
+                "effort": self.thinking_mode
+            }
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=full_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                reasoning=reasoning_config,
             )
 
             choice = response.choices[0]

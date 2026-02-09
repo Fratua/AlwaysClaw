@@ -5,7 +5,9 @@ Manages rollback operations to restore system to previous state.
 
 import shutil
 import logging
+import os
 import zipfile
+import yaml
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -537,32 +539,52 @@ class AutoRollbackTriggers:
     """
     Defines conditions that trigger automatic rollback.
     """
-    
-    TRIGGERS = {
-        "health_check_failure": {
-            "description": "System health checks failing after update",
-            "threshold": 3,  # Consecutive failures
-            "window_seconds": 300,  # 5 minutes
-        },
-        "error_rate_spike": {
-            "description": "Error rate exceeded threshold",
-            "threshold": 0.1,  # 10% error rate
-            "window_seconds": 120,  # 2 minutes
-        },
-        "performance_degradation": {
-            "description": "Performance degraded beyond acceptable limit",
-            "threshold": 1.5,  # 50% slower
-            "window_seconds": 300,  # 5 minutes
-        },
-        "service_unavailable": {
-            "description": "Critical service unavailable",
-            "threshold": 1,  # Any failure
-            "window_seconds": 30,
-        },
-    }
-    
+
+    TRIGGERS = None  # Loaded from rollback-config.yaml in __init__
+
+    @staticmethod
+    def _load_default_triggers() -> Dict:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'rollback-config.yaml')
+        try:
+            with open(config_path, 'r') as f:
+                cfg = yaml.safe_load(f) or {}
+            triggers_cfg = cfg.get('rollback', {}).get('auto_rollback', {}).get('triggers', {})
+            if triggers_cfg:
+                return {
+                    "health_check_failure": {
+                        "description": "System health checks failing after update",
+                        "threshold": triggers_cfg.get('health_check', {}).get('consecutive_failures', 3),
+                        "window_seconds": triggers_cfg.get('health_check', {}).get('check_interval_seconds', 10) * triggers_cfg.get('health_check', {}).get('consecutive_failures', 3),
+                    },
+                    "error_rate_spike": {
+                        "description": "Error rate exceeded threshold",
+                        "threshold": triggers_cfg.get('error_rate', {}).get('threshold', 0.1),
+                        "window_seconds": triggers_cfg.get('error_rate', {}).get('window_seconds', 120),
+                    },
+                    "performance_degradation": {
+                        "description": "Performance degraded beyond acceptable limit",
+                        "threshold": 1.5,
+                        "window_seconds": triggers_cfg.get('latency', {}).get('window_seconds', 300),
+                    },
+                    "service_unavailable": {
+                        "description": "Critical service unavailable",
+                        "threshold": 1,
+                        "window_seconds": 30,
+                    },
+                }
+        except (OSError, yaml.YAMLError):
+            pass
+        return {
+            "health_check_failure": {"description": "System health checks failing after update", "threshold": 3, "window_seconds": 300},
+            "error_rate_spike": {"description": "Error rate exceeded threshold", "threshold": 0.1, "window_seconds": 120},
+            "performance_degradation": {"description": "Performance degraded beyond acceptable limit", "threshold": 1.5, "window_seconds": 300},
+            "service_unavailable": {"description": "Critical service unavailable", "threshold": 1, "window_seconds": 30},
+        }
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        if AutoRollbackTriggers.TRIGGERS is None:
+            AutoRollbackTriggers.TRIGGERS = self._load_default_triggers()
         self._health_history: List[Dict[str, Any]] = []
         self._error_history: List[Dict[str, Any]] = []
         

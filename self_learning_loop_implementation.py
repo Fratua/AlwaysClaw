@@ -712,10 +712,30 @@ class TransferLearningSystem:
         target: str
     ) -> Dict[str, Any]:
         """Infer adaptation rules between domains."""
-        # Placeholder for rule inference
+        # Build concept mapping by finding shared terminology
+        source_terms = set(source.lower().split())
+        target_terms = set(target.lower().split())
+        shared = source_terms & target_terms
+
+        concept_mapping = {}
+        for term in shared:
+            concept_mapping[term] = term  # Direct mapping for shared concepts
+
+        # Build procedure adaptations
+        procedure_adaptations = []
+        if source != target:
+            procedure_adaptations.append({
+                'type': 'domain_transfer',
+                'source_domain': source,
+                'target_domain': target,
+                'shared_concepts': list(shared),
+                'adaptation_needed': len(shared) < min(len(source_terms), len(target_terms)) * 0.3
+            })
+
         return {
-            'concept_mapping': {},
-            'procedure_adaptations': []
+            'concept_mapping': concept_mapping,
+            'procedure_adaptations': procedure_adaptations,
+            'transfer_feasibility': len(shared) / max(len(source_terms | target_terms), 1)
         }
 
 
@@ -1021,10 +1041,19 @@ class SelfLearningLoop:
                 await asyncio.sleep(60)
     
     async def _check_idle_state(self) -> bool:
-        """Check if system is in idle state."""
-        # Placeholder - in production, check actual system metrics
-        # For now, always return False to prevent automatic consolidation
-        return False
+        """Check if system is in idle state using system metrics."""
+        try:
+            import psutil
+            cpu = psutil.cpu_percent(interval=0.5)
+            # Consider idle if CPU usage is below 15%
+            if cpu > 15:
+                return False
+            # Check if any active tasks are running
+            if hasattr(self, 'active_tasks') and self.active_tasks:
+                return False
+            return True
+        except ImportError:
+            return False
     
     async def _review_scheduling_loop(self):
         """Background loop for scheduling reviews."""

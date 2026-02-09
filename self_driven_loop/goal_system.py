@@ -286,19 +286,35 @@ class InterestModel:
         return gaps
     
     def _estimate_complexity(self, topic: str) -> float:
-        """Estimate complexity of a topic."""
-        # Placeholder - would use actual complexity estimation
-        return 0.5
-    
+        """Estimate complexity of a topic based on heuristics."""
+        complexity = 0.3  # Base complexity
+        # Longer topics tend to be more complex
+        complexity += min(0.3, len(topic.split()) * 0.03)
+        # Technical keywords increase complexity
+        technical_keywords = ['algorithm', 'distributed', 'concurrent', 'optimization',
+                             'architecture', 'security', 'cryptograph', 'machine learning',
+                             'neural', 'quantum', 'compiler', 'kernel']
+        matches = sum(1 for kw in technical_keywords if kw in topic.lower())
+        complexity += min(0.4, matches * 0.1)
+        return min(1.0, complexity)
+
     def _estimate_learning_time(self, topic: str) -> float:
-        """Estimate learning time for a topic."""
-        # Placeholder - would use actual time estimation
-        return 5.0
-    
+        """Estimate learning time for a topic in hours."""
+        complexity = self._estimate_complexity(topic)
+        # Scale: 1 hour for simple topics, 20 hours for very complex
+        return 1.0 + complexity * 19.0
+
     def _identify_resources(self, topic: str) -> List[str]:
-        """Identify resources needed for learning."""
-        # Placeholder - would use actual resource identification
-        return ["documentation", "examples", "practice_tasks"]
+        """Identify resources needed for learning based on topic analysis."""
+        resources = ["documentation"]
+        if any(kw in topic.lower() for kw in ['code', 'program', 'implement', 'build']):
+            resources.extend(["code_examples", "ide_environment"])
+        if any(kw in topic.lower() for kw in ['data', 'analysis', 'model', 'train']):
+            resources.extend(["datasets", "compute_resources"])
+        if any(kw in topic.lower() for kw in ['design', 'architect', 'system']):
+            resources.extend(["diagrams", "reference_implementations"])
+        resources.append("practice_tasks")
+        return resources
     
     def apply_decay(self) -> None:
         """Apply natural decay to interest levels over time."""

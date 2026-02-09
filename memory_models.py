@@ -9,7 +9,9 @@ from typing import List, Dict, Optional, Any, Set
 from enum import Enum, auto
 import json
 import hashlib
+import os
 import numpy as np
+import yaml
 from pathlib import Path
 
 
@@ -572,3 +574,76 @@ class MemoryConfig:
             'consolidation': self.consolidation.__dict__,
             'context_budget': self.context_budget.__dict__
         }
+
+    @classmethod
+    def from_yaml(cls, path: str = None) -> 'MemoryConfig':
+        """Load MemoryConfig from YAML file with fallback to defaults."""
+        if path is None:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'memory_config.yaml')
+        try:
+            with open(path, 'r') as f:
+                data = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError):
+            return cls()
+
+        embedding_data = data.get('embedding', {})
+        chunking_data = data.get('chunking', {})
+        search_data = data.get('search', {})
+        write_data = data.get('write', {})
+        consolidation_data = data.get('consolidation', {})
+        context_data = data.get('context_budget', {})
+
+        base_dir = data.get('base_dir', '~/.openclaw')
+        if base_dir.startswith('~'):
+            base_dir = str(Path.home() / base_dir[2:])
+
+        return cls(
+            base_dir=Path(base_dir),
+            llm_model=data.get('llm_model', 'gpt-5.2'),
+            embedding=EmbeddingConfig(
+                provider=embedding_data.get('provider', 'auto'),
+                model_name=embedding_data.get('model_name'),
+                dimension=embedding_data.get('dimension', 1536),
+                batch_size=embedding_data.get('batch_size', 50),
+                max_retries=embedding_data.get('max_retries', 3),
+                timeout_seconds=embedding_data.get('timeout_seconds', 60),
+            ),
+            chunking=ChunkingConfig(
+                chunk_tokens=chunking_data.get('chunk_tokens', 400),
+                overlap_tokens=chunking_data.get('overlap_tokens', 80),
+                respect_headers=chunking_data.get('respect_headers', True),
+                chars_per_token=chunking_data.get('chars_per_token', 4),
+            ),
+            search=SearchConfig(
+                default_results=search_data.get('default_results', 10),
+                min_score=search_data.get('min_score', 0.3),
+                rrf_k=search_data.get('rrf_k', 60),
+                recency_half_life_days=search_data.get('recency_half_life_days', 7),
+                semantic_weight=search_data.get('semantic_weight', 0.30),
+                lexical_weight=search_data.get('lexical_weight', 0.20),
+                temporal_weight=search_data.get('temporal_weight', 0.20),
+                importance_weight=search_data.get('importance_weight', 0.15),
+                access_weight=search_data.get('access_weight', 0.15),
+            ),
+            write=WriteConfig(
+                batch_size=write_data.get('batch_size', 10),
+                batch_interval_seconds=write_data.get('batch_interval_seconds', 30),
+                immediate_importance_threshold=write_data.get('immediate_importance_threshold', 0.8),
+                enable_caching=write_data.get('enable_caching', True),
+                cache_size=write_data.get('cache_size', 10000),
+            ),
+            consolidation=ConsolidationConfig(
+                enabled=consolidation_data.get('enabled', True),
+                schedule=consolidation_data.get('schedule', '0 2 * * *'),
+                age_threshold_days=consolidation_data.get('age_threshold_days', 7),
+                importance_threshold=consolidation_data.get('importance_threshold', 0.6),
+            ),
+            context_budget=ContextBudget(
+                system_tokens=context_data.get('system_tokens', 10000),
+                skills_tokens=context_data.get('skills_tokens', 15000),
+                memory_tokens=context_data.get('memory_tokens', 50000),
+                history_tokens=context_data.get('history_tokens', 75000),
+                request_tokens=context_data.get('request_tokens', 30000),
+                response_reserve=context_data.get('response_reserve', 20000),
+            ),
+        )

@@ -279,9 +279,17 @@ class HistoricalPatternLearner:
             confidence = support / len(event_sequences)
             
             if confidence >= self.min_confidence:
-                # Calculate average time to anomaly
-                # This would need timing information in practice
-                avg_ttf = 300  # Placeholder: 5 minutes
+                # Calculate average time between sequence events
+                if event_sequences and hasattr(event_sequences[0][0], 'timestamp') if event_sequences[0] else False:
+                    time_diffs = []
+                    for seq in event_sequences:
+                        for i in range(1, len(seq)):
+                            if hasattr(seq[i], 'timestamp') and hasattr(seq[i - 1], 'timestamp'):
+                                diff = (seq[i].timestamp - seq[i - 1].timestamp).total_seconds()
+                                time_diffs.append(diff)
+                    avg_ttf = sum(time_diffs) / len(time_diffs) if time_diffs else 300.0
+                else:
+                    avg_ttf = len(sequence) * 60.0  # Estimate: 1 minute per event in sequence
                 
                 patterns.append(SequentialPattern(
                     sequence=list(sequence),

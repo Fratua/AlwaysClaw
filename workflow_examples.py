@@ -11,7 +11,7 @@ from typing import List, Dict, Any
 
 from email_workflow_engine import (
     EmailRule, Condition, ConditionGroup, ConditionOperator, LogicalOperator,
-    Action, ActionType, EmailMessage, EmailTemplate, AutoResponder, ResponseType,
+    Action, ActionType, EmailMessage, EmailAnalysis, EmailTemplate, AutoResponder, ResponseType,
     ScheduledEmail, CronTrigger, DateTrigger
 )
 
@@ -997,7 +997,21 @@ async def main():
         to_addresses=["me@company.com"],
         body_text="Please review and approve the attached Q1 budget document ASAP.",
         received_date=datetime.utcnow(),
-        ai_analysis=EmailMessage.__dataclass_fields__  # Placeholder
+        ai_analysis=EmailAnalysis(
+            sentiment=0.3,
+            urgency=0.9,
+            intent="approval_request",
+            category="budget",
+            entities=[{'type': 'document', 'name': 'Q1 budget'}, {'type': 'person', 'name': 'CEO'}],
+            summary="CEO requests urgent approval for Q1 budget document.",
+            action_items=["Review Q1 budget", "Approve or reject"],
+            reading_time_minutes=0.5,
+            spam_probability=0.0,
+            phishing_risk=0.05,
+            confidence=0.92,
+            tone="urgent",
+            suggested_actions=["review_and_respond", "flag_important"]
+        )
     )
     
     print(f"\n📨 Sample Email:")

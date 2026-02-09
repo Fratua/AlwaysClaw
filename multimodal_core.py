@@ -8,6 +8,7 @@ This module implements the core multi-modal fusion and context sharing systems.
 import asyncio
 import json
 import hashlib
+import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any, Tuple, Union
@@ -659,22 +660,48 @@ class VoiceRenderer:
         if voice.audio_data:
             await self._play_audio(voice.audio_data)
         else:
-            # Would call TTS engine here
             await self._synthesize_and_play(voice)
     
     async def _play_audio(self, audio_data: bytes) -> None:
-        """Play audio data"""
+        """Play audio data via Windows PowerShell SoundPlayer"""
         self.is_playing = True
-        # Implementation would use Windows audio APIs
-        logger.info("Playing audio...")
-        await asyncio.sleep(2.0)  # Placeholder
-        self.is_playing = False
+        try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+                f.write(audio_data)
+                temp_path = f.name
+            proc = await asyncio.create_subprocess_exec(
+                'powershell', '-Command',
+                f"(New-Object Media.SoundPlayer '{temp_path}').PlaySync()",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await proc.wait()
+            os.unlink(temp_path)
+        except (OSError, FileNotFoundError) as e:
+            logger.error(f"Audio playback failed: {e}")
+        finally:
+            self.is_playing = False
     
     async def _synthesize_and_play(self, voice: VoiceResponse) -> None:
-        """Synthesize and play voice"""
-        # Would integrate with ElevenLabs/Azure TTS
-        logger.info("Synthesizing speech...")
-        await asyncio.sleep(1.0)  # Placeholder
+        """Synthesize and play voice via pyttsx3 or PowerShell SAPI"""
+        try:
+            import pyttsx3
+            engine = pyttsx3.init()
+            engine.say(voice.text)
+            engine.runAndWait()
+        except (ImportError, RuntimeError):
+            try:
+                text = voice.text.replace("'", "''")
+                proc = await asyncio.create_subprocess_exec(
+                    'powershell', '-Command',
+                    f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{text}')",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                await proc.wait()
+            except (OSError, FileNotFoundError) as e:
+                logger.error(f"Speech synthesis failed: {e}")
 
 
 class VisualRenderer:

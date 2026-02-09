@@ -1324,8 +1324,16 @@ class CrossReferenceResolver:
         if not recent:
             return None
         
-        # Simple heuristic: return most recently mentioned entity
-        # In production, use more sophisticated agreement checking
+        # Use recency + type agreement heuristic
+        for entity in recent:
+            if pronoun.lower() in ('it', 'this', 'that') and getattr(entity, 'type', '') in ('object', 'concept', 'thing', ''):
+                return entity
+            elif pronoun.lower() in ('he', 'him', 'his') and getattr(entity, 'type', '') in ('person', 'male', ''):
+                return entity
+            elif pronoun.lower() in ('she', 'her', 'hers') and getattr(entity, 'type', '') in ('person', 'female', ''):
+                return entity
+            elif pronoun.lower() in ('they', 'them', 'their'):
+                return entity
         return recent[0] if recent else None
     
     def _resolve_definite(self,
@@ -1393,9 +1401,18 @@ class ContextReconstructionEngine:
         return " ".join(result)
     
     async def _expand_details(self, compressed: CompressedContext) -> str:
-        """Expand with additional details."""
-        # In production, use LLM to expand
-        return compressed.text
+        """Expand compressed context with additional details."""
+        text = compressed.text
+        sections = text.split('\n\n')
+        expanded = []
+        for section in sections:
+            expanded.append(section)
+            if hasattr(compressed, 'metadata') and compressed.metadata:
+                relevant_meta = [v for k, v in compressed.metadata.items()
+                                 if any(word in section.lower() for word in k.lower().split())]
+                if relevant_meta:
+                    expanded.append(f"(Context: {'; '.join(str(m) for m in relevant_meta[:2])})")
+        return '\n\n'.join(expanded)
 
 
 # =============================================================================

@@ -1484,28 +1484,55 @@ class ConversationalAISystem:
     def __init__(self, config: Dict = None):
         self.config = config or {}
         
-        # Initialize components
-        self.stt = None  # Placeholder for STT
-        self.tts = None  # Placeholder for TTS
-        self.llm = None  # Placeholder for LLM
-        
+        # Initialize STT - use speech_recognition library
+        try:
+            import speech_recognition as sr
+            self.stt = sr.Recognizer()
+        except ImportError:
+            logger.warning("speech_recognition not installed, STT disabled")
+            self.stt = None
+
+        # Initialize TTS - use pyttsx3
+        try:
+            import pyttsx3
+            self.tts = pyttsx3.init()
+        except (ImportError, RuntimeError):
+            logger.warning("pyttsx3 not available, TTS disabled")
+            self.tts = None
+
+        # Initialize LLM - use OpenAI client
+        try:
+            from openai_client import OpenAIClient
+            self.llm = OpenAIClient()
+        except (ImportError, RuntimeError):
+            logger.warning("OpenAI client not available, LLM disabled")
+            self.llm = None
+
         # Dialogue management
         self.state_machine = DialogueStateMachine()
         self.dialogue_manager = DialogueManager(self.state_machine)
         self.turn_manager = TurnTakingManager()
-        
+
         # Context and intent
         self.context_manager = ContextManager()
         self.intent_engine = IntentRecognitionEngine()
-        self.reference_resolver = None  # Placeholder
-        
+        try:
+            from context_engineering_implementation_guide import ReferenceResolver
+            self.reference_resolver = ReferenceResolver()
+        except ImportError:
+            logger.warning("ReferenceResolver not available")
+            self.reference_resolver = None
+
         # Response and repair
         self.timing_manager = ResponseTimingManager()
         self.repair_manager = ConversationRepairManager(dialogue_manager=self.dialogue_manager)
-        
+
         # Barge-in
         self.barge_in_detector = BargeInDetector()
-        self.barge_in_handler = None  # Placeholder - needs TTS
+        self.barge_in_handler = BargeInHandler(
+            tts_controller=self.tts,
+            dialogue_manager=self.dialogue_manager
+        ) if self.tts else None
         
         # State
         self.current_state: Optional[DialogueState] = None

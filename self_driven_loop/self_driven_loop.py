@@ -224,19 +224,34 @@ class SelfDrivenLoop:
     
     def _build_agent_context(self) -> AgentContext:
         """Build context for motivation calculation."""
-        
+
         # Calculate metrics from state
         total_actions = self.state.loop_count
-        self_initiated = sum(1 for _ in range(total_actions))  # Placeholder
-        
+        self_initiated = len([g for g in self.state.completed_goals if getattr(g, 'source', '') == 'self'])
+
         return AgentContext(
             self_initiated_actions=self_initiated,
             total_actions=total_actions,
             successful_actions=len(self.state.completed_goals),
             total_attempts=len(self.state.active_goals) + len(self.state.completed_goals),
-            user_feedback_score=0.7,  # Placeholder
-            environment_novelty=0.5   # Placeholder
+            user_feedback_score=self._calculate_user_feedback_score(),
+            environment_novelty=self._calculate_environment_novelty()
         )
+
+    def _calculate_user_feedback_score(self) -> float:
+        """Calculate user feedback score from historical interactions."""
+        if not hasattr(self.state, 'feedback_history') or not self.state.feedback_history:
+            return 0.5  # Neutral default when no feedback data
+        recent = self.state.feedback_history[-20:]
+        return sum(f.score for f in recent) / len(recent) if recent else 0.5
+
+    def _calculate_environment_novelty(self) -> float:
+        """Calculate environment novelty based on goal diversity."""
+        if not self.state.active_goals:
+            return 0.5
+        # Novelty = ratio of unique goal types to total goals
+        goal_types = set(getattr(g, 'category', 'unknown') for g in self.state.active_goals)
+        return min(1.0, len(goal_types) / max(len(self.state.active_goals), 1))
     
     async def _check_motivation_health(self) -> None:
         """Check motivation health and trigger renewal if needed."""
@@ -308,11 +323,11 @@ class SelfDrivenLoop:
         
         # Build trigger context
         context = TriggerContext(
-            user_inactive_duration=1800,  # Placeholder
+            user_inactive_duration=self._get_user_inactive_duration(),
             pending_tasks_count=len(self.state.active_goals),
             motivation=self.state.current_motivation.__dict__,
-            workload=0.5,  # Placeholder
-            capacity_available=0.5  # Placeholder
+            workload=len(self.state.active_goals) / max(self.config.max_concurrent_goals, 1),
+            capacity_available=1.0 - (len(self.state.active_goals) / max(self.config.max_concurrent_goals, 1))
         )
         
         # Evaluate triggers
@@ -323,7 +338,13 @@ class SelfDrivenLoop:
             
             for action in triggered:
                 logger.info(f"  - {action.pattern.name}")
-    
+
+    def _get_user_inactive_duration(self) -> float:
+        """Get seconds since last user interaction."""
+        if hasattr(self.state, 'last_user_interaction') and self.state.last_user_interaction:
+            return (datetime.now() - self.state.last_user_interaction).total_seconds()
+        return 0.0
+
     async def _prioritize_and_schedule(self) -> None:
         """Prioritize and schedule active goals."""
         
