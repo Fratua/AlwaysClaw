@@ -53,32 +53,32 @@ export class BrowserPool extends EventEmitter {
     this.browsers.push(browser);
     this.contexts.set(browser, []);
 
-    if (this.config.stealth) {
-      await this.applyStealthPatches(browser);
-    }
+    // Stealth patches are applied per-context in createPooledPage
 
     this.emit('browserCreated', { browserId: browser.toString() });
     return browser;
   }
 
-  private async applyStealthPatches(browser: Browser): Promise<void> {
-    const context = await browser.newContext({
+  private getStealthContextOptions(): object {
+    return {
       userAgent: this.config.userAgent || this.getRandomUserAgent(),
       viewport: { width: 1920, height: 1080 },
       deviceScaleFactor: 1,
       locale: 'en-US',
       timezoneId: 'America/New_York',
       permissions: ['notifications']
-    });
+    };
+  }
 
+  private async applyStealthInitScripts(context: BrowserContext): Promise<void> {
     await context.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
       Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-      
+
       const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters: any) => 
-        parameters.name === 'notifications' 
+      window.navigator.permissions.query = (parameters: any) =>
+        parameters.name === 'notifications'
           ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
           : originalQuery(parameters);
     });
@@ -110,7 +110,11 @@ export class BrowserPool extends EventEmitter {
   }
 
   private async createPooledPage(browser: Browser): Promise<PooledPage> {
-    const context = await browser.newContext();
+    const contextOptions = this.config.stealth ? this.getStealthContextOptions() : {};
+    const context = await browser.newContext(contextOptions);
+    if (this.config.stealth) {
+      await this.applyStealthInitScripts(context);
+    }
     const page = await context.newPage();
     
     const pooledPage: PooledPage = {

@@ -217,7 +217,7 @@ class SelfUpdatingLoop:
     def detector(self):
         """Lazy initialization of update detector"""
         if self._detector is None:
-            from detection.update_detector import UpdateDetector
+            from .detection.update_detector import UpdateDetector
             self._detector = UpdateDetector(self.config)
         return self._detector
     
@@ -225,7 +225,7 @@ class SelfUpdatingLoop:
     def analyzer(self):
         """Lazy initialization of change analyzer"""
         if self._analyzer is None:
-            from analysis.change_analyzer import ChangeAnalyzer
+            from .analysis.change_analyzer import ChangeAnalyzer
             self._analyzer = ChangeAnalyzer(self.config)
         return self._analyzer
     
@@ -233,7 +233,7 @@ class SelfUpdatingLoop:
     def safety_engine(self):
         """Lazy initialization of safety engine"""
         if self._safety_engine is None:
-            from safety.safety_engine import SafetyEngine
+            from .safety.safety_engine import SafetyEngine
             self._safety_engine = SafetyEngine(self.config)
         return self._safety_engine
     
@@ -241,7 +241,7 @@ class SelfUpdatingLoop:
     def version_manager(self):
         """Lazy initialization of version manager"""
         if self._version_manager is None:
-            from version.version_manager import VersionManager
+            from .version.version_manager import VersionManager
             self._version_manager = VersionManager(self.config)
         return self._version_manager
     
@@ -249,7 +249,7 @@ class SelfUpdatingLoop:
     def rollback_manager(self):
         """Lazy initialization of rollback manager"""
         if self._rollback_manager is None:
-            from rollback.rollback_manager import RollbackManager
+            from .rollback.rollback_manager import RollbackManager
             self._rollback_manager = RollbackManager(self.config)
         return self._rollback_manager
     
@@ -257,7 +257,7 @@ class SelfUpdatingLoop:
     def validator(self):
         """Lazy initialization of update validator"""
         if self._validator is None:
-            from validation.update_validator import UpdateValidator
+            from .validation.update_validator import UpdateValidator
             self._validator = UpdateValidator(self.config)
         return self._validator
     
@@ -265,7 +265,7 @@ class SelfUpdatingLoop:
     def config_migrator(self):
         """Lazy initialization of config migrator"""
         if self._config_migrator is None:
-            from config_migration.migration_manager import ConfigMigrationManager
+            from .config_migration.migration_manager import ConfigMigrationManager
             self._config_migrator = ConfigMigrationManager(self.config)
         return self._config_migrator
     
@@ -273,7 +273,7 @@ class SelfUpdatingLoop:
     def audit_logger(self):
         """Lazy initialization of audit logger"""
         if self._audit_logger is None:
-            from audit.logger import UpdateAuditLogger
+            from .audit.logger import UpdateAuditLogger
             self._audit_logger = UpdateAuditLogger(self.config)
         return self._audit_logger
     

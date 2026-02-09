@@ -8,6 +8,7 @@ export class RateLimiter extends EventEmitter {
   private config: RateLimitConfig;
   private requestHistory: RequestRecord[] = [];
   private activeRequests = 0;
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(config: Partial<RateLimitConfig> = {}) {
     super();
@@ -19,7 +20,7 @@ export class RateLimiter extends EventEmitter {
       concurrentRequests: 3,
       ...config
     };
-    setInterval(() => this.cleanOldRecords(), 60000);
+    this.cleanupInterval = setInterval(() => this.cleanOldRecords(), 60000);
   }
 
   async acquire(domain: string, weight: number = 1): Promise<void> {
@@ -70,7 +71,7 @@ export class RateLimiter extends EventEmitter {
 
       if (!shouldWait) break;
       this.emit('rateLimited', { domain, waitTime });
-      await this.delay(Math.min(waitTime, 5000));
+      await this.delay(Math.max(100, Math.min(waitTime, 5000)));
     }
   }
 
@@ -103,6 +104,13 @@ export class RateLimiter extends EventEmitter {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  shutdown(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
   }
 
   getStats(domain?: string) {

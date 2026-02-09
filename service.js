@@ -92,15 +92,18 @@ async function main() {
   }
 }
 
-// Handle uncaught errors
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught exception:', error);
-  process.exit(1);
-});
+// In worker processes, handle uncaught errors (master has its own handlers in daemon-master.js)
+const _isPrimary = cluster.isPrimary !== undefined ? cluster.isPrimary : cluster.isMaster;
+if (!_isPrimary) {
+  process.on('uncaughtException', (error) => {
+    logger.error('Worker uncaught exception:', error);
+    process.exit(1);
+  });
 
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled rejection at:', promise, 'reason:', reason);
-});
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Worker unhandled rejection at:', promise, 'reason:', reason);
+  });
+}
 
 // Start the service
 main().catch(error => {

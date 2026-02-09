@@ -135,24 +135,25 @@ class WorkerBase {
   }
 
   async handleTask(data) {
-    // Validate task data has required taskId
-    if (data === null || typeof data !== 'object' || !data.taskId) {
-      logger.warn(`[Worker ${this.workerId}] Malformed task message: missing data or taskId`);
+    // Validate task data has required taskId (accept both taskId and id)
+    if (data === null || typeof data !== 'object' || (!data.taskId && !data.id)) {
+      logger.warn(`[Worker ${this.workerId}] Malformed task message: missing data or taskId/id`);
       return;
     }
+    const taskId = data.taskId || data.id;
 
     this.state = 'busy';
     try {
       const result = await this.onTask(data);
       this.sendToMaster({
         type: 'task-complete',
-        data: { taskId: data.taskId, result }
+        data: { taskId, result }
       });
     } catch (error) {
       logger.error(`[Worker ${this.workerId}] Task error:`, error);
       this.sendToMaster({
         type: 'task-error',
-        data: { taskId: data.taskId, error: error.message, stack: error.stack }
+        data: { taskId, error: error.message, stack: error.stack }
       });
     } finally {
       this.state = 'ready';
@@ -207,12 +208,15 @@ class WorkerBase {
   }
 
   async withTimeout(promise, ms, message = 'Operation timed out') {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error(message)), ms)
-      )
-    ]);
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

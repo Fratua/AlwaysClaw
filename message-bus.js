@@ -179,14 +179,14 @@ class MessageBus extends EventEmitter {
     }
     if (!taskType || typeof taskType !== 'string') {
       logger.warn(`[MessageBus] Discarding task request with missing/invalid taskType (req: ${requestId})`);
-      this.sendErrorResponse(fromWorkerId, requestId, 'Missing taskType field');
+      this.sendErrorResponse(fromWorkerId, requestId, 'Missing taskType field', 'task-response');
       return;
     }
 
     // Enforce max pending requests
     if (this.pendingRequests.size >= this.maxPendingRequests) {
       logger.error(`[MessageBus] Max pending requests (${this.maxPendingRequests}) reached, rejecting task request ${requestId}`);
-      this.sendErrorResponse(fromWorkerId, requestId, 'Message bus overloaded');
+      this.sendErrorResponse(fromWorkerId, requestId, 'Message bus overloaded', 'task-response');
       return;
     }
 
@@ -197,7 +197,7 @@ class MessageBus extends EventEmitter {
 
     if (!taskWorker) {
       logger.error(`[MessageBus] No task worker available`);
-      this.sendErrorResponse(fromWorkerId, requestId, 'No task workers available');
+      this.sendErrorResponse(fromWorkerId, requestId, 'No task workers available', 'task-response');
       return;
     }
 
@@ -264,11 +264,14 @@ class MessageBus extends EventEmitter {
     if (pending) {
       logger.error(`[MessageBus] Request timeout: ${requestId}`);
       this.pendingRequests.delete(requestId);
-      
+
+      // Determine correct response type based on request origin
+      const responseType = pending.taskType ? 'task-response' : 'io-response';
       this.sendErrorResponse(
-        pending.fromWorkerId, 
-        requestId, 
-        'Request timeout'
+        pending.fromWorkerId,
+        requestId,
+        'Request timeout',
+        responseType
       );
     }
   }
@@ -276,11 +279,11 @@ class MessageBus extends EventEmitter {
   /**
    * Send error response to worker
    */
-  sendErrorResponse(workerId, requestId, error) {
+  sendErrorResponse(workerId, requestId, error, responseType = 'io-response') {
     const worker = this.findWorker(workerId);
     if (worker) {
       worker.send({
-        type: 'io-response',
+        type: responseType,
         data: {
           requestId,
           error,
@@ -297,7 +300,7 @@ class MessageBus extends EventEmitter {
     const cluster = require('cluster');
     
     for (const [id, worker] of Object.entries(cluster.workers)) {
-      if (worker.id !== excludeWorkerId && !worker.isDead()) {
+      if (worker.id != excludeWorkerId && !worker.isDead()) {
         worker.send({
           type: 'broadcast',
           data

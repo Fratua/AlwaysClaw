@@ -108,6 +108,11 @@ from .auth_orchestrator import (
     create_auth_orchestrator
 )
 
+from .session_manager import (
+    Session,
+    SessionManager,
+)
+
 __all__ = [
     # Cookie Management
     'CookieJarManager',
@@ -191,4 +196,8 @@ __all__ = [
     'AuthContext',
     'AuthenticationConfig',
     'create_auth_orchestrator',
+
+    # Session Management
+    'Session',
+    'SessionManager',
 ]

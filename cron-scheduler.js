@@ -132,15 +132,18 @@ class CronScheduler {
 
   // Cron task implementations
   async heartbeatTask() {
-    // Send system heartbeat
+    // System heartbeat - update local health state
+    // Note: In master process, process.send is not available.
+    // Health data is accessed via getJobStatus() and health-monitor instead.
+    this._lastHeartbeat = {
+      timestamp: Date.now(),
+      uptime: process.uptime(),
+      memory: process.memoryUsage()
+    };
     if (process.send) {
       process.send({
         type: 'cron-heartbeat',
-        data: { 
-          timestamp: Date.now(),
-          uptime: process.uptime(),
-          memory: process.memoryUsage()
-        }
+        data: this._lastHeartbeat
       });
     }
   }

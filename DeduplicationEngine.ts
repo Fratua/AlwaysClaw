@@ -8,6 +8,8 @@ export class DeduplicationEngine {
   private config: DedupConfig;
   private memoryStore: Map<string, ContentFingerprint> = new Map();
   private simhashStore: Map<string, Set<string>> = new Map();
+  private contentStore: Map<string, string> = new Map();
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(config: Partial<DedupConfig> = {}) {
     this.config = {
@@ -17,7 +19,9 @@ export class DeduplicationEngine {
       ttl: 86400000,
       ...config
     };
-    if (this.config.ttl) setInterval(() => this.cleanExpired(), this.config.ttl);
+    if (this.config.ttl) {
+      this.cleanupInterval = setInterval(() => this.cleanExpired(), this.config.ttl);
+    }
   }
 
   async isDuplicate(content: string, url: string): Promise<boolean> {
@@ -34,6 +38,7 @@ export class DeduplicationEngine {
   async add(content: string, url: string): Promise<void> {
     const fingerprint = this.createFingerprint(content, url);
     this.memoryStore.set(fingerprint.hash, fingerprint);
+    this.contentStore.set(fingerprint.hash, this.normalizeContent(content));
 
     if (fingerprint.simhash) {
       const bucket = this.getSimhashBucket(fingerprint.simhash);
@@ -154,14 +159,26 @@ export class DeduplicationEngine {
   }
 
   private extractFeaturesFromHash(hash: string): string[] {
-    return [];
+    const content = this.contentStore.get(hash);
+    if (!content) return [];
+    return this.extractFeatures(content);
   }
 
   private cleanExpired(): void {
     if (!this.config.ttl) return;
     const cutoff = Date.now() - this.config.ttl;
     for (const [hash, fingerprint] of this.memoryStore) {
-      if (fingerprint.timestamp < cutoff) this.memoryStore.delete(hash);
+      if (fingerprint.timestamp < cutoff) {
+        this.memoryStore.delete(hash);
+        this.contentStore.delete(hash);
+      }
+    }
+  }
+
+  shutdown(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
     }
   }
 
