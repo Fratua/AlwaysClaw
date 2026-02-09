@@ -24,6 +24,7 @@ import os
 import struct
 import json
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Callable, Dict, List, Optional, Any, Coroutine, Set
@@ -34,6 +35,13 @@ from collections import deque
 import psutil
 
 # Windows-specific imports
+win32api = None
+win32process = None
+win32con = None
+win32pipe = None
+win32file = None
+win32job = None
+
 if sys.platform == 'win32':
     try:
         import win32api
@@ -43,14 +51,20 @@ if sys.platform == 'win32':
         import win32file
         import win32job
     except ImportError:
-        pass
+        logging.getLogger(__name__).warning(
+            "win32 modules not available — Windows process management features disabled"
+        )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger('ProcessManager')
+
+
+def _require_win32():
+    """Raise if win32 modules are not available."""
+    if win32api is None:
+        raise RuntimeError(
+            "win32 modules required for Windows process management. "
+            "Install pywin32: pip install pywin32"
+        )
 
 
 # =============================================================================
@@ -294,9 +308,9 @@ class OneForAllSupervisor(Supervisor):
 # WORKER POOLS
 # =============================================================================
 
-class WorkerPool:
+class WorkerPool(ABC):
     """Base class for worker pools."""
-    
+
     def __init__(self, name: str):
         self.name = name
         self.metrics = {
@@ -304,18 +318,19 @@ class WorkerPool:
             'tasks_completed': 0,
             'tasks_failed': 0
         }
-        
+
     async def start(self):
         """Start the pool."""
         pass
-        
+
     async def stop(self):
         """Stop the pool."""
         pass
-        
+
+    @abstractmethod
     def submit(self, task: Callable, *args, **kwargs):
         """Submit a task to the pool."""
-        raise NotImplementedError
+        ...
 
 
 class PreforkWorkerPool(WorkerPool):
@@ -557,7 +572,7 @@ class ProcessSpawner:
         """Set Windows process priority."""
         if sys.platform != 'win32':
             return
-            
+        _require_win32()
         try:
             handle = win32api.GetCurrentProcess()
             priority_class = self.PRIORITY_CLASSES.get(priority, 32)
@@ -800,7 +815,7 @@ class JobObjectManager:
     def __init__(self, job_name: str = None):
         if sys.platform != 'win32':
             raise RuntimeError("Job Objects are Windows-only")
-            
+        _require_win32()
         self.job_name = job_name or f"OpenClawJob_{os.getpid()}"
         self.job_handle = None
         self._create_job()
@@ -936,7 +951,7 @@ class SystemSupervisor:
         
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
-        if sys.platform == 'win32':
+        if sys.platform == 'win32' and win32api is not None:
             try:
                 def console_handler(ctrl_type):
                     if ctrl_type in (0, 2, 6):

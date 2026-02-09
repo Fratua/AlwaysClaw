@@ -9,11 +9,17 @@ const logger = require('./logger');
 class ControlServer {
   constructor(daemonMaster, options = {}) {
     this.daemon = daemonMaster;
+    const rawPort = parseInt(options.port || process.env.CONTROL_PORT || '8080', 10);
+    if (!Number.isFinite(rawPort) || rawPort < 1 || rawPort > 65535) {
+      throw new RangeError(`Invalid control server port: ${options.port || process.env.CONTROL_PORT}. Must be 1-65535.`);
+    }
+    const port = rawPort;
     this.options = {
-      port: options.port || process.env.CONTROL_PORT || 8080,
+      port,
       host: options.host || process.env.CONTROL_HOST || '127.0.0.1',
       ...options
     };
+    this.options.port = port; // ensure spread didn't override validated port
     this.server = null;
     this.metrics = {
       requests: 0,
@@ -240,43 +246,69 @@ class ControlServer {
     this.sendJson(res, 200, status);
   }
 
-  handleRestartWorker(req, res) {
+  /**
+   * Read and parse a JSON body from an HTTP request with size limits and error handling.
+   * Calls callback(data) on success; sends appropriate error responses otherwise.
+   */
+  readJsonBody(req, res, maxSize, callback) {
+    if (typeof maxSize === 'function') {
+      callback = maxSize;
+      maxSize = 1024 * 1024; // default 1MB
+    }
     let body = '';
     let bodySize = 0;
-    const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+    let responded = false;
+
+    const sendOnce = (code, msg) => {
+      if (!responded) {
+        responded = true;
+        this.sendError(res, code, msg);
+      }
+    };
 
     req.on('data', chunk => {
       bodySize += chunk.length;
-      if (bodySize > MAX_BODY_SIZE) {
-        this.sendError(res, 413, 'Request body too large');
+      if (bodySize > maxSize) {
+        sendOnce(413, 'Request body too large');
         req.destroy();
         return;
       }
       body += chunk;
     });
     req.on('end', () => {
+      if (responded) return;
+      if (!body) {
+        sendOnce(400, 'Empty request body');
+        return;
+      }
       try {
         const data = JSON.parse(body);
-        const { workerId, workerType, index } = data;
-        
-        if (workerId) {
-          this.daemon?.restartWorker(workerId);
-          this.sendJson(res, 200, { success: true, message: `Restart signal sent to worker ${workerId}` });
-        } else if (workerType === 'agent-loop' && typeof index === 'number') {
-          // Find worker by type and index
-          for (const [id, info] of this.daemon?.agentLoopWorkers || []) {
-            if (info.index === index) {
-              this.daemon?.restartWorker(id);
-              this.sendJson(res, 200, { success: true, message: `Restarted agent-loop worker ${index}` });
-              return;
-            }
-          }
-          this.sendError(res, 404, 'Worker not found');
-        } else {
-          this.sendError(res, 400, 'Missing workerId or workerType+index');
-        }
+        callback(data);
       } catch (error) {
-        this.sendError(res, 400, 'Invalid JSON body');
+        sendOnce(400, 'Invalid JSON body');
+      }
+    });
+  }
+
+  handleRestartWorker(req, res) {
+    this.readJsonBody(req, res, (data) => {
+      const { workerId, workerType, index } = data;
+
+      if (workerId) {
+        this.daemon?.restartWorker(workerId);
+        this.sendJson(res, 200, { success: true, message: `Restart signal sent to worker ${workerId}` });
+      } else if (workerType === 'agent-loop' && typeof index === 'number') {
+        // Find worker by type and index
+        for (const [id, info] of this.daemon?.agentLoopWorkers || []) {
+          if (info.index === index) {
+            this.daemon?.restartWorker(id);
+            this.sendJson(res, 200, { success: true, message: `Restarted agent-loop worker ${index}` });
+            return;
+          }
+        }
+        this.sendError(res, 404, 'Worker not found');
+      } else {
+        this.sendError(res, 400, 'Missing workerId or workerType+index');
       }
     });
   }
@@ -284,55 +316,37 @@ class ControlServer {
   handleRestartAll(req, res) {
     // Gracefully restart all workers
     logger.info('[ControlServer] Restarting all workers...');
-    
+
     // Restart agent loop workers
     for (const [id, info] of this.daemon?.agentLoopWorkers || []) {
       this.daemon?.restartWorker(id);
     }
-    
+
     // Restart IO workers
     for (const [service, info] of this.daemon?.ioWorkers || []) {
       if (info.worker) {
         this.daemon?.restartWorker(info.worker.id);
       }
     }
-    
+
     // Restart task workers
     for (const [id, info] of this.daemon?.taskWorkers || []) {
       this.daemon?.restartWorker(id);
     }
-    
+
     this.sendJson(res, 200, { success: true, message: 'Restart signals sent to all workers' });
   }
 
   handleShutdown(req, res) {
-    let body = '';
-    let bodySize = 0;
-    const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+    this.readJsonBody(req, res, (data) => {
+      const { reason = 'api-request' } = data;
 
-    req.on('data', chunk => {
-      bodySize += chunk.length;
-      if (bodySize > MAX_BODY_SIZE) {
-        this.sendError(res, 413, 'Request body too large');
-        req.destroy();
-        return;
-      }
-      body += chunk;
-    });
-    req.on('end', () => {
-      try {
-        const data = JSON.parse(body || '{}');
-        const { reason = 'api-request' } = data;
-        
-        this.sendJson(res, 200, { success: true, message: 'Shutdown initiated' });
-        
-        // Initiate shutdown after sending response
-        setTimeout(() => {
-          this.daemon?.shutdown(reason);
-        }, 100);
-      } catch (error) {
-        this.sendError(res, 400, 'Invalid JSON body');
-      }
+      this.sendJson(res, 200, { success: true, message: 'Shutdown initiated' });
+
+      // Initiate shutdown after sending response
+      setTimeout(() => {
+        this.daemon?.shutdown(reason);
+      }, 100);
     });
   }
 

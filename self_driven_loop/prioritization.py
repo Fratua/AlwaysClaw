@@ -288,27 +288,36 @@ class GoalPrioritizer:
     
     def _score_strategic_alignment(self, goal: Any,
                                   context: Dict[str, Any]) -> float:
-        """Score based on alignment with strategic objectives."""
-        
+        """Score based on alignment with strategic objectives using TF-IDF cosine similarity."""
+
         strategic_objectives = context.get('strategic_objectives', [])
-        
+
         if not strategic_objectives:
             return 0.5
-        
+
         goal_description = getattr(goal, 'description', '')
-        
-        # Simple keyword matching (placeholder for more sophisticated analysis)
-        alignment_scores = []
-        for objective in strategic_objectives:
-            # Check for keyword overlap
-            obj_words = set(objective.lower().split())
+        if not goal_description:
+            return 0.5
+
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
+            texts = [goal_description] + list(strategic_objectives)
+            vectorizer = TfidfVectorizer()
+            tfidf = vectorizer.fit_transform(texts)
+            similarities = cosine_similarity(tfidf[0:1], tfidf[1:])[0]
+            return float(max(similarities)) if len(similarities) > 0 else 0.5
+        except ImportError:
+            # Jaccard fallback
+            alignment_scores = []
             goal_words = set(goal_description.lower().split())
-            
-            if obj_words and goal_words:
-                overlap = len(obj_words & goal_words)
-                alignment_scores.append(overlap / len(obj_words))
-        
-        return max(alignment_scores) if alignment_scores else 0.5
+            for objective in strategic_objectives:
+                obj_words = set(objective.lower().split())
+                if obj_words and goal_words:
+                    alignment_scores.append(
+                        len(obj_words & goal_words) / len(obj_words | goal_words)
+                    )
+            return max(alignment_scores) if alignment_scores else 0.5
     
     def _score_resource_efficiency(self, goal: Any) -> float:
         """Score based on resource efficiency."""

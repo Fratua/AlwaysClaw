@@ -9,6 +9,7 @@ Author: AI Systems Architecture Team
 Version: 1.0.0
 """
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Deque, Any, Tuple
 from collections import deque
@@ -85,20 +86,26 @@ class ForwardDynamicsModel:
         self.feature_dim = feature_dim
         self.prediction_history: Deque[Dict] = deque(maxlen=500)
         
-    def predict(self, state_features: np.ndarray, 
+    def predict(self, state_features: np.ndarray,
                 action: Action) -> np.ndarray:
-        """Predict next state features."""
-        # Simplified prediction - in practice, this would use a neural network
-        # Combine state and action information
+        """Predict next state features using a simple 2-layer MLP."""
         action_encoding = self._encode_action(action)
-        
-        # Simple linear combination as placeholder
-        predicted = state_features * 0.9 + action_encoding * 0.1
-        
-        # Add small noise for exploration
-        predicted += np.random.normal(0, 0.01, self.feature_dim)
-        
-        return predicted
+
+        # Simple 2-layer MLP: input -> hidden (tanh) -> output
+        hidden_size = 16
+        x = np.concatenate([state_features, action_encoding])
+        input_size = len(x)
+
+        if not hasattr(self, '_w1') or self._w1.shape[0] != input_size:
+            self._w1 = np.random.randn(input_size, hidden_size) * 0.1
+            self._b1 = np.zeros(hidden_size)
+            self._w2 = np.random.randn(hidden_size, self.feature_dim) * 0.1
+            self._b2 = np.zeros(self.feature_dim)
+
+        h = np.tanh(x @ self._w1 + self._b1)
+        prediction = h @ self._w2 + self._b2
+
+        return prediction
     
     def _encode_action(self, action: Action) -> np.ndarray:
         """Encode action into feature vector."""
@@ -250,12 +257,13 @@ class IntrinsicCuriosityModule:
         return float(novelty)
 
 
-class ExplorationStrategy:
+class ExplorationStrategy(ABC):
     """Base class for exploration strategies."""
-    
+
+    @abstractmethod
     def recommend(self, context: ExplorationContext) -> Optional[Action]:
         """Recommend an exploration action."""
-        raise NotImplementedError
+        ...
 
 
 class RandomExploration(ExplorationStrategy):

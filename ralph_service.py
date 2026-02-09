@@ -25,15 +25,6 @@ import servicemanager
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ralph_loop_implementation import RalphLoop, Task, Job, PriorityLevel
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/ralph_service.log'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger("RalphService")
 
 

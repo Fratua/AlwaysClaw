@@ -3,6 +3,7 @@ Bottleneck Detection System for OpenClaw AI Agent System
 Real-time detection and analysis of performance bottlenecks
 """
 
+import os
 import time
 import threading
 import logging
@@ -12,7 +13,6 @@ from enum import Enum
 from collections import defaultdict, deque
 import statistics
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -305,36 +305,57 @@ class BottleneckDetector:
         """Collect current system metrics"""
         import psutil
         
+        import gc
+
         metrics = {
             'timestamp': time.time(),
             'cpu_percent': psutil.cpu_percent(interval=1),
             'memory_percent': psutil.virtual_memory().percent,
             'swap_percent': psutil.swap_memory().percent,
             'disk_queue_depth': 0,  # Platform-specific
-            'disk_utilization_percent': psutil.disk_usage('/').percent,
+            'disk_utilization_percent': psutil.disk_usage('/').percent if os.name != 'nt' else psutil.disk_usage('C:\\').percent,
             'io_wait_percent': 0,  # Platform-specific
             'network_latency_ms': 0,  # To be measured
             'packet_loss_percent': 0,  # To be measured
             'bandwidth_percent': 0,  # To be measured
             'load_avg': psutil.getloadavg()[0] if hasattr(psutil, 'getloadavg') else 0,
             'context_switches_per_sec': 0,  # Platform-specific
-            'queue_depth': 0,  # To be implemented
-            'processing_lag_seconds': 0,  # To be implemented
-            'consumer_lag': 0,  # To be implemented
-            'gpt_response_time_ms': 0,  # To be implemented
-            'gpt_tokens_per_min': 0,  # To be implemented
-            'gpt_queue_depth': 0,  # To be implemented
-            'slow_query_count': 0,  # To be implemented
-            'db_connection_count': 0,  # To be implemented
-            'avg_query_time_ms': 0,  # To be implemented
-            'cache_hit_rate': 0,  # To be implemented
-            'cache_eviction_rate': 0,  # To be implemented
-            'memory_fragmentation': 0,  # To be implemented
-            'browser_pool_utilization': 0,  # To be implemented
-            'browser_wait_time_ms': 0,  # To be implemented
-            'browser_crashes_per_min': 0,  # To be implemented
-            'gc_frequency_per_min': 0,  # To be implemented
         }
+
+        # Queue metrics
+        metrics['queue_depth'] = len(getattr(self, 'task_queue', []))
+        metrics['processing_lag_seconds'] = time.time() - getattr(self, '_oldest_pending_ts', time.time())
+        metrics['consumer_lag'] = max(0, getattr(self, '_pending_count', 0) - getattr(self, '_processed_count', 0))
+
+        # LLM metrics - from MetricsCollector
+        mc = self._metrics_collector if hasattr(self, '_metrics_collector') else None
+        metrics['gpt_response_time_ms'] = mc.get_latest('gpt_response_time') if mc else 0.0
+        metrics['gpt_tokens_per_min'] = mc.get_latest('gpt_tokens_per_min') if mc else 0.0
+        metrics['gpt_queue_depth'] = len(getattr(self, '_pending_llm_requests', []))
+
+        # DB metrics
+        metrics['slow_query_count'] = mc.get_latest('slow_query_count') if mc else 0
+        metrics['db_connection_count'] = mc.get_latest('db_connections') if mc else 0
+        metrics['avg_query_time_ms'] = mc.get_latest('avg_query_time_ms') if mc else 0.0
+
+        # Cache metrics
+        hits = mc.get_latest('cache_hits') if mc else 0
+        misses = mc.get_latest('cache_misses') if mc else 0
+        metrics['cache_hit_rate'] = hits / max(hits + misses, 1)
+        metrics['cache_eviction_rate'] = mc.get_latest('cache_evictions') if mc else 0.0
+
+        # System metrics via psutil
+        vm = psutil.virtual_memory()
+        metrics['memory_fragmentation'] = 1.0 - (vm.available / max(vm.total, 1))
+
+        # Browser metrics
+        metrics['browser_pool_utilization'] = mc.get_latest('browser_active_pages') / max(mc.get_latest('browser_max_pages') if mc else 1, 1) if mc else 0.0
+        metrics['browser_wait_time_ms'] = mc.get_latest('browser_wait_time') if mc else 0.0
+        metrics['browser_crashes_per_min'] = mc.get_latest('browser_crashes_per_min') if mc else 0.0
+
+        # GC metrics
+        gc_stats = gc.get_stats()
+        metrics['gc_frequency_per_min'] = sum(s.get('collections', 0) for s in gc_stats) if gc_stats else 0.0
         
         with self._lock:
             self.metrics_history.append(metrics)

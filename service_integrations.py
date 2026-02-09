@@ -18,8 +18,6 @@ from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -125,10 +123,10 @@ class GmailIntegration:
             # from google.oauth2.credentials import Credentials
             
             logger.info("Initializing Gmail integration...")
-            
-            # Placeholder for actual implementation
+
+            from gmail_client_implementation import GmailClient
+            self.service = GmailClient()
             self.authenticated = True
-            self.service = {"status": "connected"}
             
             logger.info("Gmail integration initialized successfully")
             return True
@@ -184,14 +182,11 @@ class GmailIntegration:
             if bcc:
                 message['bcc'] = bcc if isinstance(bcc, str) else ', '.join(bcc)
             
-            # In production:
-            # result = self.service.users().messages().send(
-            #     userId='me',
-            #     body={'raw': base64.urlsafe_b64encode(message.as_bytes()).decode()}
-            # ).execute()
-            
-            # Placeholder
-            result = {'id': f'msg_{datetime.now().timestamp()}'}
+            result = self.service.messages.send_message(
+                to=message['to'],
+                subject=message['subject'],
+                body=message['body'],
+            )
             
             logger.info(f"Email sent successfully: {result['id']}")
             
@@ -227,30 +222,23 @@ class GmailIntegration:
         try:
             logger.info(f"Checking emails with query: {query}")
             
-            # In production:
-            # results = self.service.users().messages().list(
-            #     userId='me',
-            #     q=query,
-            #     maxResults=max_results
-            # ).execute()
-            
-            # Placeholder implementation
+            raw_msgs = self.service.messages.list_messages(
+                query=query, max_results=max_results
+            )
             emails = []
-            
-            # Simulated email
-            emails.append(Email(
-                id="msg_123",
-                thread_id="thread_123",
-                subject="Test Email",
-                sender="test@example.com",
-                recipients=["user@example.com"],
-                body="This is a test email body.",
-                snippet="This is a test...",
-                labels=["INBOX", "UNREAD"],
-                is_unread=True,
-                received_at=datetime.now()
-            ))
-            
+            for msg in (raw_msgs or []):
+                emails.append(Email(
+                    id=msg.get('id', ''),
+                    thread_id=msg.get('threadId', ''),
+                    subject=msg.get('subject', ''),
+                    sender=msg.get('from', ''),
+                    recipients=msg.get('to', '').split(',') if msg.get('to') else [],
+                    body=msg.get('body', ''),
+                    snippet=msg.get('snippet', ''),
+                    labels=msg.get('labelIds', []),
+                    is_unread='UNREAD' in msg.get('labelIds', []),
+                    received_at=datetime.now()
+                ))
             return emails
             
         except (OSError, ConnectionError, ValueError) as e:
@@ -265,23 +253,19 @@ class GmailIntegration:
         try:
             logger.info(f"Getting email: {message_id}")
             
-            # In production:
-            # message = self.service.users().messages().get(
-            #     userId='me',
-            #     id=message_id
-            # ).execute()
-            
-            # Placeholder
+            msg = self.service.messages.get_message(message_id)
+            if not msg:
+                return None
             return Email(
-                id=message_id,
-                thread_id="thread_123",
-                subject="Retrieved Email",
-                sender="sender@example.com",
-                recipients=["user@example.com"],
-                body="Email body content",
-                snippet="Snippet...",
-                labels=["INBOX"],
-                is_unread=False,
+                id=msg.get('id', message_id),
+                thread_id=msg.get('threadId', ''),
+                subject=msg.get('subject', ''),
+                sender=msg.get('from', ''),
+                recipients=msg.get('to', '').split(',') if msg.get('to') else [],
+                body=msg.get('body', ''),
+                snippet=msg.get('snippet', ''),
+                labels=msg.get('labelIds', []),
+                is_unread='UNREAD' in msg.get('labelIds', []),
                 received_at=datetime.now()
             )
             
@@ -297,13 +281,10 @@ class GmailIntegration:
         try:
             logger.info(f"Marking email as read: {message_id}")
             
-            # In production:
-            # self.service.users().messages().modify(
-            #     userId='me',
-            #     id=message_id,
-            #     body={'removeLabelIds': ['UNREAD']}
-            # ).execute()
-            
+            self.service.messages.modify_labels(
+                message_id=message_id,
+                remove_label_ids=['UNREAD'],
+            )
             return True
             
         except (OSError, ConnectionError, ValueError) as e:
@@ -318,12 +299,7 @@ class GmailIntegration:
         try:
             logger.info(f"Deleting email: {message_id}")
             
-            # In production:
-            # self.service.users().messages().trash(
-            #     userId='me',
-            #     id=message_id
-            # ).execute()
-            
+            self.service.messages.trash_message(message_id)
             return True
             
         except (OSError, ConnectionError, ValueError) as e:

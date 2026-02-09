@@ -15,11 +15,12 @@ const logger = require('./logger');
  * - Any worker → Master (status, errors)
  */
 class MessageBus extends EventEmitter {
-  constructor() {
+  constructor(options = {}) {
     super();
     this.pendingRequests = new Map();
     this.requestTimeout = 30000; // 30 seconds default
     this.requestId = 0;
+    this.maxPendingRequests = options.maxPendingRequests || 1000;
   }
 
   /**
@@ -76,12 +77,30 @@ class MessageBus extends EventEmitter {
    */
   routeIORequest(fromWorkerId, request) {
     const { service, action, data, requestId } = request;
-    
+
+    // Validate required routing fields
+    if (!requestId || typeof requestId !== 'string') {
+      logger.warn(`[MessageBus] Discarding IO request with missing/invalid requestId from worker ${fromWorkerId}`);
+      return;
+    }
+    if (!service || typeof service !== 'string') {
+      logger.warn(`[MessageBus] Discarding IO request with missing/invalid service (req: ${requestId})`);
+      this.sendErrorResponse(fromWorkerId, requestId, 'Missing service field');
+      return;
+    }
+
+    // Enforce max pending requests
+    if (this.pendingRequests.size >= this.maxPendingRequests) {
+      logger.error(`[MessageBus] Max pending requests (${this.maxPendingRequests}) reached, rejecting request ${requestId}`);
+      this.sendErrorResponse(fromWorkerId, requestId, 'Message bus overloaded');
+      return;
+    }
+
     logger.debug(`[MessageBus] Routing I/O request: ${service}.${action} (req: ${requestId})`);
 
     // Find the appropriate I/O worker
     const ioWorker = this.findIOWorker(service);
-    
+
     if (!ioWorker) {
       logger.error(`[MessageBus] No I/O worker available for service: ${service}`);
       this.sendErrorResponse(fromWorkerId, requestId, `Service unavailable: ${service}`);
@@ -152,12 +171,30 @@ class MessageBus extends EventEmitter {
    */
   routeTaskRequest(fromWorkerId, request) {
     const { taskType, data, requestId, priority = 'normal' } = request;
-    
+
+    // Validate required routing fields
+    if (!requestId || typeof requestId !== 'string') {
+      logger.warn(`[MessageBus] Discarding task request with missing/invalid requestId from worker ${fromWorkerId}`);
+      return;
+    }
+    if (!taskType || typeof taskType !== 'string') {
+      logger.warn(`[MessageBus] Discarding task request with missing/invalid taskType (req: ${requestId})`);
+      this.sendErrorResponse(fromWorkerId, requestId, 'Missing taskType field');
+      return;
+    }
+
+    // Enforce max pending requests
+    if (this.pendingRequests.size >= this.maxPendingRequests) {
+      logger.error(`[MessageBus] Max pending requests (${this.maxPendingRequests}) reached, rejecting task request ${requestId}`);
+      this.sendErrorResponse(fromWorkerId, requestId, 'Message bus overloaded');
+      return;
+    }
+
     logger.debug(`[MessageBus] Routing task request: ${taskType} (req: ${requestId})`);
 
     // Find an available task worker
     const taskWorker = this.findAvailableTaskWorker();
-    
+
     if (!taskWorker) {
       logger.error(`[MessageBus] No task worker available`);
       this.sendErrorResponse(fromWorkerId, requestId, 'No task workers available');

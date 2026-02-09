@@ -21,6 +21,7 @@ class HealthMonitor extends EventEmitter {
     };
     
     this.checkInterval = null;
+    this._checking = false;
     this.metrics = {
       startTime: Date.now(),
       checks: 0,
@@ -53,9 +54,13 @@ class HealthMonitor extends EventEmitter {
   }
 
   async performHealthCheck() {
+    if (this._checking) {
+      return null;
+    }
+    this._checking = true;
     this.metrics.checks++;
     const checkStart = Date.now();
-    
+
     try {
       const checks = await Promise.all([
         this.checkMemory(),
@@ -79,15 +84,15 @@ class HealthMonitor extends EventEmitter {
         systemUptime: os.uptime(),
         checkDuration: Date.now() - checkStart
       };
-      
+
       this.metrics.lastCheck = health.timestamp;
-      
+
       // Store history (keep last 100 checks)
       this.metrics.history.push(health);
       if (this.metrics.history.length > 100) {
         this.metrics.history.shift();
       }
-      
+
       // Handle degraded status
       if (health.status !== 'healthy') {
         this.metrics.failures++;
@@ -97,14 +102,16 @@ class HealthMonitor extends EventEmitter {
         // Clear threshold breaches on healthy status
         this.thresholdBreaches.clear();
       }
-      
+
       this.emit('health', health);
-      
+
       return health;
     } catch (error) {
       logger.error('[HealthMonitor] Health check failed:', error);
       this.emit('error', error);
       return null;
+    } finally {
+      this._checking = false;
     }
   }
 

@@ -4,6 +4,7 @@ Hybrid search with BM25 + Vector similarity
 """
 
 import sqlite3
+import logging
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 import json
 import hashlib
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from memory_models import (
     MemoryEntry, MemoryChunk, SearchResult, 
@@ -133,9 +136,8 @@ class VectorStore:
                         embedding FLOAT[{self.config.embedding_dimension}]
                     )
                 """)
-            except sqlite3.OperationalError:
-                # Table might already exist with different dimensions
-                pass
+            except sqlite3.OperationalError as e:
+                logger.warning(f"SQLite vec0 table creation skipped: {e}")
         else:
             # Fallback: create regular table with BLOB storage
             self.db.execute("""
@@ -155,9 +157,9 @@ class VectorStore:
                         tokenize='porter unicode61'
                     )
                 """)
-            except sqlite3.OperationalError:
-                pass
-        
+            except sqlite3.OperationalError as e:
+                logger.warning(f"SQLite FTS5 table creation skipped: {e}")
+
         # Create indexes
         self.db.execute("""
             CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(type)

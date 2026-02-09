@@ -11,7 +11,13 @@ const { getBridge } = require('./python-bridge');
 class AgentLoopWorker extends WorkerBase {
   constructor() {
     super();
-    this.loopConfig = JSON.parse(process.env.AGENT_LOOP_CONFIG || '{}');
+    let parsedConfig = {};
+    try {
+      parsedConfig = JSON.parse(process.env.AGENT_LOOP_CONFIG || '{}');
+    } catch (err) {
+      logger.error(`Failed to parse AGENT_LOOP_CONFIG: ${err.message}. Using defaults.`);
+    }
+    this.loopConfig = parsedConfig;
     this.loopId = this.loopConfig.loopId;
     this.capabilities = this.loopConfig.capabilities || [];
     this.priority = this.loopConfig.priority || 'normal';
@@ -215,6 +221,14 @@ class AgentLoopWorker extends WorkerBase {
   }
 
   async executeAction(action) {
+    // Validate action structure
+    if (!action || typeof action.type !== 'string') {
+      return { success: false, error: 'Invalid action: missing or non-string type' };
+    }
+    if (action.data !== undefined && (action.data === null || typeof action.data !== 'object')) {
+      return { success: false, error: 'Invalid action: data must be a non-null object' };
+    }
+
     logger.debug(`[AgentLoop ${this.loopId}] Executing action: ${action.type}`);
 
     switch(action.type) {
@@ -235,7 +249,7 @@ class AgentLoopWorker extends WorkerBase {
       case 'system.command':
         return this.executeSystemCommand(action);
       default:
-        throw new Error(`Unknown action type: ${action.type}`);
+        return { success: false, error: `Unknown action type: ${action.type}` };
     }
   }
 

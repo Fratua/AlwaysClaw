@@ -22,6 +22,7 @@ class PythonBridge extends EventEmitter {
       restartDelay: 2000,
       maxRestartAttempts: 10,
       requestTimeout: 30000,
+      maxPendingRequests: 100,
       ...options,
     };
 
@@ -160,6 +161,10 @@ class PythonBridge extends EventEmitter {
   async call(method, params = {}) {
     if (!this.isRunning || !this.process) {
       throw new Error('Python bridge not running');
+    }
+
+    if (this.pendingRequests.size >= this.options.maxPendingRequests) {
+      throw new Error('Bridge overloaded');
     }
 
     const id = ++this.requestId;

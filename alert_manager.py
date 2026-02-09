@@ -8,6 +8,7 @@ import json
 import logging
 import smtplib
 import os
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
@@ -64,16 +65,17 @@ class Alert:
         }
 
 
-class BaseNotifier:
+class BaseNotifier(ABC):
     """Base class for all notifiers"""
-    
+
     def __init__(self, config: Dict):
         self.config = config
         self.enabled = config.get('enabled', True)
-    
+
+    @abstractmethod
     async def send(self, alert: Alert) -> bool:
         """Send alert - to be implemented by subclasses"""
-        raise NotImplementedError
+        ...
     
     def format_message(self, alert: Alert) -> str:
         """Format alert message"""

@@ -585,9 +585,13 @@ class TokenBlacklist:
     
     async def _cleanup_loop(self) -> None:
         """Periodically remove expired entries."""
-        while True:
-            await asyncio.sleep(self._cleanup_interval)
-            self._cleanup()
+        try:
+            while True:
+                await asyncio.sleep(self._cleanup_interval)
+                self._cleanup()
+        except asyncio.CancelledError:
+            logger.warning("Token blacklist cleanup loop cancelled")
+            raise
     
     def _cleanup(self) -> None:
         """Remove expired entries."""

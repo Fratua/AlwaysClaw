@@ -509,25 +509,107 @@ class UserNotificationSystem:
         return success
     
     def _send_email_notification(self, notification: UserNotification):
-        """Send email notification (placeholder)"""
-        print(f"[EMAIL] {notification.title}")
-        print(f"To: user@example.com")
-        print(f"Subject: {notification.title}")
-        print(f"Body: {notification.message[:200]}...")
+        """Send email notification via GmailClient"""
+        try:
+            from gmail_client_implementation import GmailClient
+            client = GmailClient()
+            client.messages.send_message(
+                to=notification.metadata.get('email', 'user@example.com'),
+                subject=notification.title,
+                body=notification.message[:2000],
+            )
+        except (ImportError, AttributeError, RuntimeError) as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Email notification failed: {e}")
     
     def _send_dashboard_notification(self, notification: UserNotification):
-        """Send dashboard notification (placeholder)"""
-        print(f"[DASHBOARD] {notification.title}")
-        print(f"Priority: {notification.priority.value}")
-        print(f"Message: {notification.description}")
+        """Store dashboard notification in SQLite for frontend display"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect('alwaysclaw.db')
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS notifications (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    message TEXT,
+                    priority TEXT,
+                    channel TEXT,
+                    created_at TEXT,
+                    read INTEGER DEFAULT 0
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO notifications (id, title, message, priority, channel, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    notification.title,
+                    notification.message,
+                    notification.priority.value if hasattr(notification.priority, 'value') else str(notification.priority),
+                    'dashboard',
+                    datetime.now().isoformat(),
+                ),
+            )
+            conn.commit()
+            conn.close()
+        except (sqlite3.Error, OSError) as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Dashboard notification failed: {e}")
     
     def _send_sms_notification(self, notification: UserNotification):
-        """Send SMS notification (placeholder)"""
-        print(f"[SMS] {notification.title[:50]}...")
+        """Send SMS notification via Twilio"""
+        try:
+            from twilio.rest import Client as TwilioClient
+            import os
+            account_sid = os.environ.get('TWILIO_ACCOUNT_SID', '')
+            auth_token = os.environ.get('TWILIO_AUTH_TOKEN', '')
+            from_number = os.environ.get('TWILIO_FROM_NUMBER', '')
+            to_number = notification.metadata.get('phone', os.environ.get('TWILIO_TO_NUMBER', ''))
+            if not (account_sid and auth_token and from_number and to_number):
+                import logging
+                logging.getLogger(__name__).warning("Twilio SMS credentials not configured")
+                return
+            client = TwilioClient(account_sid, auth_token)
+            client.messages.create(
+                body=f"{notification.title}: {notification.message[:140]}",
+                from_=from_number,
+                to=to_number,
+            )
+        except ImportError:
+            import logging
+            logging.getLogger(__name__).info("Twilio not installed; SMS notification skipped")
+        except (RuntimeError, ValueError) as e:
+            import logging
+            logging.getLogger(__name__).warning(f"SMS notification failed: {e}")
     
     def _send_voice_notification(self, notification: UserNotification):
-        """Send voice notification via TTS (placeholder)"""
-        print(f"[VOICE TTS] Speaking notification: {notification.title}")
+        """Send voice notification via TTS + Twilio call"""
+        try:
+            from twilio.rest import Client as TwilioClient
+            from twilio.twiml.voice_response import VoiceResponse
+            import os
+            account_sid = os.environ.get('TWILIO_ACCOUNT_SID', '')
+            auth_token = os.environ.get('TWILIO_AUTH_TOKEN', '')
+            from_number = os.environ.get('TWILIO_FROM_NUMBER', '')
+            to_number = notification.metadata.get('phone', os.environ.get('TWILIO_TO_NUMBER', ''))
+            if not (account_sid and auth_token and from_number and to_number):
+                import logging
+                logging.getLogger(__name__).warning("Twilio voice credentials not configured")
+                return
+            twiml = VoiceResponse()
+            twiml.say(f"{notification.title}. {notification.message[:200]}", voice='alice')
+            client = TwilioClient(account_sid, auth_token)
+            client.calls.create(
+                twiml=str(twiml),
+                from_=from_number,
+                to=to_number,
+            )
+        except ImportError:
+            import logging
+            logging.getLogger(__name__).info("Twilio not installed; voice notification skipped")
+        except (RuntimeError, ValueError) as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Voice notification failed: {e}")
     
     def generate_daily_summary(self) -> Optional[NotificationSummary]:
         """Generate daily summary of changes"""

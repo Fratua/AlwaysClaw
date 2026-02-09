@@ -201,9 +201,20 @@ class BreadthFirstExplorer:
         )
     
     async def _discover_neighbors(self, topic: str) -> List[str]:
-        """Simulate neighbor discovery"""
-        # In real implementation, this would use web search, APIs, etc.
-        return [f"{topic}_subtopic_{i}" for i in range(self.CONFIG["branching_factor"])]
+        """Discover related sub-topics using LLM"""
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            n = self.CONFIG["branching_factor"]
+            response = client.generate(
+                f"List exactly {n} related sub-topics for '{topic}'. "
+                f"Return one sub-topic per line, no numbering or bullets.",
+                max_tokens=200,
+            )
+            lines = [ln.strip() for ln in response.strip().splitlines() if ln.strip()]
+            return lines[:n] if lines else [f"{topic}_subtopic_{i}" for i in range(n)]
+        except (ImportError, RuntimeError, EnvironmentError):
+            return [f"{topic}_subtopic_{i}" for i in range(self.CONFIG["branching_factor"])]
 
 class DepthFirstExplorer:
     """DFS Strategy for deep territory investigation"""
@@ -236,8 +247,17 @@ class DepthFirstExplorer:
                 else:
                     break
             
-            # Select most relevant child (simulated)
-            scored_children = [(child, random.uniform(0.5, 1.0)) for child in children]
+            # Score children by TF-IDF similarity to the exploration path
+            try:
+                from sklearn.feature_extraction.text import TfidfVectorizer
+                from sklearn.metrics.pairwise import cosine_similarity as cos_sim
+                texts = [start_topic] + children
+                vectorizer = TfidfVectorizer()
+                tfidf = vectorizer.fit_transform(texts)
+                sims = cos_sim(tfidf[0:1], tfidf[1:])[0]
+                scored_children = list(zip(children, sims.tolist()))
+            except ImportError:
+                scored_children = [(child, random.uniform(0.5, 1.0)) for child in children]
             scored_children.sort(key=lambda x: x[1], reverse=True)
             
             best_child, best_score = scored_children[0]
@@ -275,8 +295,19 @@ class DepthFirstExplorer:
         )
     
     async def _discover_children(self, topic: str) -> List[str]:
-        """Simulate child discovery"""
-        return [f"{topic}_child_{i}" for i in range(5)]
+        """Discover child sub-topics using LLM"""
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            response = client.generate(
+                f"List 5 narrower sub-topics under '{topic}'. "
+                f"One per line, no numbering.",
+                max_tokens=150,
+            )
+            lines = [ln.strip() for ln in response.strip().splitlines() if ln.strip()]
+            return lines[:5] if lines else [f"{topic}_child_{i}" for i in range(5)]
+        except (ImportError, RuntimeError, EnvironmentError):
+            return [f"{topic}_child_{i}" for i in range(5)]
 
 class InterestDrivenExplorer:
     """Exploration guided by user interests"""
@@ -524,21 +555,68 @@ class NoveltyDetector:
         )
     
     async def _semantic_novelty(self, content: str) -> float:
-        """Calculate semantic novelty"""
-        # Simulated - in real implementation would use embeddings
-        return random.uniform(0.3, 0.9)
-    
+        """Calculate semantic novelty via TF-IDF distance from known knowledge base"""
+        if not hasattr(self, '_seen_contents'):
+            self._seen_contents = []
+        if not self._seen_contents:
+            self._seen_contents.append(content)
+            return 0.8  # First content is novel
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity as cos_sim
+            known_texts = self._seen_contents[-50:]
+            vectorizer = TfidfVectorizer()
+            tfidf = vectorizer.fit_transform([content] + known_texts)
+            max_sim = float(cos_sim(tfidf[0:1], tfidf[1:]).max())
+            self._seen_contents.append(content)
+            return 1.0 - max_sim
+        except ImportError:
+            content_words = set(content.lower().split())
+            all_known = set()
+            for c in self._seen_contents[-50:]:
+                all_known.update(c.lower().split())
+            self._seen_contents.append(content)
+            if not all_known:
+                return 0.8
+            overlap = len(content_words & all_known) / max(len(content_words), 1)
+            return 1.0 - overlap
+
     async def _structural_novelty(self, content: str) -> float:
-        """Calculate structural novelty"""
-        return random.uniform(0.2, 0.8)
-    
+        """Calculate structural novelty based on content patterns"""
+        # Score based on structural features not seen before
+        features = {
+            'has_code': '```' in content or 'def ' in content,
+            'has_url': 'http' in content,
+            'has_numbers': any(c.isdigit() for c in content),
+            'is_long': len(content) > 500,
+            'has_list': '\n-' in content or '\n*' in content,
+        }
+        novel_features = sum(1 for v in features.values() if v)
+        return min(1.0, novel_features / 3.0)
+
     async def _temporal_novelty(self, content: str) -> float:
-        """Calculate temporal novelty"""
-        return random.uniform(0.4, 1.0)
-    
+        """Calculate temporal novelty based on recency of related concepts"""
+        if not hasattr(self, '_seen_timestamps') or not self._seen_timestamps:
+            return 0.9
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        content_key = content[:100].lower()
+        for seen_key, ts in reversed(list(self._seen_timestamps.items())):
+            if content_key in seen_key or seen_key in content_key:
+                hours_ago = (now - ts).total_seconds() / 3600
+                return min(1.0, hours_ago / 24.0)
+        return 0.9
+
     async def _source_novelty(self, content: str, context: Dict) -> float:
-        """Calculate source novelty"""
-        return random.uniform(0.5, 1.0)
+        """Calculate source novelty based on source diversity"""
+        source = context.get('source', '')
+        if not source:
+            return 0.7
+        known_sources = getattr(self, '_known_sources', set())
+        if source in known_sources:
+            return 0.3
+        self._known_sources = known_sources | {source}
+        return 0.9
 
 # ============================================================================
 # GAP IDENTIFICATION

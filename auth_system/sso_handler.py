@@ -204,10 +204,23 @@ class SAMLHandler:
         return encoded, request_id
     
     def _sign_request(self, request_xml: str) -> str:
-        """Sign SAML request."""
-        # In production, implement XML signature
-        # For now, return unsigned
-        return request_xml
+        """Sign SAML request using XML digital signature."""
+        try:
+            from signxml import XMLSigner
+            import signxml
+            key_path = os.environ.get('SP_PRIVATE_KEY_PATH', '')
+            if key_path and os.path.exists(key_path):
+                with open(key_path, 'rb') as f:
+                    private_key = f.read()
+                signer = XMLSigner(method=signxml.methods.enveloped)
+                signed_xml = signer.sign(request_xml, key=private_key)
+                return signed_xml
+            else:
+                logger.warning("SP_PRIVATE_KEY_PATH not set or file not found, returning unsigned XML")
+                return request_xml
+        except ImportError:
+            logger.warning("signxml not installed, returning unsigned XML")
+            return request_xml
     
     def build_login_url(self, authn_request: str, relay_state: Optional[str] = None) -> str:
         """

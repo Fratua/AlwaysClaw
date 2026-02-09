@@ -97,6 +97,33 @@ class BrowserService {
     this.browserPool = null;
     this.pipelineOrchestrator = null;
     this._sessionPages = new Map();
+    this._pendingAcquisitions = new Map();
+  }
+
+  /**
+   * Acquire a page for a session, serializing concurrent acquisitions per sessionId.
+   */
+  async _acquireSessionPage(sessionId) {
+    // If already have a page for this session, return it
+    const existing = this._sessionPages.get(sessionId);
+    if (existing) return existing;
+
+    // If there's already a pending acquisition for this session, await it
+    const pending = this._pendingAcquisitions.get(sessionId);
+    if (pending) {
+      return pending;
+    }
+
+    // Start a new acquisition
+    const acquisition = (async () => {
+      const pooledPage = await this.browserPool.acquirePage();
+      this._sessionPages.set(sessionId, pooledPage);
+      this._pendingAcquisitions.delete(sessionId);
+      return pooledPage;
+    })();
+
+    this._pendingAcquisitions.set(sessionId, acquisition);
+    return acquisition;
   }
 
   async initialize() {
@@ -110,8 +137,8 @@ class BrowserService {
       const { DeduplicationEngine } = require('./dist/DeduplicationEngine');
 
       this.browserPool = new BrowserPool({
-        maxBrowsers: parseInt(process.env.BROWSER_MAX_INSTANCES || '3'),
-        maxPagesPerBrowser: 5,
+        maxBrowsers: parseInt(process.env.BROWSER_MAX_INSTANCES || '3', 10),
+        maxPagesPerBrowser: parseInt(process.env.BROWSER_MAX_PAGES_PER || '5', 10),
         headless: process.env.BROWSER_HEADLESS !== 'false',
         stealth: true,
       });
@@ -169,12 +196,7 @@ class BrowserService {
     logger.info(`[BrowserService] Navigating to ${data.url}`);
     if (this.browserPool) {
       const sessionId = data.sessionId || `session-${Date.now()}`;
-      let pooledPage = this._sessionPages.get(sessionId);
-
-      if (!pooledPage) {
-        pooledPage = await this.browserPool.acquirePage();
-        this._sessionPages.set(sessionId, pooledPage);
-      }
+      let pooledPage = await this._acquireSessionPage(sessionId);
 
       try {
         await pooledPage.page.goto(data.url, {

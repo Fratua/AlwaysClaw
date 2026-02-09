@@ -54,12 +54,12 @@ class TestRunAsync:
         assert result["value"] == 42
 
     def test_run_async_timeout(self):
-        from loop_adapters import _run_async, _LOOP_TIMEOUT
+        from loop_adapters import _run_async, _DEFAULT_TIMEOUT
         import loop_adapters
 
         # Temporarily set a very short timeout
-        original = loop_adapters._LOOP_TIMEOUT
-        loop_adapters._LOOP_TIMEOUT = 0.1
+        original = loop_adapters._DEFAULT_TIMEOUT
+        loop_adapters._DEFAULT_TIMEOUT = 0.1
 
         async def slow_coro():
             await asyncio.sleep(10)
@@ -69,7 +69,7 @@ class TestRunAsync:
             with pytest.raises(asyncio.TimeoutError):
                 _run_async(slow_coro())
         finally:
-            loop_adapters._LOOP_TIMEOUT = original
+            loop_adapters._DEFAULT_TIMEOUT = original
 
 
 class TestGetLoopHandlers:

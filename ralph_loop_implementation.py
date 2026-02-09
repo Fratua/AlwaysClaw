@@ -23,8 +23,6 @@ from abc import ABC, abstractmethod
 import threading
 import time
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("RalphLoop")
 
 

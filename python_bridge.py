@@ -627,5 +627,15 @@ class PythonBridge:
 
 
 if __name__ == '__main__':
+    import atexit
     bridge = PythonBridge()
+
+    def _cleanup():
+        if bridge.db_connection is not None:
+            try:
+                bridge.db_connection.close()
+            except Exception:
+                pass
+
+    atexit.register(_cleanup)
     bridge.run()

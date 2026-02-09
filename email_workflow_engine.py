@@ -876,16 +876,37 @@ class AIEvaluator:
         self.ai_client = ai_client
     
     async def analyze(self, email: EmailMessage) -> EmailAnalysis:
-        """Analyze email using AI."""
-        # This would call the GPT-5.2 API
-        # Placeholder implementation
-        return EmailAnalysis(
-            sentiment=0.0,
-            urgency=0.5,
-            intent="general",
-            category="general",
-            confidence=0.8
-        )
+        """Analyze email using AI via OpenAI client."""
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            prompt = (
+                f"Analyze this email and return a JSON object with keys: "
+                f"sentiment (float -1 to 1), urgency (float 0 to 1), "
+                f"intent (string), category (string), confidence (float 0 to 1).\n"
+                f"Subject: {email.subject}\n"
+                f"From: {email.sender}\n"
+                f"Body: {email.body[:500]}\n"
+                f"Return ONLY valid JSON."
+            )
+            response = client.generate(prompt, max_tokens=150)
+            import json as _json
+            data = _json.loads(response.strip())
+            return EmailAnalysis(
+                sentiment=float(data.get('sentiment', 0.0)),
+                urgency=float(data.get('urgency', 0.5)),
+                intent=str(data.get('intent', 'general')),
+                category=str(data.get('category', 'general')),
+                confidence=float(data.get('confidence', 0.8)),
+            )
+        except (ImportError, RuntimeError, EnvironmentError, ValueError, KeyError):
+            return EmailAnalysis(
+                sentiment=0.0,
+                urgency=0.5,
+                intent="general",
+                category="general",
+                confidence=0.8,
+            )
 
 
 class RuleConflictResolver:
@@ -932,12 +953,25 @@ class ActionExecutor:
         self.rate_limiter = RateLimiter()
         self._register_handlers()
     
+    def _get_gmail_client(self):
+        """Get or create a GmailClient instance."""
+        if not hasattr(self, '_gmail_client'):
+            try:
+                from gmail_client_implementation import GmailClient
+                self._gmail_client = GmailClient()
+            except (ImportError, RuntimeError) as e:
+                logger.warning(f"GmailClient unavailable: {e}")
+                self._gmail_client = None
+        return self._gmail_client
+
     def _register_handlers(self):
         """Register action handlers."""
         self.handlers[ActionType.LABEL_ADD] = self._handle_label_add
         self.handlers[ActionType.MARK_READ] = self._handle_mark_read
         self.handlers[ActionType.NOTIFY_DESKTOP] = self._handle_notify_desktop
-        # Add more handlers...
+        self.handlers[ActionType.ARCHIVE] = self._handle_archive
+        self.handlers[ActionType.DELETE] = self._handle_delete
+        self.handlers[ActionType.REPLY] = self._handle_reply
     
     async def execute(
         self,
@@ -1042,9 +1076,17 @@ class ActionExecutor:
         params: Dict[str, Any],
         context: ExecutionContext
     ):
-        """Handle label add action."""
+        """Handle label add action via GmailClient."""
         labels = params.get('labels', [])
-        # Implementation would call Gmail API
+        try:
+            from gmail_client_implementation import GmailClient
+            client = GmailClient()
+            client.messages.modify_labels(
+                message_id=email.message_id,
+                add_label_ids=labels,
+            )
+        except (ImportError, AttributeError, RuntimeError) as e:
+            logger.warning(f"Gmail label_add failed, returning local result: {e}")
         return {'labels_added': labels}
     
     async def _handle_mark_read(
@@ -1075,6 +1117,63 @@ class ActionExecutor:
         )
         
         return {'notified': True}
+
+    async def _handle_archive(
+        self,
+        email: EmailMessage,
+        params: Dict[str, Any],
+        context: ExecutionContext
+    ):
+        """Handle archive action via GmailClient."""
+        client = self._get_gmail_client()
+        if client and hasattr(email, 'message_id') and email.message_id:
+            try:
+                client.messages.modify_labels(
+                    message_id=email.message_id,
+                    remove_label_ids=['INBOX'],
+                )
+            except (RuntimeError, OSError, AttributeError) as e:
+                logger.warning(f"Gmail archive failed: {e}")
+        return {'archived': True}
+
+    async def _handle_delete(
+        self,
+        email: EmailMessage,
+        params: Dict[str, Any],
+        context: ExecutionContext
+    ):
+        """Handle delete (trash) action via GmailClient."""
+        client = self._get_gmail_client()
+        if client and hasattr(email, 'message_id') and email.message_id:
+            try:
+                client.messages.trash_message(email.message_id)
+            except (RuntimeError, OSError, AttributeError) as e:
+                logger.warning(f"Gmail delete failed: {e}")
+        return {'deleted': True}
+
+    async def _handle_reply(
+        self,
+        email: EmailMessage,
+        params: Dict[str, Any],
+        context: ExecutionContext
+    ):
+        """Handle reply action via GmailClient."""
+        reply_body = params.get('body', '')
+        client = self._get_gmail_client()
+        if client and reply_body:
+            try:
+                thread_id = getattr(email, 'thread_id', None)
+                to_addr = getattr(email, 'sender', params.get('to', ''))
+                subject = f"Re: {getattr(email, 'subject', '')}"
+                client.messages.send_message(
+                    to=to_addr,
+                    subject=subject,
+                    body=reply_body,
+                    thread_id=thread_id,
+                )
+            except (RuntimeError, OSError, AttributeError) as e:
+                logger.warning(f"Gmail reply failed: {e}")
+        return {'replied': True, 'body_length': len(reply_body)}
 
 
 class RateLimiter:

@@ -19,8 +19,6 @@ from typing import Dict, List, Optional, Any, Callable, Set
 from enum import Enum
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

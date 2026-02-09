@@ -409,16 +409,27 @@ class DaemonMaster extends EventEmitter {
     // Get worker metadata (reliably attached during fork)
     const meta = worker._meta || { type: 'unknown', index: 0, service: null };
     logger.info(`[Master] Worker ${worker.id} (${meta.type}${meta.index !== null ? '-' + meta.index : ''}${meta.service ? '-' + meta.service : ''}) exited (code: ${code}, signal: ${signal})`);
-    
+
+    // Reject pending bridge requests associated with this dead worker
+    if (this.messageBus) {
+      for (const [reqId, pending] of this.messageBus.pendingRequests) {
+        if (pending.fromWorkerId === worker.id) {
+          clearTimeout(pending.timeout);
+          this.messageBus.pendingRequests.delete(reqId);
+          logger.warn(`[Master] Rejected pending request ${reqId} for dead worker ${worker.id}`);
+        }
+      }
+    }
+
     // Remove from tracking maps
     this.agentLoopWorkers.delete(worker.id);
     this.ioWorkers.delete(meta.service);
     this.taskWorkers.delete(worker.id);
-    
+
     // Check if we should restart
     if (!this.isShuttingDown && code !== 0) {
       this.checkRestartRate();
-      
+
       // Restart the worker based on its type
       setTimeout(() => {
         if (meta.type === 'agent-loop') {
@@ -601,9 +612,33 @@ class DaemonMaster extends EventEmitter {
       return;
     }
 
+    // Initialize failure tracking map on first use
+    if (!this._loopFailures) {
+      this._loopFailures = new Map();
+    }
+    const tracker = this._loopFailures.get(loopName) || { count: 0, cooldownUntil: 0 };
+
+    // Check cooldown
+    if (tracker.cooldownUntil > Date.now()) {
+      logger.debug(`[Master] Skipping loop ${loopName}: in cooldown until ${new Date(tracker.cooldownUntil).toISOString()}`);
+      return;
+    }
+
     this.bridge.call(method, {}).then(result => {
+      // Reset consecutive failure count on success
+      tracker.count = 0;
+      tracker.cooldownUntil = 0;
+      this._loopFailures.set(loopName, tracker);
       logger.debug(`[Master] Loop ${loopName} completed:`, result);
     }).catch(error => {
+      tracker.count++;
+      if (tracker.count >= 3) {
+        const cooldownMs = this.options.loopCooldownMs || 5 * 60 * 1000; // default 5 minutes
+        tracker.cooldownUntil = Date.now() + cooldownMs;
+        logger.warn(`[Master] Loop ${loopName} paused after ${tracker.count} consecutive failures. Cooldown until ${new Date(tracker.cooldownUntil).toISOString()}`);
+        tracker.count = 0; // reset for after cooldown
+      }
+      this._loopFailures.set(loopName, tracker);
       logger.warn(`[Master] Loop ${loopName} failed: ${error.message}`);
     });
   }

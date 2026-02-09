@@ -6,6 +6,7 @@ Manages rollback operations to restore system to previous state.
 import shutil
 import logging
 import zipfile
+from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -74,15 +75,16 @@ class Checkpoint:
     operations_since: List[Dict[str, Any]] = field(default_factory=list)
 
 
-class RollbackStrategy:
+class RollbackStrategy(ABC):
     """Base class for rollback strategies"""
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-    
+
+    @abstractmethod
     async def execute(self, target: RollbackTarget) -> RollbackResult:
         """Execute rollback to target - must be implemented by subclasses"""
-        raise NotImplementedError
+        ...
     
     def can_execute(self, target: RollbackTarget) -> bool:
         """Check if this strategy can handle the target"""

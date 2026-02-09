@@ -56,9 +56,11 @@ def _get_timeout(loop_name: str) -> int:
     return _LOOP_TIMEOUTS.get(loop_name, _DEFAULT_TIMEOUT)
 
 
-def _run_async(coro, timeout: int = _DEFAULT_TIMEOUT):
+def _run_async(coro, timeout: int = None):
     """Run an async coroutine synchronously (bridge handlers are sync).
     Enforces a per-loop timeout to prevent hung loops."""
+    if timeout is None:
+        timeout = _DEFAULT_TIMEOUT
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

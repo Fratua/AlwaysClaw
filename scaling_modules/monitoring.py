@@ -13,7 +13,6 @@ from collections import defaultdict, deque
 import json
 import statistics
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

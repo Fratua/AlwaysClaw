@@ -27,6 +27,20 @@ class ClusterManager {
     
     // Set scheduling policy
     cluster.schedulingPolicy = this.options.schedulingPolicy;
+
+    // Listen for max-restarts-exceeded and escalate
+    this.on('max-restarts-exceeded', () => {
+      logger.error('[ClusterManager] CRITICAL: Max restart rate exceeded — workers are crash-looping');
+      try {
+        const HealthMonitor = require('./health-monitor');
+        const monitor = HealthMonitor.getInstance ? HealthMonitor.getInstance() : null;
+        if (monitor && typeof monitor.reportCritical === 'function') {
+          monitor.reportCritical('cluster', 'Max worker restart rate exceeded');
+        }
+      } catch (e) {
+        logger.warn(`[ClusterManager] Could not notify health monitor: ${e.message}`);
+      }
+    });
   }
 
   setupMaster() {

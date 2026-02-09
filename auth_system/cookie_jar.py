@@ -294,9 +294,8 @@ class CookieJarManager:
                     for cookie in jar.cookies:
                         try:
                             cookie.value = self.encryption.decrypt(cookie.value)
-                        except (ValueError, TypeError):
-                            # If decryption fails, keep as-is (might be unencrypted)
-                            pass
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Cookie decryption skipped (may be unencrypted): {e}")
                     self.cookie_jars[domain] = jar
                 except (KeyError, ValueError, TypeError) as e:
                     logger.warning(f"Failed to load jar for {domain}: {e}")
@@ -550,17 +549,17 @@ class CookieJarManager:
                     try:
                         # Parse HTTP date format
                         expires = datetime.strptime(
-                            attr_value, 
+                            attr_value,
                             '%a, %d %b %Y %H:%M:%S GMT'
                         )
-                    except ValueError:
-                        pass
+                    except ValueError as e:
+                        logger.warning(f"Cookie expires date parse failed: {e}")
                 elif attr_name == 'max-age':
                     try:
                         max_age = int(attr_value)
                         expires = datetime.now() + timedelta(seconds=max_age)
-                    except ValueError:
-                        pass
+                    except ValueError as e:
+                        logger.warning(f"Cookie max-age parse failed: {e}")
                 elif attr_name == 'samesite':
                     same_site = attr_value.capitalize()
             else:

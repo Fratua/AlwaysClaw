@@ -12,7 +12,6 @@ from enum import Enum
 from collections import defaultdict
 import json
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

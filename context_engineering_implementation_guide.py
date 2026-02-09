@@ -715,27 +715,42 @@ class HierarchicalRelevanceScorer:
     
     async def _semantic_score(self, message: Message, query: str) -> float:
         """Calculate semantic similarity score."""
-        if self.encoder is None:
-            # Fallback to keyword matching
-            return self._keyword_similarity(message.content, query)
-        
+        if self.encoder is not None:
+            try:
+                msg_emb = self.encoder.encode(message.content)
+                query_emb = self.encoder.encode(query)
+                similarity = cosine_similarity([msg_emb], [query_emb])[0][0]
+                return (similarity + 1) / 2  # Normalize to 0-1
+            except (OSError, RuntimeError, ValueError):
+                pass
+
+        # LLM-based fallback
         try:
-            msg_emb = self.encoder.encode(message.content)
-            query_emb = self.encoder.encode(query)
-            similarity = cosine_similarity([msg_emb], [query_emb])[0][0]
-            return (similarity + 1) / 2  # Normalize to 0-1
-        except (OSError, RuntimeError, ValueError):
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            response = client.generate(
+                f"Rate the semantic relevance between these texts on a scale "
+                f"of 0.0 to 1.0. Reply with ONLY a number.\n"
+                f"Text 1: {message.content[:500]}\nText 2: {query[:500]}"
+            )
+            return max(0.0, min(1.0, float(response.strip())))
+        except (ImportError, ValueError, RuntimeError, EnvironmentError):
             return self._keyword_similarity(message.content, query)
     
     def _keyword_similarity(self, text1: str, text2: str) -> float:
-        """Simple keyword-based similarity."""
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
-        if not words1 or not words2:
-            return 0.5
-        intersection = words1 & words2
-        union = words1 | words2
-        return len(intersection) / len(union)
+        """Calculate similarity using TF-IDF cosine similarity with Jaccard fallback."""
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
+            vectorizer = TfidfVectorizer()
+            tfidf = vectorizer.fit_transform([text1, text2])
+            return float(cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0])
+        except ImportError:
+            words1 = set(text1.lower().split())
+            words2 = set(text2.lower().split())
+            if not words1 or not words2:
+                return 0.0
+            return len(words1 & words2) / len(words1 | words2)
     
     def _entity_score(self,
                      message: Message,
@@ -772,7 +787,8 @@ class HierarchicalRelevanceScorer:
             return 1.0
         if e1 in e2 or e2 in e1:
             return 0.9
-        return 0.0
+        import difflib
+        return difflib.SequenceMatcher(None, e1.lower(), e2.lower()).ratio()
     
     def _temporal_score(self, msg: WeightedMessage) -> float:
         """Calculate temporal recency score."""

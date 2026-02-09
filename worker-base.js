@@ -39,6 +39,12 @@ class WorkerBase {
         return;
       }
 
+      // Validate msg is an object with a string type field
+      if (msg === null || typeof msg !== 'object' || typeof msg.type !== 'string') {
+        logger.warn(`[Worker ${this.workerId}] Malformed IPC message (missing object or type):`, typeof msg);
+        return;
+      }
+
       switch(msg.type) {
         case 'shutdown':
           this.handleShutdown();
@@ -129,6 +135,12 @@ class WorkerBase {
   }
 
   async handleTask(data) {
+    // Validate task data has required taskId
+    if (data === null || typeof data !== 'object' || !data.taskId) {
+      logger.warn(`[Worker ${this.workerId}] Malformed task message: missing data or taskId`);
+      return;
+    }
+
     this.state = 'busy';
     try {
       const result = await this.onTask(data);
@@ -173,8 +185,7 @@ class WorkerBase {
   }
 
   async onTask(data) {
-    // Subclass implementation
-    return { status: 'completed' };
+    throw new Error('onTask() must be implemented by subclass');
   }
 
   onMessage(msg) {

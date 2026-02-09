@@ -16,8 +16,6 @@ import numpy as np
 from collections import deque
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

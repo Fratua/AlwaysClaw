@@ -71,8 +71,6 @@ try:
 except ImportError:
     HAS_PROPHET = False
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -768,17 +766,35 @@ class ConfidenceScorer:
         # Prediction stability
         factor_scores['prediction_stability'] = self._calculate_stability(prediction)
         
-        # Historical accuracy (placeholder - would use actual feedback)
-        factor_scores['historical_accuracy'] = 0.7
-        
-        # Data quality
-        factor_scores['data_quality'] = context.get('data_quality', 0.8) if context else 0.8
-        
-        # Pattern strength
+        # Historical accuracy from feedback history
+        if self.feedback_history:
+            correct = sum(1 for f in self.feedback_history if f.get('correct', False))
+            factor_scores['historical_accuracy'] = correct / len(self.feedback_history)
+        else:
+            factor_scores['historical_accuracy'] = 0.5
+
+        # Data quality from feature completeness
+        if context and 'features' in context:
+            features = context['features']
+            if isinstance(features, dict):
+                total = len(features)
+                non_null = sum(1 for v in features.values() if v is not None)
+                factor_scores['data_quality'] = non_null / total if total > 0 else 0.5
+            else:
+                factor_scores['data_quality'] = context.get('data_quality', 0.5)
+        else:
+            factor_scores['data_quality'] = context.get('data_quality', 0.5) if context else 0.5
+
+        # Pattern strength from max individual model confidence
         factor_scores['pattern_strength'] = min(1.0, prediction.ensemble_score * 1.2)
-        
-        # Temporal proximity
-        factor_scores['temporal_proximity'] = 0.8  # Placeholder
+
+        # Temporal proximity via exponential decay
+        import math
+        if context and 'days_old' in context:
+            days_old = context['days_old']
+            factor_scores['temporal_proximity'] = math.exp(-days_old / 30.0)
+        else:
+            factor_scores['temporal_proximity'] = 1.0
         
         # Calculate weighted confidence
         overall = sum(
@@ -797,19 +813,17 @@ class ConfidenceScorer:
         }
     
     def _calculate_stability(self, prediction: EnsemblePrediction) -> float:
-        """Calculate prediction stability over time"""
-        # Compare with recent similar predictions
+        """Calculate prediction stability over time using std deviation"""
         if not self.prediction_history:
             return 0.5
-        
+
         recent = list(self.prediction_history)[-10:]
         if not recent:
             return 0.5
-        
+
         scores = [p.ensemble_score for p in recent]
-        variance = np.var(scores)
-        
-        return 1.0 - min(1.0, variance * 10)
+        std = np.std(scores) if scores else 0.0
+        return 1.0 - min(1.0, std * 4)
     
     def _classify_level(self, confidence: float) -> str:
         """Classify confidence level"""

@@ -555,25 +555,34 @@ class ImportanceScorer:
         return min(1.0, max(0.0, score))
     
     async def semantic_score(self, content: str) -> float:
-        """Use LLM to score semantic importance."""
+        """Use LLM to score semantic importance with retry on transient errors."""
         if not self.llm:
             return 0.5
-        
+
         prompt = f"""
         Rate the importance of the following information for an AI assistant
         to remember long-term. Consider:
         - Is this a user preference?
         - Is this a key decision?
         - Would this be useful in future conversations?
-        
+
         Content: {content}
-        
+
         Importance (0.0-1.0):
         """
-        
-        try:
-            response = await self.llm.generate(prompt, max_tokens=10)
-            score = float(response.strip())
-            return min(1.0, max(0.0, score))
-        except (ValueError, TypeError):
-            return 0.5
+
+        for attempt in range(2):
+            try:
+                response = await self.llm.generate(prompt, max_tokens=10)
+                score = float(response.strip())
+                return min(1.0, max(0.0, score))
+            except (ConnectionError, TimeoutError) as e:
+                if attempt == 0:
+                    logger.warning(f"Transient LLM error, retrying: {e}")
+                    continue
+                logger.warning(f"LLM retry failed: {e}")
+                return 0.5
+            except (ValueError, TypeError) as e:
+                logger.warning(f"LLM response parse error: {e}")
+                return 0.5
+        return 0.5

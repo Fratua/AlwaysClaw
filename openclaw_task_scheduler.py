@@ -32,15 +32,6 @@ from enum import IntEnum
 from dataclasses import dataclass, field
 import logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('C:\\OpenClaw\\logs\\task_scheduler.log'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger('OpenClaw.TaskScheduler')
 
 

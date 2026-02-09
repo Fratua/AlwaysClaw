@@ -12,7 +12,6 @@ from enum import Enum
 from collections import deque
 import statistics
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -74,18 +73,24 @@ class MetricsCollector:
         """Collect current metrics"""
         import psutil
         
+        import os as _os
+
+        mc = self._metrics_collector if hasattr(self, '_metrics_collector') else None
+        err = mc.get_latest('error_count') if mc else 0
+        total = mc.get_latest('total_count') if mc else 1
+
         snapshot = MetricSnapshot(
             timestamp=time.time(),
             cpu_percent=psutil.cpu_percent(interval=1),
             memory_percent=psutil.virtual_memory().percent,
-            disk_percent=psutil.disk_usage('/').percent,
-            queue_depth=0,  # To be implemented
-            request_rate=0,  # To be implemented
-            response_time_ms=0,  # To be implemented
-            error_rate=0,  # To be implemented
-            active_instances=0,  # To be implemented
-            gpt_tokens_per_min=0,  # To be implemented
-            gpt_response_time_ms=0  # To be implemented
+            disk_percent=psutil.disk_usage('/').percent if _os.name != 'nt' else psutil.disk_usage('C:\\').percent,
+            queue_depth=len(getattr(self, 'task_queue', [])),
+            request_rate=mc.get_latest('request_rate') if mc else 0.0,
+            response_time_ms=mc.get_latest('response_time') if mc else 0.0,
+            error_rate=err / max(total, 1),
+            active_instances=len(psutil.Process().children()) if psutil.pid_exists(_os.getpid()) else 1,
+            gpt_tokens_per_min=mc.get_latest('gpt_tokens_per_min') if mc else 0.0,
+            gpt_response_time_ms=mc.get_latest('gpt_response_time') if mc else 0.0,
         )
         
         with self._lock:

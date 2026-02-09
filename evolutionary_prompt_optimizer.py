@@ -757,9 +757,20 @@ class MutationOperators:
         return new_gene
     
     def _paraphrase_gene(self, gene: PromptGene) -> PromptGene:
-        """Paraphrase gene content (simplified)."""
-        # In real implementation, use LLM for paraphrasing
-        return gene.copy()
+        """Paraphrase gene content using LLM."""
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            response = client.generate(
+                f"Rephrase this prompt differently while preserving intent:\n"
+                f"{gene.content}",
+                max_tokens=200,
+            )
+            new_gene = gene.copy()
+            new_gene.content = response.strip() or gene.content
+            return new_gene
+        except (ImportError, RuntimeError, EnvironmentError):
+            return gene.copy()
     
     def _reorder_genes(self, genes: List[PromptGene]) -> List[PromptGene]:
         """Shuffle gene order while respecting constraints."""

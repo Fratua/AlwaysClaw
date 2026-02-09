@@ -24,8 +24,6 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -949,14 +947,21 @@ class StatisticalAnalysisEngine:
                 interpretation="Insufficient data for analysis"
             )
         
-        # For controlled experiment, simulate treatment vs control
-        # In real implementation, this would separate actual treatment/control groups
-        all_values = []
-        for var_data in data_dict.values():
-            values = [p["value"] for p in var_data.get("points", [])]
-            all_values.extend(values)
-        
-        if len(all_values) < 2:
+        # Separate treatment/control groups for proper A/B testing
+        groups = list(data_dict.values())
+        if len(groups) >= 2:
+            variant_a = [p["value"] for p in groups[0].get("points", [])]
+            variant_b = [p["value"] for p in groups[1].get("points", [])]
+        else:
+            # Single group: split in half as fallback
+            all_values = []
+            for var_data in groups:
+                all_values.extend([p["value"] for p in var_data.get("points", [])])
+            mid = len(all_values) // 2
+            variant_a = all_values[:mid]
+            variant_b = all_values[mid:]
+
+        if len(variant_a) < 2 or len(variant_b) < 2:
             return InferentialResult(
                 test="none",
                 statistic=0.0,
@@ -964,30 +969,43 @@ class StatisticalAnalysisEngine:
                 significant=False,
                 confidence_interval=None,
                 effect_size=0.0,
-                interpretation="Insufficient data points"
+                interpretation="Insufficient data points for A/B comparison"
             )
-        
-        # Simulate one-sample t-test against hypothesized mean
-        hypothesized_mean = 100  # Default hypothesized value
-        t_stat, p_value = stats.ttest_1samp(all_values, hypothesized_mean)
-        
-        # Calculate confidence interval
-        ci = stats.t.interval(
-            self.config["confidence_level"],
-            len(all_values) - 1,
-            loc=np.mean(all_values),
-            scale=stats.sem(all_values)
+
+        # Independent samples t-test
+        t_stat, p_value = stats.ttest_ind(variant_a, variant_b)
+
+        # Confidence interval for the difference in means
+        diff_mean = np.mean(variant_a) - np.mean(variant_b)
+        pooled_se = np.sqrt(
+            stats.sem(variant_a) ** 2 + stats.sem(variant_b) ** 2
         )
-        
-        # Calculate Cohen's d (effect size)
-        cohens_d = (np.mean(all_values) - hypothesized_mean) / np.std(all_values, ddof=1)
-        
+        df = len(variant_a) + len(variant_b) - 2
+        t_crit = stats.t.ppf(
+            (1 + self.config["confidence_level"]) / 2, df
+        )
+        ci = (diff_mean - t_crit * pooled_se, diff_mean + t_crit * pooled_se)
+
+        # Cohen's d effect size
+        pooled_std = np.sqrt(
+            ((len(variant_a) - 1) * np.var(variant_a, ddof=1) +
+             (len(variant_b) - 1) * np.var(variant_b, ddof=1)) / df
+        )
+        cohens_d = diff_mean / pooled_std if pooled_std > 0 else 0.0
+
         # Interpret
         significant = p_value < 0.05
         if significant:
-            interpretation = f"Significant difference from hypothesized mean (t={t_stat:.3f}, p={p_value:.4f})"
+            winner = 'A' if np.mean(variant_a) > np.mean(variant_b) else 'B'
+            interpretation = (
+                f"Significant difference: variant {winner} is better "
+                f"(t={t_stat:.3f}, p={p_value:.4f}, d={cohens_d:.3f})"
+            )
         else:
-            interpretation = f"No significant difference from hypothesized mean (t={t_stat:.3f}, p={p_value:.4f})"
+            interpretation = (
+                f"No significant difference between variants "
+                f"(t={t_stat:.3f}, p={p_value:.4f}, d={cohens_d:.3f})"
+            )
         
         return InferentialResult(
             test="one_sample_t_test",

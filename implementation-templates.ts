@@ -418,9 +418,29 @@ export class MemoryManager {
   }
 
   private async generateEmbedding(text: string): Promise<number[]> {
-    // Use embedding model API
-    // This is a placeholder - implement with actual embedding service
-    return new Array(1536).fill(0).map(() => Math.random() - 0.5);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (apiKey) {
+      const response = await fetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'text-embedding-3-small',
+          input: text,
+        }),
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`OpenAI embeddings API error ${response.status}: ${errText}`);
+      }
+      const json = await response.json() as { data: Array<{ embedding: number[] }> };
+      return json.data[0].embedding;
+    }
+
+    console.warn('OPENAI_API_KEY not set - returning zero vector for embedding');
+    return new Array(1536).fill(0);
   }
 
   private async loadLongTermMemory(): Promise<void> {

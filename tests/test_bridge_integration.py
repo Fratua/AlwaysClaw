@@ -87,6 +87,8 @@ def bridge_proc():
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
+    proc.stdout.close()
+    proc.stderr.close()
 
 
 class TestBridgeStartup:

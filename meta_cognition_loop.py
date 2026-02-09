@@ -25,8 +25,6 @@ from collections import deque
 import numpy as np
 from pathlib import Path
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -629,9 +627,19 @@ class CognitivePerformanceMonitor:
         return np.mean(errors) if errors else 0.0
     
     def _calculate_token_efficiency(self, trace: ReasoningTrace) -> float:
-        """Calculate token efficiency"""
-        # Placeholder - would integrate with actual token tracking
-        return 0.7
+        """Calculate token efficiency based on reasoning density"""
+        if not trace.steps:
+            return 0.5
+
+        total_chars = sum(len(s.conclusion) + len(s.premise) for s in trace.steps)
+        validated = sum(
+            1 for s in trace.steps
+            if s.validation_status == ValidationStatus.VALIDATED
+        )
+        if total_chars == 0:
+            return 0.5
+        # Efficiency = useful output per unit of reasoning text
+        return min(1.0, (validated / len(trace.steps)) * (1000.0 / max(total_chars, 1)) * 10)
     
     def _assess_coherence(self, trace: ReasoningTrace) -> float:
         """Assess coherence of reasoning"""
@@ -1524,10 +1532,29 @@ class DeepReflectionEngine:
         trace: ReasoningTrace,
         context: Optional[Dict] = None
     ) -> str:
-        """Generate an insight for a reflection question"""
-        # This would integrate with LLM for actual insight generation
-        # For now, return a placeholder
-        return f"Insight for: {question[:50]}..."
+        """Generate an insight for a reflection question using LLM"""
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+
+            trace_summary = "; ".join(
+                s.conclusion[:80] for s in trace.steps[:5]
+            ) if trace.steps else "No reasoning steps available"
+
+            context_str = ""
+            if context:
+                context_str = f"\nContext: {json.dumps({k: str(v)[:100] for k, v in list(context.items())[:5]})}"
+
+            prompt = (
+                f"Given this reasoning trace summary:\n{trace_summary}\n"
+                f"{context_str}\n\n"
+                f"Generate a concise insight answering: {question}\n"
+                f"Respond in 1-2 sentences."
+            )
+            return client.generate(prompt, max_tokens=150)
+        except (ImportError, ValueError, RuntimeError, EnvironmentError) as e:
+            logger.warning(f"LLM insight generation failed: {e}")
+            return f"Insight for: {question[:50]}..."
     
     def _synthesize_insights(self, phases: Dict[str, ReflectionPhase]) -> List[str]:
         """Synthesize insights from all phases"""

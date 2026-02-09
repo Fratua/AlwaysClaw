@@ -3,6 +3,7 @@ Multi-Factor Authentication Handling System
 For Windows 10 OpenClaw AI Agent Framework
 """
 
+import os
 import re
 import time
 import asyncio
@@ -564,12 +565,30 @@ class SMSOTPHandler:
     ) -> List[Dict]:
         """
         Fetch SMS messages from provider.
-        
+
         Override this method for specific SMS provider.
         """
-        # This should be implemented for specific provider (Twilio, etc.)
-        # Default implementation returns empty list
-        return []
+        try:
+            from twilio.rest import Client as TwilioClient
+            account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+            auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
+            if not account_sid or not auth_token:
+                logger.warning("Twilio credentials not configured")
+                return []
+            client = TwilioClient(account_sid, auth_token)
+            messages = client.messages.list(to=phone_number, limit=5)
+            codes = []
+            for msg in messages:
+                match = re.search(r'\b\d{4,8}\b', msg.body)
+                if match:
+                    codes.append({'body': msg.body, 'code': match.group()})
+            return codes
+        except ImportError:
+            logger.warning("twilio not installed")
+            return []
+        except (ConnectionError, TimeoutError, ValueError, AttributeError) as e:
+            logger.warning(f"Failed to fetch SMS messages: {e}")
+            return []
     
     def _extract_code_from_text(self, text: str) -> Optional[str]:
         """

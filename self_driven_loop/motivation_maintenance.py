@@ -9,6 +9,7 @@ Author: AI Systems Architecture Team
 Version: 1.0.0
 """
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Deque, Any
 from collections import deque
@@ -225,12 +226,13 @@ class MotivationMonitor:
         }
 
 
-class RenewalStrategy:
+class RenewalStrategy(ABC):
     """Base class for renewal strategies."""
-    
+
+    @abstractmethod
     def execute(self, context: Dict[str, Any]) -> RenewalResult:
         """Execute renewal strategy."""
-        raise NotImplementedError
+        ...
 
 
 class AutonomyBoostStrategy(RenewalStrategy):

@@ -7,10 +7,13 @@ const cron = require('node-cron');
 const logger = require('./logger');
 
 class CronScheduler {
-  constructor() {
+  constructor(options = {}) {
     this.jobs = new Map();
     this.tasks = new Map();
     this.isRunning = false;
+    this.jobFailures = new Map(); // { name -> { count, pausedUntil } }
+    this.maxConsecutiveFailures = options.maxConsecutiveFailures || 5;
+    this.failureCooldownMs = options.failureCooldownMs || 10 * 60 * 1000; // 10 minutes default
   }
 
   initialize() {
@@ -37,15 +40,39 @@ class CronScheduler {
     }
 
     const task = cron.schedule(cronExpression, async () => {
+      // Circuit breaker: check if job is paused due to consecutive failures
+      const failTracker = this.jobFailures.get(name) || { count: 0, pausedUntil: 0 };
+      if (failTracker.pausedUntil > Date.now()) {
+        logger.debug(`[CronScheduler] Skipping paused job: ${name} (resumes at ${new Date(failTracker.pausedUntil).toISOString()})`);
+        return;
+      }
+      // Auto-resume: clear pause if cooldown has passed
+      if (failTracker.pausedUntil > 0 && failTracker.pausedUntil <= Date.now()) {
+        failTracker.pausedUntil = 0;
+        failTracker.count = 0;
+        logger.info(`[CronScheduler] Auto-resumed job after cooldown: ${name}`);
+      }
+
       logger.debug(`[CronScheduler] Executing job: ${name}`);
       const startTime = Date.now();
-      
+
       try {
         await handler();
+        // Reset failure count on success
+        failTracker.count = 0;
+        failTracker.pausedUntil = 0;
+        this.jobFailures.set(name, failTracker);
         logger.debug(`[CronScheduler] Job completed: ${name} (${Date.now() - startTime}ms)`);
       } catch (error) {
+        failTracker.count++;
+        if (failTracker.count >= this.maxConsecutiveFailures) {
+          failTracker.pausedUntil = Date.now() + this.failureCooldownMs;
+          logger.warn(`[CronScheduler] Job paused after ${failTracker.count} consecutive failures: ${name}. Cooldown until ${new Date(failTracker.pausedUntil).toISOString()}`);
+          failTracker.count = 0; // reset for after cooldown
+        }
+        this.jobFailures.set(name, failTracker);
         logger.error(`[CronScheduler] Job failed: ${name}`, error);
-        
+
         // Report error to master
         if (process.send) {
           process.send({

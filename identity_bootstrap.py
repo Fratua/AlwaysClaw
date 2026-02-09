@@ -245,24 +245,71 @@ class IdentityBootstrap:
         }
     
     async def _restore_state(self) -> Optional[Dict[str, Any]]:
-        """Restore identity state from persistence"""
-        # This would load from the persistence layer
-        # For now, return None to indicate fresh start
+        """Restore identity state from SQLite, falling back to JSON file"""
+        # Try SQLite first
+        try:
+            import sqlite3
+            db_path = self.memory_path / "alwaysclaw.db"
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT state_json FROM identity_state ORDER BY updated_at DESC LIMIT 1"
+                ).fetchone()
+                conn.close()
+                if row:
+                    return json.loads(row['state_json'])
+        except (sqlite3.Error, OSError, ValueError) as e:
+            logger.warning(f"SQLite state restore failed, trying JSON: {e}")
+
+        # Fall back to JSON file
         state_file = self.memory_path / "identity_state.json"
-        
         if state_file.exists():
             try:
                 with open(state_file, 'r') as f:
                     return json.load(f)
             except (OSError, ValueError) as e:
-                logger.warning(f"Failed to restore state: {e}")
-        
+                logger.warning(f"Failed to restore state from JSON: {e}")
+
         return None
+
+    async def save_state(self, state: Dict[str, Any]) -> bool:
+        """Persist identity state to SQLite and JSON file"""
+        import sqlite3
+
+        # Save to SQLite
+        try:
+            db_path = self.memory_path / "alwaysclaw.db"
+            self.memory_path.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(db_path))
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS identity_state (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO identity_state (state_json, updated_at) VALUES (?, ?)",
+                (json.dumps(state), datetime.utcnow().isoformat()),
+            )
+            conn.commit()
+            conn.close()
+        except (sqlite3.Error, OSError) as e:
+            logger.warning(f"SQLite state save failed: {e}")
+
+        # Also save to JSON as backup
+        try:
+            state_file = self.memory_path / "identity_state.json"
+            with open(state_file, 'w') as f:
+                json.dump(state, f, indent=2, default=str)
+            return True
+        except (OSError, TypeError) as e:
+            logger.warning(f"JSON state save failed: {e}")
+            return False
     
     async def _initialize_persona_manager(self) -> Any:
-        """Initialize and load persona manager"""
-        # This would initialize the PersonaManager
-        # For now, return a simple placeholder
+        """Initialize and load persona manager from YAML persona files"""
         from persona_manager import PersonaManager
         
         personas_dir = self.config_path / "personas"
@@ -278,9 +325,7 @@ class IdentityBootstrap:
         identity: AgentIdentity,
         restored_state: Optional[Dict]
     ) -> Any:
-        """Initialize self-concept model"""
-        # This would initialize the SelfConceptModel
-        # For now, return a simple placeholder
+        """Initialize self-concept model from identity and restored state"""
         from self_concept import SelfConceptModel
         
         model = SelfConceptModel()

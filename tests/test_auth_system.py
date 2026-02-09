@@ -30,12 +30,12 @@ class TestJWTHandler:
         """Test that expired tokens are rejected."""
         try:
             import jwt
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
         except ImportError:
             pytest.skip("pyjwt not installed")
 
         secret = "test-secret-key"
-        payload = {"sub": "user123", "exp": datetime.utcnow() - timedelta(hours=1)}
+        payload = {"sub": "user123", "exp": datetime.now(timezone.utc) - timedelta(hours=1)}
         token = jwt.encode(payload, secret, algorithm="HS256")
         with pytest.raises(jwt.ExpiredSignatureError):
             jwt.decode(token, secret, algorithms=["HS256"])

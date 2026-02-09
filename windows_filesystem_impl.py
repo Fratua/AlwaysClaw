@@ -54,11 +54,6 @@ except ImportError:
     HAS_WIN32 = False
     logging.warning("pywin32 not available - Windows-specific features disabled")
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 
 # =============================================================================
 # CONSTANTS

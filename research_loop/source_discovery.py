@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import urllib.robotparser
+from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from urllib.parse import urlparse, urljoin
@@ -716,14 +717,37 @@ class SourceRanker:
         return (title_match * 0.6) + (snippet_match * 0.4)
     
     def _score_freshness(self, source: DiscoveredSource) -> float:
-        """Score content freshness"""
-        # For now, use a neutral score
-        # Production would check publication dates
-        return 0.7
-    
+        """Score content freshness based on discovery time"""
+        from datetime import datetime, timezone
+        try:
+            discovered = source.discovered_at
+            if isinstance(discovered, str):
+                discovered = datetime.fromisoformat(discovered.replace('Z', '+00:00'))
+            days_old = (datetime.now(timezone.utc) - discovered).days
+            return max(0.1, 1.0 - (days_old / 365.0))
+        except (AttributeError, ValueError, TypeError):
+            return 0.5
+
     def _score_authority(self, source: DiscoveredSource) -> float:
-        """Score source authority"""
-        return source.credibility_score
+        """Score source authority based on domain reputation"""
+        import re
+        url = getattr(source, 'url', '') or ''
+        domain = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
+
+        authoritative = {
+            'github.com': 0.85, 'stackoverflow.com': 0.8,
+            'docs.python.org': 0.9, 'developer.mozilla.org': 0.9,
+            'arxiv.org': 0.85, 'ieee.org': 0.85,
+        }
+        if domain in authoritative:
+            return authoritative[domain]
+        if domain.endswith('.gov') or domain.endswith('.edu'):
+            return 0.8
+        if domain.endswith('.org'):
+            return 0.7
+
+        # Fall back to the source's own credibility score
+        return getattr(source, 'credibility_score', 0.5)
     
     def _score_position(self, source: DiscoveredSource) -> float:
         """Score based on search result position"""
@@ -758,12 +782,13 @@ class SearchEngineManager:
         return self.engines[name]
 
 
-class SearchEngine:
+class SearchEngine(ABC):
     """Base class for search engines"""
-    
+
+    @abstractmethod
     async def search(self, query: str, num_results: int = 10) -> List[Dict[str, Any]]:
         """Execute search and return results"""
-        raise NotImplementedError
+        ...
 
 
 class GoogleSearchEngine(SearchEngine):

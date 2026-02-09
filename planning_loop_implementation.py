@@ -25,8 +25,6 @@ from typing import Dict, List, Optional, Callable, Any, Set, Tuple, Union
 from collections import defaultdict
 import heapq
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

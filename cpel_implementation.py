@@ -20,8 +20,6 @@ from enum import Enum
 from collections import defaultdict
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -621,25 +619,60 @@ class ContextEngine:
             return 0.6
         elif any(kw in input_lower for kw in urgency_keywords['low']):
             return 0.2
-            
-        return 0.5
+
+        # LLM fallback when no keywords match
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            resp = client.generate(
+                f"Rate urgency 0.0-1.0 for: {user_input[:300]}. Reply ONLY a number."
+            )
+            return max(0.0, min(1.0, float(resp.strip())))
+        except (ImportError, ValueError, RuntimeError, EnvironmentError):
+            return 0.3
         
     def _detect_domain(self, user_input: str) -> Optional[str]:
         """Detect the domain of the request."""
         domains = {
-            'technical': ['code', 'program', 'script', 'api', 'database', 'server'],
-            'business': ['meeting', 'report', 'client', 'project', 'deadline'],
-            'creative': ['write', 'story', 'design', 'create', 'art'],
-            'personal': ['my', 'i need', 'help me', 'for me'],
-            'research': ['study', 'paper', 'article', 'research', 'analysis']
+            'technical': ['code', 'program', 'script', 'api', 'database', 'server',
+                          'software', 'bug', 'deploy', 'programming', 'function'],
+            'business': ['meeting', 'report', 'client', 'project', 'deadline',
+                         'revenue', 'profit', 'market', 'budget', 'stakeholder'],
+            'creative': ['write', 'story', 'design', 'create', 'art',
+                         'compose', 'illustrate', 'brainstorm'],
+            'personal': ['my', 'i need', 'help me', 'for me', 'remind me'],
+            'research': ['study', 'paper', 'article', 'research', 'analysis',
+                         'hypothesis', 'experiment', 'data'],
+            'science': ['biology', 'physics', 'chemistry', 'math', 'theorem'],
         }
-        
+
         input_lower = user_input.lower()
-        
+
+        # Count keyword matches per domain, return best match
+        scores = {}
         for domain, keywords in domains.items():
-            if any(kw in input_lower for kw in keywords):
-                return domain
-                
+            count = sum(1 for kw in keywords if kw in input_lower)
+            if count > 0:
+                scores[domain] = count
+
+        if scores:
+            return max(scores, key=scores.get)
+
+        # LLM fallback
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            resp = client.generate(
+                f"Classify this request into one domain: technical, business, "
+                f"creative, personal, research, science. Reply with ONLY the "
+                f"domain name.\nRequest: {user_input[:300]}"
+            )
+            detected = resp.strip().lower()
+            if detected in domains:
+                return detected
+        except (ImportError, ValueError, RuntimeError, EnvironmentError):
+            pass
+
         return None
         
     def _detect_emotional_tone(self, user_input: str) -> Optional[str]:
