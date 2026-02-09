@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from enum import Enum, auto
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import aiohttp
@@ -101,7 +101,7 @@ class DeploymentOrchestrator(ABC):
 
     async def deploy(self, version: str, **kwargs) -> DeploymentResult:
         """Template method for deployment."""
-        started_at = datetime.utcnow()
+        started_at = datetime.now(timezone.utc)
         self._current_version = version
         self.logger.info("Starting deployment of version %s", version)
 
@@ -124,7 +124,7 @@ class DeploymentOrchestrator(ABC):
                 state=DeploymentState.COMPLETED,
                 message=f"Successfully deployed version {version}",
                 started_at=started_at,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
             )
 
         except Exception as exc:
@@ -135,12 +135,12 @@ class DeploymentOrchestrator(ABC):
                 state=DeploymentState.FAILED,
                 message=f"Deployment failed: {exc}",
                 started_at=started_at,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
             )
 
     async def rollback(self) -> DeploymentResult:
         """Template method for rollback."""
-        started_at = datetime.utcnow()
+        started_at = datetime.now(timezone.utc)
         self.state = DeploymentState.ROLLING_BACK
         self.logger.info("Rolling back deployment")
 
@@ -152,7 +152,7 @@ class DeploymentOrchestrator(ABC):
                 state=DeploymentState.COMPLETED,
                 message="Rollback completed successfully",
                 started_at=started_at,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
             )
         except Exception as exc:
             self.logger.error("Rollback failed: %s", exc)
@@ -162,7 +162,7 @@ class DeploymentOrchestrator(ABC):
                 state=DeploymentState.FAILED,
                 message=f"Rollback failed: {exc}",
                 started_at=started_at,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
             )
 
     async def health_check(

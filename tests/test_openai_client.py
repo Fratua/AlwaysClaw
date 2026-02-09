@@ -54,12 +54,20 @@ class TestOpenAIClientInit:
             assert client.thinking_mode == 'high'
 
     def test_thinking_mode_from_env(self):
-        """Should respect OPENAI_THINKING_MODE env var."""
+        """Should respect OPENAI_THINKING_MODE env var when valid."""
+        with patch.dict(os.environ, {'OPENAI_THINKING_MODE': 'xhigh'}):
+            from openai_client import OpenAIClient
+            OpenAIClient._instance = None
+            client = OpenAIClient()
+            assert client.thinking_mode == 'xhigh'
+
+    def test_thinking_mode_invalid_falls_back(self):
+        """Invalid OPENAI_THINKING_MODE should fall back to 'high'."""
         with patch.dict(os.environ, {'OPENAI_THINKING_MODE': 'extra_high'}):
             from openai_client import OpenAIClient
             OpenAIClient._instance = None
             client = OpenAIClient()
-            assert client.thinking_mode == 'extra_high'
+            assert client.thinking_mode == 'high'
 
     def test_disabled_client_raises_on_complete(self):
         """Disabled client should raise on complete()."""

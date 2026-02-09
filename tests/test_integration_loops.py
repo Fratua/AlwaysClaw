@@ -118,12 +118,16 @@ class TestDeploymentOrchestrator:
 
     def test_blue_green_init(self):
         from deployment_orchestrator import BlueGreenDeployer
-        deployer = BlueGreenDeployer("blue-green-config.yaml")
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "config", "future", "blue-green-config.yaml")
+        deployer = BlueGreenDeployer(config_path)
         assert deployer is not None
 
     def test_canary_init(self):
         from deployment_orchestrator import CanaryDeployer
-        deployer = CanaryDeployer("canary-config.yaml")
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "config", "future", "canary-config.yaml")
+        deployer = CanaryDeployer(config_path)
         assert deployer is not None
 
     def test_rolling_update_init(self):

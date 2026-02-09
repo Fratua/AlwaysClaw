@@ -9,7 +9,7 @@ and safe validation of generated patches.
 import asyncio
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
@@ -25,7 +25,7 @@ class DetectedError:
     message: str
     stacktrace: str = ""
     severity: str = "medium"
-    detected_at: datetime = field(default_factory=datetime.utcnow)
+    detected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     context: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -78,7 +78,7 @@ class DebuggingLoop:
         4. Return status report
         """
         context = context or {}
-        cycle_start = datetime.utcnow()
+        cycle_start = datetime.now(timezone.utc)
 
         # Step 1: Detect errors from various sources
         errors = await self._detect_errors(context)
@@ -97,7 +97,7 @@ class DebuggingLoop:
                     self.fix_history.append(fix)
 
         return {
-            "cycle_time_ms": int((datetime.utcnow() - cycle_start).total_seconds() * 1000),
+            "cycle_time_ms": int((datetime.now(timezone.utc) - cycle_start).total_seconds() * 1000),
             "errors_detected": len(errors),
             "new_errors": len(new_errors),
             "fixes_generated": len(fixes),
@@ -278,7 +278,7 @@ class DebuggingLoop:
                      DetectedError(error_id='', source='', error_type='', message=''))
             ),
             'outcome': outcome,
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
         })
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         try:
