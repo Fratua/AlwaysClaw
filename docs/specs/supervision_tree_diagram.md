@@ -416,7 +416,7 @@
 │  CPU CORES (Example: 8-core system)                                                                 │
 │  ┌─────────────────────────────────────────────────────────────────────────────────────────────┐   │
 │  │ Core 0: [SYSTEM]  Critical services, heartbeat, monitoring                                  │   │
-│  │ Cores 1-3: [AGENTS] Agent loops (15 loops, distributed)                                     │   │
+│  │ Cores 1-3: [AGENTS] Agent loops (16 loops, distributed)                                     │   │
 │  │ Cores 4-6: [WORKERS] Prefork worker pool for CPU tasks                                      │   │
 │  │ Core 7: [SERVICES] I/O services (Gmail, Browser, TTS, STT, Twilio)                          │   │
 │  └─────────────────────────────────────────────────────────────────────────────────────────────┘   │
@@ -425,7 +425,7 @@
 │  ┌─────────────────────────────────────────────────────────────────────────────────────────────┐   │
 │  │ System Supervisor:     512 MB                                                               │   │
 │  │ Core Services:       1,024 MB (4 services x 256 MB)                                         │   │
-│  │ Agent Loops:        15,360 MB (15 loops x 1,024 MB)                                         │   │
+│  │ Agent Loops:        16,384 MB (16 loops x 1,024 MB)                                         │   │
 │  │ Worker Pools:        8,192 MB (4 workers x 2,048 MB)                                        │   │
 │  │ Services:            2,560 MB (5 services x 512 MB)                                         │   │
 │  │ ─────────────────────────────────────────────                                               │   │

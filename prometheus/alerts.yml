@@ -1,0 +1,40 @@
+# OpenClaw Prometheus Alert Rules
+
+groups:
+  - name: agent_alerts
+    rules:
+      - alert: AgentDown
+        expr: up{job="agent"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent service is down"
+          description: "Agent instance {{ $labels.instance }} has been down for more than 1 minute."
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total{job="agent"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on agent"
+          description: "Agent instance {{ $labels.instance }} CPU usage is above 80% for 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="agent"} > 3221225472
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on agent"
+          description: "Agent instance {{ $labels.instance }} memory usage is above 3GB for 5 minutes."
+
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="agent"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High request latency on agent"
+          description: "Agent instance {{ $labels.instance }} p99 latency is above 5 seconds."

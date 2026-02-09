@@ -1,0 +1,23 @@
+# OpenClaw ML Feature Dependencies
+# Install with: pip install -r requirements-ml.txt
+#
+# These are optional dependencies for advanced ML features,
+# PostgreSQL cold storage, pattern learning, and voice/SMS integrations.
+
+# ML Stack (bug_finder_loop, pattern_learning, self_learning_loop)
+tensorflow>=2.14.0
+xgboost>=2.0.0
+shap>=0.43.0
+lime>=0.2.0
+statsmodels>=0.14.0
+prophet>=1.1.0
+prefixspan>=0.5.2
+
+# PostgreSQL cold storage (postgres_store.py)
+asyncpg>=0.29.0
+
+# File system monitoring (self_updating_loop)
+watchdog>=3.0.0
+
+# Twilio voice/SMS (alert_manager.py, service_integrations.py)
+twilio>=8.5.0

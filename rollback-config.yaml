@@ -43,7 +43,7 @@ rollback:
       # Agent loop specific triggers
       agent_loops:
         enabled: true
-        min_running: 13                    # Min 13 of 15 loops
+        min_running: 14                    # Min 14 of 16 loops
         max_failed_restarts: 3
       
       # External service triggers

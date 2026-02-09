@@ -1,5 +1,5 @@
 /**
- * Agent Loops - 15 Hardcoded Agentic Loops
+ * Agent Loops - 15 Operational + 16 Cognitive Agentic Loops (37 total scheduled tasks)
  * OpenClaw AI Agent Scheduler
  */
 
@@ -40,10 +40,10 @@ export const SCHEDULES = {
 } as const;
 
 /**
- * Register all 15 agent loops
+ * Register all 37 scheduled tasks (15 operational + 16 cognitive + 6 cron)
  */
 export function registerAgentLoops(scheduler: SchedulerSystem): void {
-  logger.info('[AgentLoops] Registering 15 agent loops...');
+  logger.info('[AgentLoops] Registering 37 scheduled tasks (15 operational + 16 cognitive + 6 cron)...');
 
   const bridgeCall = async (method: string, context: Record<string, unknown> = {}) => {
     // Bridge is accessed at runtime from the daemon master
@@ -103,8 +103,8 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     async () => {
       logger.info('[Loop:BrowserHealth] Checking browser health...');
       try {
-        const health = await bridgeCall('health');
-        logger.info('[Loop:BrowserHealth] Bridge status:', health?.status || 'unknown');
+        const health = await bridgeCall('browser.health');
+        logger.info('[Loop:BrowserHealth] Browser status:', health?.status || 'unknown');
       } catch (e) {
         logger.warn('[Loop:BrowserHealth] Check skipped:', (e as Error).message);
       }
@@ -122,8 +122,14 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Voice Queue Processor',
     SCHEDULES.EVERY_5_SECONDS,
     async () => {
-      // Voice queue processing is lightweight - check if any TTS/STT requests pending
-      // No-op if no queue system configured
+      try {
+        const status = await bridgeCall('voice.queue_status');
+        if (status?.pending > 0) {
+          logger.info('[Loop:VoiceQueue] Pending voice requests:', status.pending);
+        }
+      } catch (e) {
+        // Voice queue not configured - silently skip
+      }
     },
     { 
       tags: ['voice', 'tts', 'stt', 'realtime'],
@@ -140,8 +146,8 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     async () => {
       logger.info('[Loop:TwilioStatus] Checking Twilio status...');
       try {
-        const health = await bridgeCall('health');
-        logger.info('[Loop:TwilioStatus] System status:', health?.status || 'unknown');
+        const health = await bridgeCall('twilio.status');
+        logger.info('[Loop:TwilioStatus] Twilio status:', health?.status || 'unknown');
       } catch (e) {
         logger.warn('[Loop:TwilioStatus] Check skipped:', (e as Error).message);
       }
@@ -166,11 +172,6 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
         external: `${Math.round(usage.external / 1024 / 1024)}MB`,
         rss: `${Math.round(usage.rss / 1024 / 1024)}MB`,
       });
-      try {
-        await bridgeCall('health');
-      } catch (e) {
-        // Resource monitoring continues even if bridge is down
-      }
     },
     { 
       tags: ['system', 'monitoring', 'resources'],
@@ -187,7 +188,18 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     async () => {
       logger.info('[Loop:IdentitySync] Syncing identity state...');
       try {
-        await bridgeCall('memory.search', { query: 'identity config', limit: 5 });
+        const identityRecords = await bridgeCall('memory.search', { query: 'identity config', limit: 5 });
+        const currentConfig = await bridgeCall('memory.search', { query: 'active identity', type: 'system', limit: 1 });
+        logger.info('[Loop:IdentitySync] Identity records found:', identityRecords?.count || 0, 'current:', currentConfig?.count || 0);
+        if (identityRecords?.count > 0 && (!currentConfig?.count || currentConfig.count === 0)) {
+          await bridgeCall('memory.store', {
+            type: 'system',
+            content: JSON.stringify({ identity: 'synced', timestamp: Date.now() }),
+            source: 'identity-sync-loop',
+            tags: ['identity', 'sync'],
+          });
+          logger.info('[Loop:IdentitySync] Identity state synchronized');
+        }
       } catch (e) {
         logger.warn('[Loop:IdentitySync] Sync skipped:', (e as Error).message);
       }
@@ -207,12 +219,22 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     async () => {
       logger.info('[Loop:SoulUpdate] Updating soul state...');
       try {
+        const recentInteractions = await bridgeCall('memory.search', { query: 'interaction', type: 'episodic', limit: 10 });
+        const interactionCount = recentInteractions?.count || 0;
+        const mood = interactionCount > 5 ? 'engaged' : interactionCount > 0 ? 'active' : 'idle';
         await bridgeCall('memory.store', {
           type: 'system',
-          content: JSON.stringify({ state: 'active', timestamp: Date.now(), uptime: process.uptime() }),
+          content: JSON.stringify({
+            state: 'active',
+            mood,
+            recentInteractions: interactionCount,
+            timestamp: Date.now(),
+            uptime: process.uptime(),
+          }),
           source: 'soul-update-loop',
           tags: ['soul-state', 'system'],
         });
+        logger.info('[Loop:SoulUpdate] Soul state updated - mood:', mood);
       } catch (e) {
         logger.warn('[Loop:SoulUpdate] Update skipped:', (e as Error).message);
       }
@@ -271,8 +293,11 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Log Rotation',
     SCHEDULES.EVERY_HOUR,
     async () => {
-      logger.info('[Loop:LogRotation] Log rotation handled by Winston DailyRotateFile');
+      logger.info('[Loop:LogRotation] Verifying Winston log rotation...');
       // Winston's DailyRotateFile transport handles rotation automatically
+      // Verify transports are operational
+      const transportCount = logger.transports?.length || 0;
+      logger.info('[Loop:LogRotation] Active transports:', transportCount, '- rotation handled by Winston DailyRotateFile');
     },
     { 
       tags: ['maintenance', 'logs', 'cleanup'],
@@ -309,8 +334,15 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     SCHEDULES.EVERY_MINUTE,
     async () => {
       logger.info('[Loop:RateLimit] Checking API rate limits...');
-      const usage = process.cpuUsage();
-      logger.info('[Loop:RateLimit] CPU usage:', { user: usage.user, system: usage.system });
+      try {
+        const rateStatus = await bridgeCall('api.rate_status');
+        logger.info('[Loop:RateLimit] API rate status:', rateStatus?.status || 'unknown',
+          'calls:', rateStatus?.calls_remaining || 'N/A');
+      } catch (e) {
+        // Fallback to basic CPU monitoring if bridge rate tracking unavailable
+        const usage = process.cpuUsage();
+        logger.info('[Loop:RateLimit] CPU usage (fallback):', { user: usage.user, system: usage.system });
+      }
     },
     { 
       tags: ['system', 'api', 'throttling'],
@@ -325,8 +357,10 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'User Presence Check',
     SCHEDULES.EVERY_5_MINUTES,
     async () => {
-      logger.info('[Loop:PresenceCheck] User presence check completed');
-      // User presence detection requires Windows UI automation (not yet implemented)
+      // TODO: User presence detection requires Windows UI automation
+      // This loop is deferred until win32 API integration is complete.
+      // See docs/architecture/windows_ipc_architecture_spec.md for planned approach.
+      logger.debug('[Loop:PresenceCheck] User presence check deferred - Windows UI automation not yet integrated');
     },
     { 
       tags: ['user', 'presence', 'activity'],
@@ -544,7 +578,19 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     { tags: ['cognitive', 'web-monitor'], preventOverlap: true, timeout: 300000 }
   );
 
-  logger.info('[AgentLoops] 15 cognitive loops registered');
+  // Loop 31: Debugging Loop - Every 10 minutes
+  scheduler.registerAgentLoop(
+    'loop-31-debugging',
+    'Debugging Loop',
+    SCHEDULES.EVERY_10_MINUTES,
+    async () => {
+      logger.info('[Loop:Debugging] Running debugging cycle...');
+      await bridgeCall('loop.debugging.run_cycle');
+    },
+    { tags: ['cognitive', 'debugging'], preventOverlap: true, timeout: 300000 }
+  );
+
+  logger.info('[AgentLoops] 16 cognitive loops registered (including debugging)');
 
   // ═══════════════════════════════════════════════════════════
   // Operational Cron Jobs (absorbed from cron-scheduler.js)
@@ -624,7 +670,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
   );
 
   const totalLoops = scheduler.cronEngine.getAllJobs().length;
-  logger.info(`[AgentLoops] All ${totalLoops} loops registered successfully (15 operational + 15 cognitive + 6 cron)`);
+  logger.info(`All ${totalLoops} loops registered successfully (15 operational + 16 cognitive + 6 cron)`);
 }
 
 /**
@@ -818,6 +864,12 @@ export function getLoopInfo(loopId: string): {
       description: 'Web monitoring and change detection',
       tags: ['cognitive', 'web-monitor'],
     },
+    'loop-31-debugging': {
+      name: 'Debugging Loop',
+      schedule: SCHEDULES.EVERY_10_MINUTES,
+      description: 'Automated debugging and issue detection',
+      tags: ['cognitive', 'debugging'],
+    },
   };
 
   const loop = loops[loopId];
@@ -864,5 +916,6 @@ export function getAllLoopIds(): string[] {
     'loop-28-cpel',
     'loop-29-context-eng',
     'loop-30-web-monitor',
+    'loop-31-debugging',
   ];
 }

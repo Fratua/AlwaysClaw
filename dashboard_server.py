@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from dataclasses import asdict
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -72,17 +73,27 @@ class DashboardAPI:
     
     def _setup_middleware(self):
         """Setup CORS middleware"""
+        allowed_origins = os.environ.get(
+            "DASHBOARD_CORS_ORIGINS", "http://localhost:8000"
+        ).split(",")
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origins=allowed_origins,
             allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
         )
     
+    @staticmethod
+    def _validate_id(value: str) -> str:
+        """Validate path parameter IDs against injection."""
+        if not re.match(r'^[a-zA-Z0-9_-]{1,128}$', value):
+            raise HTTPException(status_code=400, detail="Invalid identifier format")
+        return value
+
     def _setup_routes(self):
         """Setup API routes"""
-        
+
         @self.app.get("/", response_class=HTMLResponse)
         async def dashboard():
             return self._get_dashboard_html()
@@ -97,6 +108,7 @@ class DashboardAPI:
         
         @self.app.post("/api/sites/{site_id}/check")
         async def check_site(site_id: str):
+            self._validate_id(site_id)
             change = await self.engine.run_check(site_id)
             return {
                 'change_detected': change is not None,
@@ -105,6 +117,7 @@ class DashboardAPI:
         
         @self.app.get("/api/sites/{site_id}/status")
         async def get_site_status(site_id: str):
+            self._validate_id(site_id)
             status = self.engine.get_monitor_status(site_id)
             if not status:
                 raise HTTPException(status_code=404, detail="Site not found")
@@ -116,6 +129,7 @@ class DashboardAPI:
             limit: int = Query(50, ge=1, le=1000),
             days: int = Query(7, ge=1, le=365)
         ):
+            self._validate_id(site_id)
             return self._get_site_history(site_id, limit, days)
         
         @self.app.get("/api/changes")
@@ -129,6 +143,7 @@ class DashboardAPI:
         
         @self.app.get("/api/changes/{change_id}")
         async def get_change(change_id: str):
+            self._validate_id(change_id)
             return self._get_change_data(change_id)
         
         @self.app.get("/api/alerts")
@@ -141,6 +156,7 @@ class DashboardAPI:
         
         @self.app.post("/api/alerts/{alert_id}/acknowledge")
         async def acknowledge_alert(alert_id: str):
+            self._validate_id(alert_id)
             return {'acknowledged': True}
         
         @self.app.get("/api/scheduler")
@@ -519,6 +535,16 @@ class DashboardAPI:
     </div>
     
     <script>
+        function escapeHtml(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         const ws = new WebSocket(`ws://${window.location.host}/ws`);
         
         ws.onopen = function() {
@@ -599,19 +625,19 @@ class DashboardAPI:
                         ${sites.map(site => `
                             <tr>
                                 <td>
-                                    <div class="site-name">${site.name}</div>
-                                    <div class="site-url">${site.url}</div>
+                                    <div class="site-name">${escapeHtml(site.name)}</div>
+                                    <div class="site-url">${escapeHtml(site.url)}</div>
                                 </td>
                                 <td>
-                                    <span class="badge badge-${site.status}">
-                                        ${site.status === 'active' ? '🟢' : '🔴'} ${site.status}
+                                    <span class="badge badge-${escapeHtml(site.status)}">
+                                        ${site.status === 'active' ? '🟢' : '🔴'} ${escapeHtml(site.status)}
                                     </span>
                                 </td>
                                 <td>${site.last_check ? new Date(site.last_check).toLocaleString() : 'Never'}</td>
                                 <td>${site.last_change ? new Date(site.last_change).toLocaleString() : 'Never'}</td>
                                 <td>
-                                    <button class="btn btn-secondary" onclick="checkSite('${site.id}')">Check</button>
-                                    <button class="btn btn-secondary" onclick="viewHistory('${site.id}')">History</button>
+                                    <button class="btn btn-secondary" onclick="checkSite('${escapeHtml(site.id)}')">Check</button>
+                                    <button class="btn btn-secondary" onclick="viewHistory('${escapeHtml(site.id)}')">History</button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -645,15 +671,15 @@ class DashboardAPI:
             
             container.innerHTML = alerts.map(alert => `
                 <div class="alert-item">
-                    <div class="alert-icon ${alert.severity.toLowerCase()}">
+                    <div class="alert-icon ${escapeHtml(alert.severity.toLowerCase())}">
                         ${alert.severity === 'CRITICAL' ? '🚨' : alert.severity === 'HIGH' ? '⚠️' : '🔔'}
                     </div>
                     <div class="alert-content">
-                        <div class="alert-title">${alert.site_name}: ${alert.category} Change</div>
+                        <div class="alert-title">${escapeHtml(alert.site_name)}: ${escapeHtml(alert.category)} Change</div>
                         <div class="alert-meta">
-                            ${alert.severity} • ${alert.change_type} • ${new Date(alert.detected_at).toLocaleString()}
+                            ${escapeHtml(alert.severity)} • ${escapeHtml(alert.change_type)} • ${new Date(alert.detected_at).toLocaleString()}
                         </div>
-                        <div style="margin-top: 8px; color: #94a3b8;">${alert.description}</div>
+                        <div style="margin-top: 8px; color: #94a3b8;">${escapeHtml(alert.description)}</div>
                     </div>
                 </div>
             `).join('');

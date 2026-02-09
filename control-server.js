@@ -7,6 +7,35 @@ const http = require('http');
 const crypto = require('crypto');
 const logger = require('./logger');
 
+class TokenBucketRateLimiter {
+  constructor(maxTokens, refillRate) {
+    this.maxTokens = maxTokens;
+    this.refillRate = refillRate; // tokens per second
+    this.buckets = new Map();
+  }
+
+  _getBucket(key) {
+    if (!this.buckets.has(key)) {
+      this.buckets.set(key, { tokens: this.maxTokens, lastRefill: Date.now() });
+    }
+    const bucket = this.buckets.get(key);
+    const now = Date.now();
+    const elapsed = (now - bucket.lastRefill) / 1000;
+    bucket.tokens = Math.min(this.maxTokens, bucket.tokens + elapsed * this.refillRate);
+    bucket.lastRefill = now;
+    return bucket;
+  }
+
+  consume(key) {
+    const bucket = this._getBucket(key);
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+}
+
 class ControlServer {
   constructor(daemonMaster, options = {}) {
     this.daemon = daemonMaster;
@@ -27,6 +56,9 @@ class ControlServer {
       errors: 0,
       startTime: Date.now()
     };
+    // Rate limiters: general (30/min) and strict for dangerous endpoints (5/min)
+    this._generalLimiter = new TokenBucketRateLimiter(30, 30 / 60);
+    this._strictLimiter = new TokenBucketRateLimiter(5, 5 / 60);
   }
 
   start() {
@@ -77,8 +109,17 @@ class ControlServer {
 
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost:' + this.options.port}`);
     const path = parsedUrl.pathname;
-    
+    const clientIp = req.socket.remoteAddress || 'unknown';
+
     logger.debug(`[ControlServer] ${req.method} ${path}`);
+
+    // Rate limiting
+    const isStrictPath = path === '/control/shutdown' || path === '/control/restart-all';
+    const limiter = isStrictPath ? this._strictLimiter : this._generalLimiter;
+    if (!limiter.consume(clientIp)) {
+      this.sendError(res, 429, 'Too many requests');
+      return;
+    }
 
     try {
       switch (path) {
@@ -118,6 +159,14 @@ class ControlServer {
           if (!this.authenticateRequest(req, res)) return;
           if (req.method === 'POST') {
             this.handleShutdown(req, res);
+          } else {
+            this.sendError(res, 405, 'Method not allowed');
+          }
+          break;
+        case '/webhook/alerts':
+          // No authentication required - alertmanager is an internal service
+          if (req.method === 'POST') {
+            this.handleWebhookAlerts(req, res);
           } else {
             this.sendError(res, 405, 'Method not allowed');
           }
@@ -360,6 +409,17 @@ class ControlServer {
       setTimeout(() => {
         this.daemon?.shutdown(reason);
       }, 100);
+    });
+  }
+
+  handleWebhookAlerts(req, res) {
+    this.readJsonBody(req, res, (data) => {
+      const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+      logger.info(`[ControlServer] Received ${alerts.length} alert(s) from alertmanager`);
+      for (const alert of alerts) {
+        logger.info(`[ControlServer] Alert: ${alert.status || 'unknown'} - ${alert.labels?.alertname || 'unnamed'}`, alert);
+      }
+      this.sendJson(res, 200, { received: true, alerts: alerts.length });
     });
   }
 

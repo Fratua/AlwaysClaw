@@ -175,7 +175,7 @@ AI Response → Multi-Modal Decomposition
 
 ### 7. Session Management
 
-**Purpose**: Manage user sessions with 15 agentic loops and heartbeat monitoring.
+**Purpose**: Manage user sessions with 37 scheduled tasks (15 operational + 16 cognitive + 6 cron) and heartbeat monitoring.
 
 **15 Agent Loops**:
 1. `conversation_loop` - Main conversation handler

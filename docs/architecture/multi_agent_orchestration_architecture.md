@@ -7,6 +7,8 @@
 
 ---
 
+> **Implementation Status:** This document describes an aspirational multi-agent hierarchy with agent registries, Raft consensus, and tiered orchestration. The current implementation uses a **flat loop architecture** with 37 scheduled tasks (15 operational + 16 cognitive + 6 cron) managed by `daemon-master.js`. See [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) for details.
+
 ## Executive Summary
 
 This document provides a comprehensive technical specification for the Inter-Agent Communication and Multi-Agent Orchestration Architecture of a Windows 10-focused AI agent system inspired by OpenClaw. The architecture supports:

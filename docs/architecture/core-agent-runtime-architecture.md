@@ -34,7 +34,7 @@ This document defines the complete core agent runtime architecture for a Windows
 - Multi-channel communication (Gmail, Twilio voice/SMS, browser control)
 - Full system access with appropriate security controls
 - Text-to-speech (TTS) and speech-to-text (STT) capabilities
-- 15 hardcoded agentic loops for specialized tasks
+- 37 scheduled tasks (15 operational loops, 16 cognitive loops, 6 cron jobs)
 - Persistent memory and identity management
 - Cron-based scheduled actions with heartbeat monitoring
 
@@ -61,7 +61,7 @@ The architecture follows event-driven design principles with a clear separation 
 │  └──────────────┘    └──────────────┘    └──────────────┘                  │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                     AGENTIC LOOPS (15 Hardcoded)                   │   │
+│  │                     AGENTIC LOOPS (37 Scheduled Tasks)                   │   │
 │  │  ralph | research | discovery | bug-finder | debugging | end-to-end │   │
 │  │  meta-cognition | exploration | self-driven | self-learning        │   │
 │  │  self-updating | self-upgrading | planning | context-engineering   │   │
@@ -731,7 +731,7 @@ openclaw-win10/
 │   │   │   ├── 📄 LLMActionPlanner.ts    # GPT-5.2 planner
 │   │   │   ├── 📄 PlanTypes.ts           # Plan type definitions
 │   │   │   └── 📄 PlanValidator.ts       # Plan validation
-│   │   ├── 📁 loops/                     # 15 Agentic Loops
+│   │   ├── 📁 loops/                     # 37 Scheduled Tasks (15 operational + 16 cognitive + 6 cron)
 │   │   │   ├── 📄 AgenticLoop.ts         # Base loop interface
 │   │   │   ├── 📄 LoopRegistry.ts        # Loop registration
 │   │   │   ├── 📄 RalphLoop.ts           # Default conversational loop
@@ -1614,7 +1614,7 @@ class SystemTool extends BaseTool {
 
 ## Agentic Loops Specification
 
-### 15 Hardcoded Agentic Loops
+### Agentic Loops (37 Scheduled Tasks)
 
 ```typescript
 // core/loops/AgenticLoop.ts - Base Interface
@@ -2736,7 +2736,7 @@ This architecture specification defines a comprehensive, production-grade AI age
 
 1. **Event-Driven Architecture**: Enables loose coupling, scalability, and reliability
 2. **Layered Separation**: Clear boundaries between Gateway, Core, and Execution
-3. **15 Agentic Loops**: Specialized behavior patterns for different task types
+3. **37 scheduled tasks (15 operational, 16 cognitive, 6 cron)**: Specialized behavior patterns for different task types
 4. **Robust Memory System**: Multi-tier memory with vector search capabilities
 5. **Security-First**: Sandboxed execution with permission layers
 6. **Extensible Design**: Plugin-based skills and configurable providers

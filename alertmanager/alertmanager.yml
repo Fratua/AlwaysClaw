@@ -14,5 +14,5 @@ route:
 receivers:
   - name: "default"
     webhook_configs:
-      - url: "http://localhost:5001/webhook/alerts"
+      - url: "http://agent:8080/webhook/alerts"
         send_resolved: true

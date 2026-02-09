@@ -323,7 +323,7 @@ class FailoverManager:
 │   │ Windows 10      │            │ Windows 10      │                         │
 │   │ Full AI Agent   │◄──────────►│ Full AI Agent   │                         │
 │   │                 │  Sync      │ (Standby Mode)  │                         │
-│   │ - All 15 loops  │  Stream    │ - All 15 loops  │                         │
+│   │ - All 16 loops  │  Stream    │ - All 16 loops  │                         │
 │   │ - GPT-5.2 API   │            │ - GPT-5.2 API   │                         │
 │   │ - Gmail/Outlook │            │ - Gmail/Outlook │                         │
 │   │ - Browser Ctrl  │            │ - Browser Ctrl  │                         │
@@ -498,7 +498,7 @@ class HealthCheckManager:
 | gmail_service | CUSTOM | 30s | WARNING | Gmail API accessibility |
 | twilio_api | HTTP | 30s | WARNING | Twilio service health |
 | system_resources | RESOURCE | 5s | CRITICAL | CPU, memory, disk usage |
-| agent_loops | CUSTOM | 5s | CRITICAL | All 15 loops active |
+| agent_loops | CUSTOM | 5s | CRITICAL | All 16 loops active |
 | cron_jobs | CUSTOM | 30s | WARNING | Cron execution status |
 | state_persistence | CUSTOM | 5s | CRITICAL | State saving operational |
 | heartbeat | CUSTOM | 5s | FATAL | Internal heartbeat system |
@@ -776,7 +776,7 @@ class StatePersistenceManager:
 │   DEGRADED MODE 1 (Minor Issues)                                            │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │ Trigger: Single service failure or high latency                     │   │
-│   │ - All 15 loops active                                               │   │
+│   │ - All 16 loops active                                               │   │
 │   │ - GPT-5.2 with reduced thinking depth                               │   │
 │   │ - Failed service disabled, alternatives used                        │   │
 │   │ - Simplified responses                                              │   │

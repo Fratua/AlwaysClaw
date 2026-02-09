@@ -91,6 +91,7 @@ email-validator>=2.0.0
 # ============================================
 # DATABASE
 # ============================================
+# asyncpg>=0.29.0            # Uncomment for PostgreSQL cold storage (postgres_store.py)
 # sqlalchemy>=2.0.0          # Uncomment if database ORM is needed
 # neo4j>=5.14.0              # Uncomment for knowledge graph support
 
@@ -157,6 +158,7 @@ isort>=5.12.0
 # lime>=0.2.0          # Uncomment for local interpretable explanations
 # statsmodels>=0.14.0  # Uncomment for time series analysis
 # prophet>=1.1.0       # Uncomment for forecasting
+# prefixspan>=0.5.2   # Uncomment for pattern learning (pattern_learning.py)
 
 # ============================================
 # OPTIONAL NLP DEPENDENCIES
@@ -169,6 +171,7 @@ isort>=5.12.0
 # ============================================
 # OPTIONAL SERVICE INTEGRATIONS
 # ============================================
-# twilio>=8.5.0                  # Uncomment for Twilio voice/SMS (service_integrations.py)
-# playwright>=1.40.0             # Uncomment for browser automation (service_integrations.py)
+twilio>=8.5.0
+# watchdog>=3.0.0                # Uncomment for file system monitoring (self_updating_loop)
+playwright>=1.40.0
 # selenium>=4.15.0               # Uncomment for Selenium-based browser control

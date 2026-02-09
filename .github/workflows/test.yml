@@ -8,10 +8,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
+          cache: 'npm'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       - run: npm install
       - run: pip install -r requirements.txt
+      - run: npm audit --audit-level=high
+      - run: pip install safety && safety check -r requirements.txt
+        continue-on-error: true
       - run: python -m pytest tests/ -v
       - run: npx tsc --noEmit

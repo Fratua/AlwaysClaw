@@ -807,7 +807,7 @@ openclaw/
 │   ├── windows_credential.py # Windows secrets
 │   └── resolver.py           # Secret resolution
 ├── agents/
-│   └── manager.py            # AgentLoopManager (15 loops)
+│   └── manager.py            # AgentLoopManager (16 loops)
 ├── integrations/
 │   └── manager.py            # IntegrationManager
 ├── cron/

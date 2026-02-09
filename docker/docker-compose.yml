@@ -31,7 +31,6 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.agent
-    container_name: openclaw-agent
     deploy:
       replicas: 3
       resources:
@@ -103,7 +102,7 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - openclaw-network
     restart: unless-stopped
@@ -222,6 +221,15 @@ services:
     restart: unless-stopped
     profiles:
       - monitoring
+
+  # Node Exporter (system metrics)
+  node-exporter:
+    image: prom/node-exporter:latest
+    ports:
+      - "9100:9100"
+    networks:
+      - openclaw-network
+    restart: unless-stopped
 
   # Alert Manager
   alertmanager:

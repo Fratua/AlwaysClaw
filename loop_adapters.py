@@ -1,5 +1,5 @@
 """
-Loop Adapters - Standardized entry points for all 15 Python cognitive loops.
+Loop Adapters - Standardized entry points for all 16 Python cognitive loops.
 Each adapter lazily initializes its loop class and provides a run_cycle() method
 that can be called from the Python bridge.
 
@@ -8,7 +8,9 @@ access to the memory database (same Python process, no bridge round-trip).
 """
 
 import asyncio
+import atexit
 import logging
+import os
 import traceback
 from typing import Any, Callable, Dict, Optional
 
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _loop_instances: Dict[str, Any] = {}
 _llm_client = None
+_thread_pool = None
 
 
 def _get_llm():
@@ -59,6 +62,7 @@ def _get_timeout(loop_name: str) -> int:
 def _run_async(coro, timeout: int = None):
     """Run an async coroutine synchronously (bridge handlers are sync).
     Enforces a per-loop timeout to prevent hung loops."""
+    global _thread_pool
     if timeout is None:
         timeout = _DEFAULT_TIMEOUT
     try:
@@ -67,12 +71,16 @@ def _run_async(coro, timeout: int = None):
         loop = None
 
     if loop and loop.is_running():
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            future = pool.submit(asyncio.run, asyncio.wait_for(coro, timeout=timeout))
-            return future.result(timeout=timeout + 5)
+        if _thread_pool is None:
+            import concurrent.futures
+            _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        future = _thread_pool.submit(asyncio.run, asyncio.wait_for(coro, timeout=timeout))
+        return future.result(timeout=timeout + 5)
     else:
         return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
+
+
+atexit.register(lambda: _thread_pool.shutdown(wait=False) if _thread_pool else None)
 
 
 # ── Individual loop adapters ──────────────────────────────────────────
@@ -309,14 +317,12 @@ def _loop_run_async(loop_name: str, coro):
 
 def run_ralph_cycle(**context) -> Dict:
     return _safe_run('ralph', _get_ralph_loop,
-                     lambda loop: _loop_run_async('ralph', loop.run_single_cycle(context)) if hasattr(loop, 'run_single_cycle')
-                     else {"status": "completed", "note": "single-cycle not available"})
+                     lambda loop: _loop_run_async('ralph', loop.run_single_cycle(context)))
 
 
 def run_research_cycle(**context) -> Dict:
     return _safe_run('research', _get_research_loop,
-                     lambda loop: _loop_run_async('research', loop.run_single_cycle(context)) if hasattr(loop, 'run_single_cycle')
-                     else {"status": "completed", "note": "single-cycle not available"})
+                     lambda loop: _loop_run_async('research', loop.run_single_cycle(context)))
 
 
 def run_planning_cycle(**context) -> Dict:
@@ -356,8 +362,7 @@ def run_exploration_cycle(**context) -> Dict:
 
 def run_discovery_cycle(**context) -> Dict:
     return _safe_run('discovery', _get_discovery_loop,
-                     lambda loop: _loop_run_async('discovery', loop.run_single_cycle(context)) if hasattr(loop, 'run_single_cycle')
-                     else {"status": "completed", "note": "single-cycle not available"})
+                     lambda loop: _loop_run_async('discovery', loop.run_single_cycle(context)))
 
 
 def run_bug_finder_cycle(**context) -> Dict:
@@ -367,13 +372,12 @@ def run_bug_finder_cycle(**context) -> Dict:
             'system_metrics': {
                 'cpu_percent': psutil.cpu_percent(),
                 'memory_percent': psutil.virtual_memory().percent,
-                'disk_usage': psutil.disk_usage('C:\\').percent,
+                'disk_usage': psutil.disk_usage(os.environ.get('SYSTEMDRIVE', 'C:\\')).percent,
             }
         }
 
     return _safe_run('bug_finder', _get_bug_finder_loop,
-                     lambda loop: _loop_run_async('bug_finder', loop._detection_cycle(_default_bug_finder_source)) if hasattr(loop, '_detection_cycle')
-                     else {"status": "completed", "note": "detection cycle not available"})
+                     lambda loop: _loop_run_async('bug_finder', loop._detection_cycle(_default_bug_finder_source)))
 
 
 def run_self_learning_cycle(**context) -> Dict:
@@ -395,14 +399,12 @@ def run_self_upgrading_cycle(**context) -> Dict:
 
 def run_self_updating_cycle(**context) -> Dict:
     return _safe_run('self_updating', _get_self_updating_loop,
-                     lambda loop: _loop_run_async('self_updating', loop.run_single_cycle(context)) if hasattr(loop, 'run_single_cycle')
-                     else {"status": "completed", "note": "single-cycle not available"})
+                     lambda loop: _loop_run_async('self_updating', loop.run_single_cycle(context)))
 
 
 def run_self_driven_cycle(**context) -> Dict:
     return _safe_run('self_driven', _get_self_driven_loop,
-                     lambda loop: _loop_run_async('self_driven', loop._loop_iteration()) if hasattr(loop, '_loop_iteration')
-                     else {"status": "completed", "note": "single iteration not available"})
+                     lambda loop: _loop_run_async('self_driven', loop._loop_iteration()))
 
 
 def run_cpel_cycle(**context) -> Dict:
@@ -415,8 +417,7 @@ def run_cpel_cycle(**context) -> Dict:
 
 def run_context_engineering_cycle(**context) -> Dict:
     return _safe_run('context_engineering', _get_context_engineering_loop,
-                     lambda loop: _loop_run_async('context_engineering', loop.run_single_cycle(context)) if hasattr(loop, 'run_single_cycle')
-                     else {"status": "completed", "note": "single-cycle not available"})
+                     lambda loop: _loop_run_async('context_engineering', loop.run_single_cycle(context)))
 
 
 def run_debugging_cycle(**context) -> Dict:
@@ -426,8 +427,7 @@ def run_debugging_cycle(**context) -> Dict:
 
 def run_web_monitor_cycle(**context) -> Dict:
     return _safe_run('web_monitor', _get_web_monitor_loop,
-                     lambda loop: _loop_run_async('web_monitor', loop.run_single_cycle(context)) if hasattr(loop, 'run_single_cycle')
-                     else {"status": "completed", "note": "single-cycle not available"})
+                     lambda loop: _loop_run_async('web_monitor', loop.run_single_cycle(context)))
 
 
 # ── Public API ────────────────────────────────────────────────────────
