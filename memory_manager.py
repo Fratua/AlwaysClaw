@@ -4,6 +4,7 @@ Central coordinator for all memory operations
 """
 
 import asyncio
+import time
 import uuid
 import json
 from typing import List, Dict, Optional, Any, Callable
@@ -426,6 +427,8 @@ class MemoryManager:
         metadata: Optional[Dict]
     ) -> WriteResult:
         """Write memory immediately."""
+        start_time = time.perf_counter()
+
         # Determine memory type
         memory_type = MemoryType.SEMANTIC
         if category in ['episodic', 'event']:
@@ -434,19 +437,19 @@ class MemoryManager:
             memory_type = MemoryType.PROCEDURAL
         elif category in ['preference']:
             memory_type = MemoryType.PREFERENCE
-        
+
         # Write to appropriate file
         if memory_type == MemoryType.EPISODIC:
             file_path = self._get_daily_log_path()
         else:
             file_path = self.config.memory_dir / 'MEMORY.md'
-        
+
         # Append to file
         await self._append_to_file(file_path, content, category, importance)
-        
+
         # Generate embedding
         embedding = await self.embedder.embed(content)
-        
+
         # Create entry
         entry = MemoryEntry(
             id=str(uuid.uuid4()),
@@ -458,14 +461,16 @@ class MemoryManager:
             tags=set(tags or []),
             metadata=metadata or {}
         )
-        
+
         # Index in vector store
         self.vector_store.insert_memory(entry, embedding)
-        
+
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+
         return WriteResult(
             success=True,
             memory_id=entry.id,
-            latency_ms=0  # Would measure actual latency
+            latency_ms=round(latency_ms, 2)
         )
     
     def _queue_write(

@@ -7,7 +7,10 @@ Framework for making decisions collectively across multiple agents.
 
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from pathlib import Path
 import asyncio
+import json
+import tempfile
 
 
 # Collective decision framework definition
@@ -205,42 +208,94 @@ class CollectiveDecisionEngine:
             
         return participants
     
-    async def _collect_inputs(self, participants: List[str], 
+    async def _collect_inputs(self, participants: List[str],
                               context: Dict[str, Any]) -> Dict[str, Any]:
         """
         Collect decision inputs from participants.
-        
+
+        Uses file-based message passing to request input from each agent.
+        Falls back to profile-based inference if an agent does not respond.
+
         Args:
             participants: Participating agents
             context: Decision context
-            
+
         Returns:
             Collected inputs
         """
         inputs = {}
-        
-        # In a real system, this would request input from each agent
-        # For now, simulate based on agent profiles
+        decision_id = f"decision_{datetime.utcnow().timestamp()}"
+        request_dir = (
+            Path(tempfile.gettempdir()) / "openclaw_decisions" / decision_id
+        )
+
+        # Phase 1: Send input requests to all agents via file-based messages
+        try:
+            request_dir.mkdir(parents=True, exist_ok=True)
+            for agent_id in participants:
+                request_file = request_dir / f"request_{agent_id}.json"
+                request_payload = {
+                    "decision_id": decision_id,
+                    "agent_id": agent_id,
+                    "context": context,
+                    "requested_at": datetime.utcnow().isoformat(),
+                }
+                request_file.write_text(json.dumps(request_payload, default=str))
+        except OSError:
+            pass  # Fall through to profile-based inference
+
+        # Phase 2: Wait briefly for responses
+        await asyncio.sleep(0.1)
+
+        # Phase 3: Collect responses; fall back to profile-based inference
         for agent_id in participants:
+            response_file = request_dir / f"response_{agent_id}.json"
+
+            # Try to read file-based response from agent
+            if response_file.exists():
+                try:
+                    data = json.loads(response_file.read_text())
+                    inputs[agent_id] = {
+                        "preference": data.get("preference", "standard"),
+                        "confidence": data.get("confidence", 0.7),
+                        "reasoning": data.get("reasoning", "Agent-provided input"),
+                    }
+                    continue
+                except (OSError, json.JSONDecodeError, ValueError):
+                    pass
+
+            # Also check shared memory for agent input
+            if self.memory:
+                stored = await self.memory.read(
+                    "ephemeral",
+                    f"decision_input:{decision_id}:{agent_id}",
+                    agent_id,
+                )
+                if stored and isinstance(stored, dict):
+                    inputs[agent_id] = {
+                        "preference": stored.get("preference", "standard"),
+                        "confidence": stored.get("confidence", 0.7),
+                        "reasoning": stored.get("reasoning", "Memory-stored input"),
+                    }
+                    continue
+
+            # Fall back: infer preference from agent profile
             profile = self.agent_profiles.get(agent_id, {})
-            
-            # Simulate agent input based on value priorities
             values = profile.get("value_affinities", {})
-            
-            # Determine preference based on values
+
             if context.get("security_relevant"):
                 preference = "secure" if values.get("SECURITY", 0) > 0.8 else "standard"
             elif context.get("efficiency_critical"):
                 preference = "fast" if values.get("EFFICIENCY", 0) > 0.8 else "balanced"
             else:
                 preference = "standard"
-                
+
             inputs[agent_id] = {
                 "preference": preference,
                 "confidence": 0.7 + (profile.get("authority_level", 0.5) * 0.3),
-                "reasoning": f"Based on {profile.get('archetype', 'Unknown')} perspective"
+                "reasoning": f"Based on {profile.get('archetype', 'Unknown')} perspective",
             }
-            
+
         return inputs
     
     def _unilateral_decision(self, inputs: Dict[str, Any], 
@@ -625,11 +680,48 @@ class ConsensusBuilder:
             
         return compromises
     
-    def _find_middle_ground(self, position_a: Dict[str, Any], 
+    def _find_middle_ground(self, position_a: Dict[str, Any],
                             position_b: Dict[str, Any]) -> Any:
-        """Find middle ground between two positions."""
-        # Simple implementation - would be more sophisticated in practice
-        return "compromise_between_options"
+        """
+        Find middle ground between two positions.
+
+        Attempts to merge overlapping proposal elements. For numeric
+        values, averages them. For string values, selects the one from
+        the agent with higher authority. For collections, computes the
+        union.
+        """
+        proposal_a = position_a.get("proposal", position_a.get("agent", ""))
+        proposal_b = position_b.get("proposal", position_b.get("agent", ""))
+
+        # If both proposals are numeric, return the average
+        try:
+            num_a = float(proposal_a)
+            num_b = float(proposal_b)
+            return (num_a + num_b) / 2.0
+        except (TypeError, ValueError):
+            pass
+
+        # If both proposals are dicts, merge them with union semantics
+        if isinstance(proposal_a, dict) and isinstance(proposal_b, dict):
+            merged = {**proposal_a, **proposal_b}
+            # For shared keys, prefer the value from the first position
+            for key in set(proposal_a) & set(proposal_b):
+                val_a = proposal_a[key]
+                val_b = proposal_b[key]
+                try:
+                    merged[key] = (float(val_a) + float(val_b)) / 2.0
+                except (TypeError, ValueError):
+                    merged[key] = val_a  # Keep first position's value
+            return merged
+
+        # If both proposals are lists/sets, compute the union
+        if isinstance(proposal_a, (list, set)) and isinstance(proposal_b, (list, set)):
+            return list(set(list(proposal_a) + list(proposal_b)))
+
+        # String proposals -- build a compromise label
+        agent_a = position_a.get("agent", "agent_a")
+        agent_b = position_b.get("agent", "agent_b")
+        return f"compromise({agent_a}:{proposal_a}+{agent_b}:{proposal_b})"
     
     def _find_common_subset(self, positions: List[Dict[str, Any]]) -> Any:
         """Find common subset among multiple positions."""

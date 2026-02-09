@@ -511,9 +511,26 @@ class MultiModalFusionEngine:
         return " ".join(texts)
     
     async def _detect_intent(self, text: str, context: CrossModalContext) -> Optional[str]:
-        """Detect user intent from combined text"""
-        # This would integrate with GPT-5.2 for intent classification
-        # Simplified implementation
+        """Detect user intent from combined text."""
+        # Try LLM-based intent detection first
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient()
+            if client.enabled:
+                result = await client.complete(
+                    messages=[
+                        {"role": "system", "content": "Classify the user intent into one of: search, create, delete, send, open, close, help, general. Reply with just the intent word."},
+                        {"role": "user", "content": text}
+                    ],
+                    max_tokens=10
+                )
+                intent = result.strip().lower()
+                if intent in ('search', 'create', 'delete', 'send', 'open', 'close', 'help', 'general'):
+                    return intent
+        except (ImportError, RuntimeError, Exception):
+            pass
+
+        # Fallback: keyword-based classification
         intent_keywords = {
             'search': ['search', 'find', 'look for', 'lookup'],
             'create': ['create', 'make', 'new', 'add'],
@@ -523,12 +540,12 @@ class MultiModalFusionEngine:
             'close': ['close', 'exit', 'quit'],
             'help': ['help', 'assist', 'support'],
         }
-        
+
         text_lower = text.lower()
         for intent, keywords in intent_keywords.items():
             if any(kw in text_lower for kw in keywords):
                 return intent
-        
+
         return "general"
     
     def _resolve_intent_conflicts(self, fused: FusedContext) -> FusedContext:
@@ -729,18 +746,54 @@ class VisualRenderer:
                     await asyncio.sleep(wait_time)
     
     async def _render_segment(self, segment: Dict) -> None:
-        """Render a visual segment"""
-        logger.info(f"Rendering segment: {segment.get('id')}")
-        # Implementation would use Windows UI APIs
+        """Render a visual segment using Windows UI."""
+        segment_id = segment.get('id', 'unknown')
+        content = segment.get('content', '')
+        logger.info(f"Rendering segment: {segment_id}")
+        try:
+            title = segment.get('title', 'OpenClaw')
+            # Sanitize for PowerShell string embedding
+            safe_title = str(title).replace("'", "''")[:100]
+            safe_content = str(content).replace("'", "''")[:200]
+            ps_cmd = (
+                "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; "
+                "$template = [Windows.UI.Notifications.ToastTemplateType]::ToastText02; "
+                "$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent($template); "
+                "$text = $xml.GetElementsByTagName('text'); "
+                f"$text[0].AppendChild($xml.CreateTextNode('{safe_title}')) | Out-Null; "
+                f"$text[1].AppendChild($xml.CreateTextNode('{safe_content}')) | Out-Null; "
+                "$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('OpenClaw'); "
+                "$notifier.Show([Windows.UI.Notifications.ToastNotification]::new($xml))"
+            )
+            await asyncio.create_subprocess_exec(
+                'powershell', '-Command', ps_cmd,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            )
+        except (OSError, FileNotFoundError) as e:
+            logger.debug(f"Visual rendering fallback for segment {segment_id}: {e}")
 
 
 class TextRenderer:
     """Renders text output"""
     
     async def render(self, text: TextResponse, timing: Dict) -> None:
-        """Render text output with timing"""
-        logger.info(f"Rendering text: {text.plain_text[:50]}...")
-        # Implementation would update text display
+        """Render text output."""
+        content = text.plain_text if hasattr(text, 'plain_text') else str(text)
+        logger.info(f"Rendering text: {content[:50]}...")
+        # Write to console/stdout for text display
+        print(content)
+        # Also write to output file for persistence
+        try:
+            output_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'output')
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, 'last_response.txt')
+            with open(output_path, 'w', encoding='utf-8') as f:
+                if hasattr(text, 'markdown') and text.markdown:
+                    f.write(text.markdown)
+                else:
+                    f.write(content)
+        except OSError as e:
+            logger.debug(f"Could not persist text output: {e}")
 
 
 class SynchronizedOutputOrchestrator:
@@ -1350,7 +1403,13 @@ class SessionManager:
                     VoiceState.LISTENING,
                     inp.metadata.get('audio_level', 0.5)
                 )
-                # Would render feedback here
+                if feedback:
+                    try:
+                        await self.output_orchestrator.voice_renderer.render(
+                            VoiceResponse(text=""), {'start': 0, 'feedback': feedback}
+                        )
+                    except (AttributeError, RuntimeError):
+                        pass
         
         # Fuse inputs
         fused_context = await self.fusion_engine.fuse_inputs(inputs, session.context)
@@ -1362,7 +1421,7 @@ class SessionManager:
         optimal_mode = self.mode_coordinator.determine_optimal_mode(session.context)
         session.current_mode = optimal_mode
         
-        # Generate response (would integrate with GPT-5.2)
+        # Generate response
         response = await self._generate_response(fused_context, session)
         
         # Render synchronized output
@@ -1382,18 +1441,44 @@ class SessionManager:
         context: FusedContext,
         session: MultiModalSession
     ) -> MultiModalResponse:
-        """Generate multi-modal response"""
-        # This would integrate with GPT-5.2
-        # Simplified implementation
-        
-        voice_text = f"I understood: {context.intent}"
-        
+        """Generate multi-modal response using LLM."""
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient()
+            if client.enabled:
+                history_context = ""
+                for interaction in list(session.interaction_history)[-5:]:
+                    resp = interaction.get('response', None)
+                    if resp and hasattr(resp, 'text') and resp.text:
+                        history_context += f"Previous: {resp.text.plain_text}\n"
+
+                primary_text = ""
+                if context.voice_input:
+                    primary_text = context.voice_input.content
+                elif context.text_input:
+                    primary_text = context.text_input.content
+
+                result = await client.complete(
+                    messages=[
+                        {"role": "system", "content": "You are OpenClaw, a helpful AI assistant. Respond concisely."},
+                        {"role": "user", "content": f"Intent: {context.intent}\nInput: {primary_text}\n{history_context}"}
+                    ],
+                    max_tokens=500
+                )
+                response_text = result.strip()
+                return MultiModalResponse(
+                    voice=VoiceResponse(text=response_text),
+                    visual=VisualResponse(title="Response", content=response_text),
+                    text=TextResponse(markdown=response_text, plain_text=response_text)
+                )
+        except (ImportError, RuntimeError, Exception) as e:
+            logger.debug(f"LLM response generation failed, using template: {e}")
+
+        # Fallback: template-based response
+        voice_text = f"I understood your request: {context.intent}"
         return MultiModalResponse(
             voice=VoiceResponse(text=voice_text),
-            visual=VisualResponse(
-                title="Response",
-                content=f"Intent detected: {context.intent}"
-            ),
+            visual=VisualResponse(title="Response", content=f"Intent: {context.intent}"),
             text=TextResponse(
                 markdown=f"**Intent:** {context.intent}",
                 plain_text=f"Intent: {context.intent}"

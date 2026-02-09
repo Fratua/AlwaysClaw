@@ -721,22 +721,50 @@ class SafetyEngine:
         return stage_id
     
     def _create_operations(self, update: Any) -> List[UpdateOperation]:
-        """Create update operations from update event"""
+        """Create update operations from update event."""
         operations = []
-        
-        # Create operations for changed files
-        if hasattr(update, 'changed_files'):
-            for file_path in update.changed_files:
-                # In real implementation, source would be from update package
-                source = f"./staging/{file_path}"
-                target = file_path
-                
-                operations.append(UpdateOperation(
-                    operation_type="file_write",
-                    source_path=source,
-                    target_path=target,
-                ))
-        
+
+        if not hasattr(update, 'changed_files'):
+            return operations
+
+        # Determine update package source directory
+        # Priority: update metadata -> git staging area -> default staging dir
+        source_root = None
+
+        # Check update metadata for an explicit package path
+        if hasattr(update, 'metadata') and isinstance(update.metadata, dict):
+            pkg_path = update.metadata.get("package_path")
+            if pkg_path and Path(pkg_path).is_dir():
+                source_root = Path(pkg_path)
+
+        # Try git-based source: if the update carries a commit hash,
+        # check for an extracted worktree in the staging area
+        if source_root is None and hasattr(update, 'git_commit_hash') and update.git_commit_hash:
+            git_staging = Path("./staging/git") / update.git_commit_hash
+            if git_staging.is_dir():
+                source_root = git_staging
+
+        # Try remote source: look for downloaded archive extraction
+        if source_root is None and hasattr(update, 'remote_url') and update.remote_url:
+            event_id = update.event_id if hasattr(update, 'event_id') else "unknown"
+            remote_staging = Path("./staging/remote") / event_id
+            if remote_staging.is_dir():
+                source_root = remote_staging
+
+        # Fallback to the default staging directory
+        if source_root is None:
+            source_root = Path("./staging")
+
+        for file_path in update.changed_files:
+            source = source_root / file_path
+            target = file_path
+
+            operations.append(UpdateOperation(
+                operation_type="file_write",
+                source_path=str(source),
+                target_path=target,
+            ))
+
         return operations
     
     def _verify_update(self, update: Any) -> bool:

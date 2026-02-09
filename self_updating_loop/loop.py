@@ -407,7 +407,7 @@ class SelfUpdatingLoop:
             if impact.risk_level == RiskLevel.CRITICAL and not self._should_auto_apply(update):
                 logger.warning(f"Update {update.event_id} has critical risk - requires manual approval")
                 self.set_state(UpdateLoopState.APPROVING)
-                # In a real implementation, this would notify for approval
+                self._write_approval_notification(update, impact)
                 return
             
             # Step 3: Validate update
@@ -436,6 +436,41 @@ class SelfUpdatingLoop:
             self._current_update = None
             self.set_state(UpdateLoopState.IDLE)
     
+    def _write_approval_notification(self, update: UpdateEvent,
+                                        impact: ImpactReport):
+        """Write a file-based approval notification for critical updates."""
+        import tempfile
+        notification_dir = Path(tempfile.gettempdir()) / "openclaw_approvals"
+        try:
+            notification_dir.mkdir(parents=True, exist_ok=True)
+            notification_file = notification_dir / f"{update.event_id}.json"
+            payload = {
+                "update_id": update.event_id,
+                "update_type": update.update_type.value,
+                "target_version": update.target_version,
+                "current_version": update.current_version,
+                "risk_level": impact.risk_level.name,
+                "risk_factors": impact.risk_factors,
+                "recommendations": impact.recommendations,
+                "requires_approval": True,
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+            }
+            notification_file.write_text(json.dumps(payload, indent=2))
+            logger.info(
+                f"Approval notification written to {notification_file}"
+            )
+
+            # Fire registered state handlers for APPROVING
+            for handler in self._state_handlers.get(UpdateLoopState.APPROVING, []):
+                try:
+                    handler(UpdateLoopState.ANALYZING, UpdateLoopState.APPROVING)
+                except (TypeError, ValueError, AttributeError) as e:
+                    logger.error(f"Approval handler error: {e}", exc_info=True)
+
+        except OSError as e:
+            logger.error(f"Failed to write approval notification: {e}", exc_info=True)
+
     async def _analyze_update(self, update: UpdateEvent) -> ImpactReport:
         """Analyze the impact of an update"""
         self.set_state(UpdateLoopState.ANALYZING)
@@ -592,20 +627,45 @@ class SelfUpdatingLoop:
         }
     
     def trigger_manual_update(self, update_source: str = "manual") -> str:
-        """Trigger a manual update check"""
-        # This would trigger an immediate update check
+        """Trigger a manual update check by scheduling an immediate iteration."""
         logger.info(f"Manual update triggered from {update_source}")
-        
-        # In async context, this would schedule an immediate check
-        # For now, just log the request
+
         self.audit_logger.log_event(
             event_type="MANUAL_UPDATE_TRIGGERED",
             actor_type="user",
             actor_id=update_source,
             description="Manual update check triggered",
         )
-        
-        return "Update check scheduled"
+
+        # Schedule an immediate iteration on the running event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(self._iteration())
+                )
+                return "Update check scheduled on running loop"
+        except RuntimeError:
+            pass
+
+        # Fallback: use a background thread to run the iteration
+        trigger_thread = threading.Thread(
+            target=self._run_iteration_sync,
+            name="manual_update_trigger",
+            daemon=True,
+        )
+        trigger_thread.start()
+        return "Update check scheduled via thread"
+
+    def _run_iteration_sync(self):
+        """Run a single iteration synchronously in a new event loop."""
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._iteration())
+            loop.close()
+        except (OSError, RuntimeError, ValueError, KeyError, AttributeError) as e:
+            logger.error(f"Manual update iteration failed: {e}", exc_info=True)
 
 
 # Singleton instance

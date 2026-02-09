@@ -251,19 +251,52 @@ class CollectiveIdentityEngine:
 class IdentityCohesionMonitor:
     """
     Monitors and maintains identity cohesion across all agents.
-    
+
     Continuously checks that all agents maintain alignment with the
     collective identity and triggers restoration when needed.
     """
-    
+
     def __init__(self, identity_engine: CollectiveIdentityEngine = None,
-                 agent_profiles: Dict[str, Any] = None):
+                 agent_profiles: Dict[str, Any] = None,
+                 value_propagator=None):
         self.identity_engine = identity_engine or CollectiveIdentityEngine(agent_profiles)
         self.agent_profiles = agent_profiles or {}
         self.cohesion_threshold = 0.75
         self.check_interval = 60  # seconds
         self.cohesion_history = []
         self.monitoring = False
+        # ValuePropagator instance for value alignment checking
+        self._value_propagator = value_propagator
+        # Behavioral event log: list of {agent_id, action_type, timestamp}
+        self._behavioral_log: List[Dict[str, Any]] = []
+        # Communication log: list of {agent_id, tone, formality, timestamp}
+        self._communication_log: List[Dict[str, Any]] = []
+
+    def record_behavior(self, agent_id: str, action_type: str,
+                        metadata: Dict[str, Any] = None):
+        """Record a behavioral event for consistency tracking."""
+        from datetime import datetime as _dt
+        self._behavioral_log.append({
+            "agent_id": agent_id,
+            "action_type": action_type,
+            "timestamp": _dt.utcnow(),
+            "metadata": metadata or {},
+        })
+        # Keep bounded
+        if len(self._behavioral_log) > 5000:
+            self._behavioral_log = self._behavioral_log[-5000:]
+
+    def record_communication(self, agent_id: str, tone: str,
+                             formality: str, metadata: Dict[str, Any] = None):
+        """Record a communication event for style alignment tracking."""
+        from datetime import datetime as _dt
+        self._communication_log.append({
+            "agent_id": agent_id,
+            "tone": tone,
+            "formality": formality,
+            "timestamp": _dt.utcnow(),
+            "metadata": metadata or {},
+        })
         
     async def start_monitoring(self):
         """Start continuous cohesion monitoring."""
@@ -322,20 +355,104 @@ class IdentityCohesionMonitor:
         return scores
     
     def _check_value_alignment(self, agent_id: str) -> float:
-        """Check value alignment for an agent."""
-        # This would integrate with ValuePropagator
-        # For now, return default
-        return 0.85
-    
+        """Check value alignment for an agent using ValuePropagator."""
+        if self._value_propagator is None:
+            # No propagator configured -- derive alignment from profile
+            profile = self.agent_profiles.get(agent_id, {})
+            affinities = profile.get("value_affinities", {})
+            if not affinities:
+                return 0.85  # Neutral default
+            # Compare agent affinities against collective primary value weights
+            collective_values = COLLECTIVE_IDENTITY["identity_dimensions"].get(
+                "beliefs", {}
+            )
+            expected_count = max(len(collective_values), 1)
+            alignment_sum = sum(min(v, 1.0) for v in affinities.values())
+            return min(alignment_sum / expected_count, 1.0)
+
+        # Use ValuePropagator to get propagated values and compute alignment
+        propagated = self._value_propagator.propagate_to_agent(agent_id, {})
+        if not propagated:
+            return 0.85
+
+        # Alignment = average weight of propagated primary values (capped at 1)
+        weights = [
+            min(v.get("weight", 0.5), 1.0)
+            for v in propagated.values()
+            if isinstance(v, dict)
+        ]
+        return sum(weights) / max(len(weights), 1)
+
     def _check_behavioral_consistency(self, agent_id: str) -> float:
-        """Check behavioral consistency for an agent."""
-        # This would check recent behavior against expected patterns
-        return 0.80
-    
+        """Check recent behavior against expected patterns for an agent."""
+        profile = self.agent_profiles.get(agent_id, {})
+        expected_patterns = profile.get("behavioral_patterns", {})
+        expected_proactive = expected_patterns.get("proactive", True)
+        expected_context_aware = expected_patterns.get("context_aware", True)
+
+        # Gather recent behavioral events for this agent
+        recent_events = [
+            e for e in self._behavioral_log
+            if e["agent_id"] == agent_id
+        ][-50:]  # Last 50 events
+
+        if not recent_events:
+            return 0.80  # Neutral default when no data
+
+        # Calculate consistency score based on action type patterns
+        expected_action_types = set(profile.get("capabilities", []))
+        if not expected_action_types:
+            return 0.80
+
+        matching = sum(
+            1 for e in recent_events
+            if e.get("action_type") in expected_action_types
+            or "all" in expected_action_types
+        )
+        raw_score = matching / len(recent_events)
+
+        # Boost for proactive agents if they produce events
+        if expected_proactive and len(recent_events) >= 5:
+            raw_score = min(raw_score + 0.05, 1.0)
+
+        return raw_score
+
     def _check_communication_alignment(self, agent_id: str) -> float:
-        """Check communication style alignment for an agent."""
-        # This would check recent communications against collective style
-        return 0.82
+        """Check recent communications against collective style for an agent."""
+        collective_style = COLLECTIVE_IDENTITY["identity_dimensions"]["personality"][
+            "communication_style"
+        ]
+        expected_tone = collective_style.get("tone", "professional_yet_approachable")
+        expected_formality = collective_style.get("formality", "medium")
+
+        # Get agent-specific style from identity engine
+        agent_style = self.identity_engine.get_communication_style(agent_id)
+        agent_expected_tone = agent_style.get("tone", expected_tone)
+        agent_expected_formality = agent_style.get("formality", expected_formality)
+
+        # Gather recent communications for this agent
+        recent_comms = [
+            c for c in self._communication_log
+            if c["agent_id"] == agent_id
+        ][-50:]  # Last 50 communications
+
+        if not recent_comms:
+            return 0.82  # Neutral default when no data
+
+        # Score how many communications match expected tone and formality
+        tone_matches = sum(
+            1 for c in recent_comms
+            if c.get("tone") == agent_expected_tone
+        )
+        formality_matches = sum(
+            1 for c in recent_comms
+            if c.get("formality") == agent_expected_formality
+        )
+
+        tone_score = tone_matches / len(recent_comms)
+        formality_score = formality_matches / len(recent_comms)
+
+        return (tone_score * 0.6) + (formality_score * 0.4)
     
     async def _trigger_cohesion_restoration(self, agent_id: str, score: float):
         """

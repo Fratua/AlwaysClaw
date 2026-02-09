@@ -317,34 +317,74 @@ class ContextWindowManager:
     ) -> str:
         """
         Generate a concise summary of messages.
-        
-        In production, this would use the LLM to generate a summary.
-        For now, we use a simple extraction approach.
+
+        Attempts LLM-based summarization via OpenAIClient, falling back
+        to extractive summarization if the LLM is unavailable.
         """
-        # Extract key points
+        # Build conversation text for both paths
+        conversation_parts = []
+        for msg in messages:
+            prefix = "User" if msg.role == 'user' else "Agent"
+            conversation_parts.append(f"{prefix}: {msg.content[:300]}")
+        conversation_text = '\n'.join(conversation_parts)
+
+        # Attempt LLM-based summarization
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            result = client.complete(
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        "Summarize the following conversation segment concisely. "
+                        "Preserve: key decisions, user requests, action items, important context. "
+                        "Max 150 words.\n\n"
+                        f"{conversation_text}"
+                    )
+                }],
+                system="You are a conversation summarizer. Be concise and preserve critical information.",
+                max_tokens=min(300, max_tokens),
+                temperature=0.3,
+            )
+            summary = result.get('content', '').strip()
+            if summary:
+                # Ensure it fits in budget
+                while self.count_tokens(summary) > max_tokens and len(summary) > 10:
+                    summary = summary[:int(len(summary) * 0.8)]
+                return summary
+        except (ImportError, EnvironmentError, OSError, KeyError, TypeError, ValueError) as e:
+            logging.getLogger(__name__).debug(f"LLM summarization unavailable, using extraction: {e}")
+
+        # Fallback: extractive summarization
         key_points = []
-        
+
         for msg in messages:
             if msg.role == 'user':
-                # Extract user requests
                 lines = msg.content.split('\n')
-                for line in lines[:2]:  # First 2 lines
-                    if line.strip():
-                        key_points.append(f"User: {line.strip()[:100]}")
+                for line in lines[:2]:
+                    stripped = line.strip()
+                    if stripped:
+                        key_points.append(f"User: {stripped[:100]}")
             elif msg.role == 'assistant':
-                # Extract assistant actions
-                if 'action' in msg.content.lower() or 'completed' in msg.content.lower():
-                    lines = msg.content.split('\n')
-                    for line in lines[:1]:
-                        if line.strip():
-                            key_points.append(f"Agent: {line.strip()[:100]}")
-        
-        summary = ' | '.join(key_points[:5])  # Limit to 5 key points
-        
+                # Extract action-oriented lines and first line
+                lines = msg.content.split('\n')
+                for line in lines[:2]:
+                    stripped = line.strip()
+                    if stripped and any(kw in stripped.lower() for kw in
+                                       ('action', 'completed', 'decided', 'created',
+                                        'found', 'error', 'result', 'success', 'failed')):
+                        key_points.append(f"Agent: {stripped[:100]}")
+                        break
+                else:
+                    if lines and lines[0].strip():
+                        key_points.append(f"Agent: {lines[0].strip()[:100]}")
+
+        summary = ' | '.join(key_points[:8])
+
         # Ensure it fits in budget using token counting
         while self.count_tokens(summary) > max_tokens and len(summary) > 10:
             summary = summary[:int(len(summary) * 0.8)]
-        
+
         return summary
     
     def _aggressive_compress(

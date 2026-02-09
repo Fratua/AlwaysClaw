@@ -7,8 +7,11 @@ Manages shared memory layers and context propagation across agents.
 
 from typing import Dict, Any, List, Optional, Set
 from datetime import datetime, timedelta
+from pathlib import Path
 import asyncio
 import json
+import os
+import tempfile
 
 
 # Shared memory architecture definition
@@ -89,16 +92,39 @@ SHARED_MEMORY_ARCHITECTURE = {
 class SharedMemoryManager:
     """
     Central manager for all shared memory across agents.
-    
+
     Manages multiple memory layers with different persistence,
     access patterns, and TTL configurations.
     """
-    
+
     def __init__(self):
         self.memory_layers = {}
         self.access_log = []
         self.synchronization_queue = asyncio.Queue()
         self.subscribers = {}
+        # Task tracking: maps task_id -> set of participating agent_ids
+        self.active_tasks: Dict[str, Set[str]] = {}
+        # Agent-to-task lookup: maps agent_id -> set of task_ids
+        self._agent_tasks: Dict[str, Set[str]] = {}
+
+    def register_task(self, task_id: str, agent_ids: List[str]):
+        """Register a task with its participating agents."""
+        self.active_tasks[task_id] = set(agent_ids)
+        for agent_id in agent_ids:
+            if agent_id not in self._agent_tasks:
+                self._agent_tasks[agent_id] = set()
+            self._agent_tasks[agent_id].add(task_id)
+
+    def unregister_task(self, task_id: str):
+        """Remove a completed or cancelled task."""
+        agent_ids = self.active_tasks.pop(task_id, set())
+        for agent_id in agent_ids:
+            if agent_id in self._agent_tasks:
+                self._agent_tasks[agent_id].discard(task_id)
+
+    def is_agent_participating(self, agent_id: str) -> bool:
+        """Check if an agent is participating in any active task."""
+        return bool(self._agent_tasks.get(agent_id))
         
     async def initialize(self):
         """Initialize all memory layers."""
@@ -299,9 +325,8 @@ class SharedMemoryManager:
         elif access == "identity_coordinator":
             return agent_id == "A001_CORE"
         elif access == "participating_agents":
-            # Check if agent is participating in current task
-            # This would need task tracking integration
-            return True
+            # Check if agent is participating in any active task
+            return self.is_agent_participating(agent_id)
             
         return False
     
@@ -476,12 +501,11 @@ class ContextPropagator:
                 
         return propagation_result
     
-    async def _send_context_to_agent(self, agent_id: str, 
-                                      context: Dict[str, Any], 
+    async def _send_context_to_agent(self, agent_id: str,
+                                      context: Dict[str, Any],
                                       context_key: str):
-        """Send context to a specific agent."""
-        # In a real system, this would use agent communication channels
-        # For now, store in agent-specific memory
+        """Send context to a specific agent via file-based message passing."""
+        # Store in agent-specific shared memory
         await self.memory.write(
             "ephemeral",
             f"received_context:{agent_id}:{context_key}",
@@ -489,6 +513,23 @@ class ContextPropagator:
             agent_id,
             {"source": context_key}
         )
+
+        # File-based message passing for cross-process communication
+        message_dir = Path(tempfile.gettempdir()) / "openclaw_messages" / agent_id
+        try:
+            message_dir.mkdir(parents=True, exist_ok=True)
+            message_file = message_dir / f"{context_key.replace(':', '_')}.json"
+            message_payload = {
+                "context_key": context_key,
+                "context": context,
+                "timestamp": datetime.utcnow().isoformat(),
+                "target_agent": agent_id,
+            }
+            message_file.write_text(json.dumps(message_payload, default=str))
+        except OSError as e:
+            raise OSError(
+                f"Failed to send file-based message to {agent_id}: {e}"
+            ) from e
         
     def _infer_target_agents(self, context: Dict[str, Any]) -> List[str]:
         """

@@ -772,13 +772,21 @@ class FeatureExperimentationFramework:
         return {
             'latency_ms': round(sum(durations) * 1000 / max(len(durations), 1), 1),
             'memory_mb': round(disk_bytes / (1024 * 1024), 1),
-            'cpu_percent': 0,  # Would need psutil for real measurement
+            'cpu_percent': self._measure_cpu_percent(),
             'success_rate': pass_count / max(total_count, 1),
             'total_duration_seconds': round(sum(durations), 2),
             'tests_passed': pass_count,
             'tests_total': total_count,
         }
     
+    def _measure_cpu_percent(self) -> float:
+        """Measure current process CPU usage."""
+        try:
+            import psutil
+            return psutil.Process().cpu_percent(interval=0.1)
+        except (ImportError, psutil.NoSuchProcess, psutil.AccessDenied):
+            return 0.0
+
     def _analyze_results(self, experiment: Experiment) -> ExperimentDecision:
         """Analyze experiment results and make decision"""
         
@@ -1443,7 +1451,15 @@ class UpgradeOrchestrator:
             
             if validation_result['status'] == 'failed':
                 logger.warning("Performance validation failed")
-                # Would trigger rollback here
+                try:
+                    from self_updating_loop.rollback.rollback_manager import RollbackManager
+                    rollback_mgr = RollbackManager()
+                    await rollback_mgr.trigger_rollback(
+                        reason="Performance validation failed",
+                        component_id=integration_result.get('component_id', 'unknown')
+                    )
+                except (ImportError, RuntimeError, AttributeError) as e:
+                    logger.error(f"Rollback trigger failed: {e}")
             
             # 7. Verify capability
             self.state = UpgradeState.VERIFYING

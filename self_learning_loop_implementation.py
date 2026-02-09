@@ -247,13 +247,61 @@ class ElasticWeightConsolidation:
         return self.parameter_importance
     
     async def _compute_gradients(self, experience: Experience) -> Dict[str, float]:
-        """Simulate gradient computation for experience."""
-        # In real implementation, this would compute actual gradients
-        # For now, return simulated gradients based on importance
-        return {
-            f'param_{i}': experience.importance * np.random.randn()
-            for i in range(10)
-        }
+        """
+        Compute gradients for experience using numerical differentiation.
+
+        Approximates the gradient of a loss function with respect to each
+        parameter using the experience's state, outcome, and importance.
+        """
+        # Extract features from the experience
+        state_data = experience.state if isinstance(experience.state, dict) else {}
+        outcome_val = float(experience.outcome) if isinstance(experience.outcome, (int, float)) else 0.0
+        importance = float(experience.importance)
+
+        # Build a parameter vector from current optimal params or defaults
+        n_params = max(10, len(self.optimal_parameters))
+        param_names = [f'param_{i}' for i in range(n_params)]
+
+        # Get current parameter values
+        params = np.array([
+            self.optimal_parameters.get(name, 0.0) for name in param_names
+        ], dtype=np.float64)
+
+        # Build input features from experience state
+        state_features = np.zeros(n_params, dtype=np.float64)
+        if isinstance(state_data, dict):
+            for i, (key, val) in enumerate(list(state_data.items())[:n_params]):
+                try:
+                    state_features[i] = float(val)
+                except (TypeError, ValueError):
+                    state_features[i] = hash(str(val)) % 100 / 100.0
+        elif isinstance(experience.state, (list, np.ndarray)):
+            arr = np.array(experience.state, dtype=np.float64).flatten()
+            state_features[:min(len(arr), n_params)] = arr[:n_params]
+
+        # Loss function: MSE between predicted output and actual outcome
+        # predicted = dot(params, state_features), target = outcome
+        epsilon = 1e-5
+        gradients = {}
+
+        predicted = np.dot(params, state_features)
+        base_loss = (predicted - outcome_val) ** 2
+
+        for i, name in enumerate(param_names):
+            # Numerical gradient via central difference
+            params_plus = params.copy()
+            params_plus[i] += epsilon
+            loss_plus = (np.dot(params_plus, state_features) - outcome_val) ** 2
+
+            params_minus = params.copy()
+            params_minus[i] -= epsilon
+            loss_minus = (np.dot(params_minus, state_features) - outcome_val) ** 2
+
+            grad = (loss_plus - loss_minus) / (2 * epsilon)
+            # Scale by importance
+            gradients[name] = float(grad * importance)
+
+        return gradients
     
     async def apply_ewc_penalty(self, loss: float, current_params: Dict[str, float]) -> float:
         """Apply EWC regularization penalty to loss function."""

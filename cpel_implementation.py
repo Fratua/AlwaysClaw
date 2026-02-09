@@ -1571,10 +1571,37 @@ class ContextPromptEngineeringLoop:
         if not base_template:
             base_template = await self.registry.get_template("system_default")
             
-        # Check for active A/B test
+        # Check for active A/B test and select variant if applicable
         variant = None
-        # (A/B test integration would go here)
-        
+        for test_id, test_config in self.ab_tester._active_tests.items():
+            if test_config.get('status') != 'running':
+                continue
+            # Match test to current task type by checking if control template matches
+            control = test_config.get('control')
+            if control and control.template_id == base_template.template_id:
+                try:
+                    user_id = system_state.get('user_id') if system_state else None
+                    variant = await self.ab_tester.get_variant_for_request(
+                        test_id, user_id=user_id
+                    )
+                    if variant:
+                        # Override the base template with the variant
+                        base_template = OptimizableTemplate(
+                            template_id=variant.parent_template_id or base_template.template_id,
+                            name=base_template.name,
+                            category=base_template.category,
+                            template_str=variant.template_str,
+                            variables=base_template.variables,
+                            context_rules=base_template.context_rules,
+                            version=base_template.version,
+                        )
+                        logger.debug(
+                            f"A/B test {test_id}: selected variant {variant.variant_id}"
+                        )
+                except (KeyError, TypeError, ValueError) as e:
+                    logger.debug(f"A/B test variant selection failed: {e}")
+                break  # Only apply one test per request
+
         # Apply context-based modifications
         modified_template = self.modifier.apply_context_modifications(
             base_template.template_str, context

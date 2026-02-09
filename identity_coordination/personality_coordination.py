@@ -238,14 +238,16 @@ class PersonalitySynchronizer:
 class PersonalityBridge:
     """
     Creates smooth personality transitions between agents.
-    
+
     Manages the handoff of personality context when control passes
     from one agent to another.
     """
-    
+
     def __init__(self, agent_profiles: Dict[str, Any] = None):
         self.agent_profiles = agent_profiles or {}
         self.transition_cache = {}
+        # Track usage counts for each transition pair
+        self._transition_usage_counts: Dict[str, int] = {}
         
     def create_transition(self, from_agent: str, to_agent: str, 
                           context: Dict[str, Any]) -> Dict[str, Any]:
@@ -285,7 +287,12 @@ class PersonalityBridge:
             "context": context,
             "transition": transition
         }
-        
+
+        # Increment usage counter for this transition pair
+        self._transition_usage_counts[cache_key] = (
+            self._transition_usage_counts.get(cache_key, 0) + 1
+        )
+
         return transition
     
     def _generate_continuity_phrases(self, from_agent: str, 
@@ -413,9 +420,11 @@ class PersonalityBridge:
         }
     
     def _get_most_common_transition(self) -> Optional[str]:
-        """Get the most common transition pattern."""
-        if not self.transition_cache:
+        """Get the most common transition pattern based on usage counts."""
+        if not self._transition_usage_counts:
             return None
-            
-        # This would track actual usage, for now return first
-        return list(self.transition_cache.keys())[0]
+
+        return max(
+            self._transition_usage_counts,
+            key=self._transition_usage_counts.get,
+        )

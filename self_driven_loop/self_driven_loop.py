@@ -17,6 +17,8 @@ import asyncio
 import json
 import logging
 
+import numpy as np
+
 # Import all submodules
 from .motivation_engine import (
     IntrinsicMotivationEngine, AgentContext, MotivationState,
@@ -296,8 +298,9 @@ class SelfDrivenLoop:
             'curiosity': self.state.current_motivation.curiosity
         }
         
-        opportunities = []  # Would get from opportunity detector
-        
+        # Detect opportunities from active goals and environment state
+        opportunities = self._detect_opportunities(motivation_dict)
+
         new_goals = self.goal_generator.generate_goals(
             motivation_dict,
             self.interest_model,
@@ -372,6 +375,65 @@ class SelfDrivenLoop:
         
         logger.debug(f"Scheduled {len(schedule.scheduled_goals)} goals")
     
+    def _detect_opportunities(self, motivation_dict: Dict[str, float]) -> List[Dict[str, Any]]:
+        """Detect goal opportunities from active goals and motivation state."""
+        opportunities = []
+
+        # Opportunity from high curiosity: suggest learning goals
+        if motivation_dict.get('curiosity', 0) > 0.6:
+            opportunities.append({
+                'type': 'learning',
+                'source': 'curiosity',
+                'description': 'High curiosity detected - explore new knowledge areas',
+                'priority': motivation_dict['curiosity']
+            })
+
+        # Opportunity from completed goals: suggest follow-up goals
+        for goal in self.state.completed_goals[-5:]:
+            opportunities.append({
+                'type': 'follow_up',
+                'source': 'completion',
+                'description': f'Follow up on completed goal: {goal.title}',
+                'priority': 0.5,
+                'related_goal': goal.title
+            })
+
+        # Opportunity from goal gaps: detect underserved interest areas
+        active_categories = set(
+            getattr(g, 'category', 'general') for g in self.state.active_goals
+        )
+        interest_topics = self.interest_model.get_top_interests(5) if hasattr(self.interest_model, 'get_top_interests') else []
+        for topic in interest_topics:
+            topic_name = topic if isinstance(topic, str) else getattr(topic, 'topic', str(topic))
+            if topic_name not in active_categories:
+                opportunities.append({
+                    'type': 'interest_gap',
+                    'source': 'interest_model',
+                    'description': f'Underserved interest area: {topic_name}',
+                    'priority': 0.6,
+                    'topic': topic_name
+                })
+
+        # Opportunity from high autonomy: suggest self-directed initiatives
+        if motivation_dict.get('autonomy', 0) > 0.7:
+            opportunities.append({
+                'type': 'initiative',
+                'source': 'autonomy',
+                'description': 'High autonomy - initiate self-directed project',
+                'priority': motivation_dict['autonomy']
+            })
+
+        # Opportunity from low competence: suggest skill-building goals
+        if motivation_dict.get('competence', 0) < 0.4:
+            opportunities.append({
+                'type': 'skill_building',
+                'source': 'competence_gap',
+                'description': 'Low competence score - focus on skill building',
+                'priority': 0.7
+            })
+
+        return opportunities
+
     async def _evaluate_exploration(self) -> None:
         """Evaluate exploration opportunities."""
         
@@ -381,9 +443,59 @@ class SelfDrivenLoop:
         # Only explore if curiosity is high enough
         if self.state.current_motivation.curiosity < 0.4:
             return
-        
-        # Would implement actual exploration logic here
-        logger.debug("Exploration opportunity evaluated")
+
+        # Build exploration context from current state
+        from .curiosity_module import ExplorationContext, State, Action
+        available_actions = [
+            Action(
+                id=f"explore_goal_{g.title[:20]}",
+                action_type='explore',
+                parameters={'goal_id': getattr(g, 'id', ''), 'title': g.title}
+            )
+            for g in self.state.active_goals
+        ]
+        # Add generic exploration actions
+        for action_type in ('learn', 'analyze', 'optimize', 'plan'):
+            available_actions.append(
+                Action(
+                    id=f"{action_type}_{self.state.loop_count}",
+                    action_type=action_type,
+                    parameters={'iteration': self.state.loop_count}
+                )
+            )
+
+        current_features = np.array([
+            self.state.current_motivation.autonomy,
+            self.state.current_motivation.competence,
+            self.state.current_motivation.relatedness,
+            self.state.current_motivation.curiosity,
+            self._calculate_environment_novelty(),
+            len(self.state.active_goals) / max(self.config.max_concurrent_goals, 1),
+        ])
+        # Pad to feature_dim
+        padded = np.zeros(64)
+        padded[:len(current_features)] = current_features
+
+        context = ExplorationContext(
+            environment_novelty=self._calculate_environment_novelty(),
+            knowledge_coverage=1.0 - self.state.current_motivation.curiosity,
+            model_uncertainty=max(0.0, 1.0 - self.state.current_motivation.competence),
+            recent_exploration_count=self.state.loop_count,
+            available_actions=available_actions,
+            current_state=State(
+                id=f"state_{self.state.loop_count}",
+                features=padded
+            )
+        )
+
+        recommended_action = self.exploration_manager.select_exploration_action(context)
+        if recommended_action:
+            logger.info(
+                f"Exploration action selected: {recommended_action.action_type} "
+                f"(id={recommended_action.id})"
+            )
+        else:
+            logger.debug("No exploration action recommended")
     
     def record_goal_completion(self, goal: Goal, outcome: Dict[str, Any]) -> None:
         """Record completion of a goal."""

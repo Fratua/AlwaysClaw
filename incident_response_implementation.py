@@ -600,15 +600,54 @@ class AutomatedResponseActions:
         subprocess.run(cmd, capture_output=True)
     
     def _capture_memory_dump(self, process_name: str, output_path: str):
-        """Capture memory dump of process"""
+        """Capture memory dump of process."""
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        # Would use procdump.exe in production
-        logger.info(f"Would capture memory dump to {output_path}")
+        try:
+            # Try procdump first
+            result = subprocess.run(
+                ['procdump', '-ma', '-accepteula', process_name, output_path],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                logger.info(f"Memory dump captured to {output_path}")
+                return
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        # Fallback: PowerShell minidump
+        try:
+            ps_cmd = (
+                f"$proc = Get-Process -Name '{process_name}' -ErrorAction Stop | Select-Object -First 1; "
+                f"$info = $proc | Select-Object Id, ProcessName, WorkingSet64, StartTime, Threads | ConvertTo-Json -Depth 2; "
+                f"[System.IO.File]::WriteAllText('{output_path}', $info)"
+            )
+            subprocess.run(['powershell', '-Command', ps_cmd], capture_output=True, timeout=30)
+            logger.info(f"Process info captured to {output_path}")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.error(f"Memory dump failed for {process_name}: {e}")
     
     def _capture_memory_dump_by_pid(self, pid: int, output_path: str):
-        """Capture memory dump by PID"""
+        """Capture memory dump by PID."""
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        logger.info(f"Would capture memory dump of PID {pid} to {output_path}")
+        try:
+            result = subprocess.run(
+                ['procdump', '-ma', '-accepteula', str(pid), output_path],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                logger.info(f"Memory dump captured for PID {pid}")
+                return
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        try:
+            ps_cmd = (
+                f"$proc = Get-Process -Id {pid} -ErrorAction Stop; "
+                f"$info = $proc | Select-Object Id, ProcessName, WorkingSet64, StartTime, Threads | ConvertTo-Json -Depth 2; "
+                f"[System.IO.File]::WriteAllText('{output_path}', $info)"
+            )
+            subprocess.run(['powershell', '-Command', ps_cmd], capture_output=True, timeout=30)
+            logger.info(f"Process info captured for PID {pid}")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.error(f"Memory dump failed for PID {pid}: {e}")
     
     def _disable_non_essential_loops(self) -> List[str]:
         """Disable non-essential agentic loops."""
@@ -911,7 +950,7 @@ class EvidenceCollectionSystem:
         for conv_id in conversation_ids:
             ai_logs.append({
                 "conversation_id": conv_id,
-                "messages": [],  # Would contain actual messages
+                "messages": self._load_conversation_messages(conv_id),
                 "metadata": {},
                 "timestamp": datetime.utcnow().isoformat()
             })
@@ -940,6 +979,28 @@ class EvidenceCollectionSystem:
         
         return evidence
     
+    def _load_conversation_messages(self, conv_id: str) -> List[Dict]:
+        """Load conversation messages from log files."""
+        log_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'sessions')
+        messages = []
+        try:
+            log_path = os.path.join(log_dir, f'{conv_id}.json')
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    data = json.load(f)
+                    messages = data.get('messages', [])
+            else:
+                # Try jsonl format
+                log_path = os.path.join(log_dir, f'{conv_id}.jsonl')
+                if os.path.exists(log_path):
+                    with open(log_path, 'r') as f:
+                        for line in f:
+                            if line.strip():
+                                messages.append(json.loads(line))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Could not load messages for {conv_id}: {e}")
+        return messages
+
     def _calculate_hash(self, filepath: str) -> str:
         """Calculate SHA256 hash of file"""
         sha256_hash = hashlib.sha256()

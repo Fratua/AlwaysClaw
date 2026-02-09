@@ -7,6 +7,9 @@ Manages and enforces the identity hierarchy across agents.
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from pathlib import Path
+import json
+import tempfile
 
 
 class IdentityHierarchy:
@@ -56,6 +59,8 @@ class IdentityHierarchy:
         self.levels = self.HIERARCHY_LEVELS
         self.agent_profiles = agent_profiles or {}
         self.authority_log = []
+        # Track agent status: maps agent_id -> status string
+        self._agent_status: Dict[str, str] = {}
         
     def get_agent_level(self, agent_id: str) -> int:
         """
@@ -124,29 +129,84 @@ class IdentityHierarchy:
         
         return result
     
-    def escalate_decision(self, agent_id: str, 
+    def set_agent_status(self, agent_id: str, status: str):
+        """
+        Set the operational status of an agent.
+
+        Args:
+            agent_id: Agent identifier
+            status: Status string (e.g. 'active', 'busy', 'offline', 'error')
+        """
+        self._agent_status[agent_id] = status
+
+    def _is_agent_available(self, agent_id: str) -> bool:
+        """
+        Check whether an agent is available by consulting its status.
+
+        Checks in-memory status tracking first, then falls back to the
+        file-based heartbeat marker that agents write to temp storage.
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            True if the agent is considered available
+        """
+        # Check in-memory status first
+        status = self._agent_status.get(agent_id)
+        if status is not None:
+            return status in ("active", "idle", "healthy")
+
+        # Check agent profile for a status field
+        profile = self.agent_profiles.get(agent_id, {})
+        profile_status = profile.get("status")
+        if profile_status is not None:
+            return profile_status in ("active", "idle", "healthy")
+
+        # Fall back to file-based heartbeat marker
+        heartbeat_file = (
+            Path(tempfile.gettempdir())
+            / "openclaw_heartbeats"
+            / f"{agent_id}.json"
+        )
+        try:
+            if heartbeat_file.exists():
+                data = json.loads(heartbeat_file.read_text())
+                hb_status = data.get("status", "unknown")
+                return hb_status in ("active", "idle", "healthy")
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+
+        # If no status information is found, assume available
+        return True
+
+    def escalate_decision(self, agent_id: str,
                           decision_context: Dict[str, Any]) -> str:
         """
         Escalate a decision to the next higher authority level.
-        
+
         Args:
             agent_id: Agent requesting escalation
             decision_context: Context of the decision
-            
+
         Returns:
             ID of agent to escalate to
         """
         current_level = self.get_agent_level(agent_id)
-        
+
         if current_level <= 1:
             return "A001_CORE"  # Already at or near top
-            
+
         # Find appropriate higher authority
         higher_level = current_level - 1
         higher_agents = self.levels[higher_level]["agents"]
-        
-        # Return first available agent at higher level
-        # In a real system, this would check availability
+
+        # Return the first available agent at the higher level
+        for candidate in higher_agents:
+            if self._is_agent_available(candidate):
+                return candidate
+
+        # All agents busy/offline -- fall back to the first in the list
         return higher_agents[0]
     
     def get_higher_authorities(self, agent_id: str) -> List[str]:

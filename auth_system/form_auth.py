@@ -414,31 +414,80 @@ class CaptchaSolver:
                 captcha_type=captcha_type
             )
     
+    async def _notify_user_captcha(self, page, captcha_type: str, timeout: int = 120) -> CaptchaResult:
+        """
+        Notify the user that a CAPTCHA needs manual solving and wait.
+
+        Injects a visual notification into the page and polls for the
+        CAPTCHA to be completed by the user.
+        """
+        notification_js = """
+        (function() {
+            var banner = document.createElement('div');
+            banner.id = 'openclaw-captcha-banner';
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;'
+                + 'background:#ff9800;color:#000;padding:12px;text-align:center;font-size:16px;'
+                + 'font-family:sans-serif;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+            banner.textContent = 'OpenClaw: Please solve the CAPTCHA below, then it will continue automatically.';
+            document.body.prepend(banner);
+        })();
+        """
+        try:
+            await page.evaluate(notification_js)
+        except (OSError, ValueError):
+            pass  # Non-critical if injection fails
+
+        # Poll for CAPTCHA completion
+        import time
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                # Check if reCAPTCHA/hCaptcha response token is populated
+                token = await page.evaluate("""
+                    (() => {
+                        // reCAPTCHA v2
+                        var el = document.querySelector('[name="g-recaptcha-response"]');
+                        if (el && el.value) return el.value;
+                        // hCaptcha
+                        var hel = document.querySelector('[name="h-captcha-response"]');
+                        if (hel && hel.value) return hel.value;
+                        return '';
+                    })()
+                """)
+                if token:
+                    # Clean up notification banner
+                    try:
+                        await page.evaluate(
+                            "var b = document.getElementById('openclaw-captcha-banner'); if (b) b.remove();"
+                        )
+                    except (OSError, ValueError):
+                        pass
+                    return CaptchaResult(
+                        success=True,
+                        solution=token,
+                        captcha_type=captcha_type
+                    )
+            except (OSError, ValueError):
+                pass
+            await asyncio.sleep(2)
+
+        return CaptchaResult(
+            success=False,
+            error=f"CAPTCHA solving timed out after {timeout}s - user did not complete it",
+            captcha_type=captcha_type
+        )
+
     async def _solve_recaptcha_v2(self, page) -> CaptchaResult:
-        """Solve reCAPTCHA v2."""
-        # This would integrate with external solving service
-        # For now, return failure
-        return CaptchaResult(
-            success=False,
-            error="reCAPTCHA v2 solving requires external service",
-            captcha_type='recaptcha_v2'
-        )
-    
+        """Solve reCAPTCHA v2 by notifying user for manual completion."""
+        return await self._notify_user_captcha(page, 'recaptcha_v2')
+
     async def _solve_hcaptcha(self, page) -> CaptchaResult:
-        """Solve hCaptcha."""
-        return CaptchaResult(
-            success=False,
-            error="hCaptcha solving requires external service",
-            captcha_type='hcaptcha'
-        )
-    
+        """Solve hCaptcha by notifying user for manual completion."""
+        return await self._notify_user_captcha(page, 'hcaptcha')
+
     async def _solve_image_captcha(self, page) -> CaptchaResult:
-        """Solve image-based CAPTCHA."""
-        return CaptchaResult(
-            success=False,
-            error="Image CAPTCHA solving requires OCR service",
-            captcha_type='image_captcha'
-        )
+        """Solve image-based CAPTCHA by notifying user for manual completion."""
+        return await self._notify_user_captcha(page, 'image_captcha')
 
 
 class LoginVerifier:
@@ -751,15 +800,25 @@ class FormAuthenticator:
             )
     
     async def _update_credential_stats(self, service_name: str, username: str) -> None:
-        """Update credential usage statistics."""
+        """Update credential usage statistics and persist via vault."""
         try:
             creds = await self.vault.get_credentials(service_name, username)
             if creds:
                 creds.use_count += 1
                 creds.last_used = datetime.now()
-                # Note: This would need a save method in the vault
-        except (ValueError, KeyError) as e:
-            logger.warning(f"Form auth data parsing error: {e}")
+                # Persist updated stats back to the vault
+                await self.vault.store_credentials(
+                    service_name=creds.service_name,
+                    username=creds.username,
+                    password=creds.password,
+                    attributes={
+                        **creds.attributes,
+                        'use_count': creds.use_count,
+                        'last_used': creds.last_used.isoformat()
+                    }
+                )
+        except (ValueError, KeyError, OSError, TypeError) as e:
+            logger.warning(f"Failed to update credential stats for {service_name}/{username}: {e}")
 
     def _random_delay(self, min_delay: float, max_delay: float) -> float:
         """Generate random delay for human-like behavior."""

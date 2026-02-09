@@ -5,6 +5,7 @@ This module implements continuous learning, concept drift detection,
 and automated model retraining for the ML-based bug detection system.
 """
 
+import os
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -417,10 +418,36 @@ class IncrementalRetrainingStrategy:
     Updates models with new data without forgetting previous knowledge.
     """
     
+    # File-based storage for historical training data
+    _DATA_DIR = Path(os.path.expanduser('~')) / '.openclaw' / 'model_data'
+
     def __init__(self, config: Optional[Dict] = None):
         self.config = config or {}
         self.learning_rate = self.config.get('learning_rate', 0.01)
-        
+        self._DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _load_historical_data(self, model_name: str) -> Optional[np.ndarray]:
+        """Load historical training data from file storage."""
+        data_file = self._DATA_DIR / f"{model_name}_historical.npy"
+        if data_file.exists():
+            try:
+                return np.load(str(data_file))
+            except (OSError, ValueError) as e:
+                logger.warning(f"Failed to load historical data for {model_name}: {e}")
+        return None
+
+    def _save_historical_data(self, model_name: str, data: np.ndarray,
+                              max_samples: int = 50000) -> None:
+        """Save historical training data to file storage."""
+        # Limit size to prevent unbounded growth
+        if len(data) > max_samples:
+            data = data[-max_samples:]
+        data_file = self._DATA_DIR / f"{model_name}_historical.npy"
+        try:
+            np.save(str(data_file), data)
+        except (OSError, ValueError) as e:
+            logger.warning(f"Failed to save historical data for {model_name}: {e}")
+
     async def retrain(self,
                      models: Dict,
                      new_data: np.ndarray,
@@ -428,26 +455,37 @@ class IncrementalRetrainingStrategy:
                      validation_data: Optional[Tuple] = None) -> Tuple[Dict, ModelPerformance]:
         """
         Perform incremental retraining
-        
+
         Args:
             models: Current models
             new_data: New training data
             new_labels: Optional labels
             validation_data: Optional validation data
-            
+
         Returns:
             Updated models and performance metrics
         """
         import time
         start_time = time.time()
-        
+
         updated_models = {}
-        
-        # Isolation Forest - retrain with combined data
+
+        # Isolation Forest - retrain with combined old + new data
         if 'isolation_forest' in models:
             logger.info("Incremental update: Isolation Forest")
-            # Combine old and new data (would need storage of old data)
-            updated_models['isolation_forest'] = models['isolation_forest']
+            old_data = self._load_historical_data('isolation_forest')
+            if old_data is not None:
+                combined_data = np.vstack([old_data, new_data])
+            else:
+                combined_data = new_data
+
+            # Retrain with combined dataset
+            iso_model = models['isolation_forest']
+            iso_model.fit(combined_data)
+            updated_models['isolation_forest'] = iso_model
+
+            # Persist combined data for future incremental updates
+            self._save_historical_data('isolation_forest', combined_data)
         
         # LSTM Autoencoder - continue training
         if 'lstm_autoencoder' in models and models['lstm_autoencoder'] is not None:

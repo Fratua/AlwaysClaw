@@ -3,8 +3,9 @@ Synthesis and Summarization System
 Multi-source synthesis, conflict resolution, and multi-level summarization.
 """
 
+import re
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
 from collections import defaultdict
 
@@ -304,14 +305,109 @@ This research synthesis covers **{task.topic}** based on analysis of multiple so
         return "## Knowledge Gaps\n\nSome areas require additional research for complete understanding."
     
     def _extract_implications(self, facts: List[ResolvedFact]) -> List[str]:
-        """Extract implications from facts"""
-        # Simplified - would use LLM in production
-        return ["Further research recommended"]
+        """Extract implications from facts using LLM with keyword fallback."""
+        if not facts:
+            return ["Insufficient data to determine implications"]
+
+        # Attempt LLM-based extraction
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            statements = "\n".join(f"- {f.statement}" for f in facts[:15])
+            prompt = (
+                "Given the following research facts, list 3-5 concise implications "
+                "(one sentence each). Return only a numbered list.\n\n"
+                f"Facts:\n{statements}"
+            )
+            result = client.generate(prompt, system="You are a research analyst.", max_tokens=512)
+            lines = [
+                line.strip().lstrip("0123456789.-) ").strip()
+                for line in result.strip().splitlines()
+                if line.strip() and len(line.strip()) > 5
+            ]
+            if lines:
+                return lines[:5]
+        except (ImportError, EnvironmentError, RuntimeError, ValueError) as exc:
+            logger.debug(f"LLM unavailable for implication extraction: {exc}")
+
+        # Keyword-based fallback
+        implications = []
+        high_confidence = [f for f in facts if f.confidence > 0.7]
+        low_confidence = [f for f in facts if f.confidence <= 0.4]
+
+        if high_confidence:
+            implications.append(
+                f"{len(high_confidence)} findings have high confidence and can inform decisions"
+            )
+        if low_confidence:
+            implications.append(
+                f"{len(low_confidence)} findings need verification from additional sources"
+            )
+
+        # Detect topics with multiple corroborating facts
+        word_freq: Dict[str, int] = defaultdict(int)
+        for fact in facts:
+            for word in fact.statement.lower().split():
+                if len(word) > 4:
+                    word_freq[word] += 1
+        common = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:3]
+        if common:
+            top_terms = ", ".join(w for w, _ in common)
+            implications.append(f"Key recurring themes: {top_terms}")
+
+        if facts and any(f.alternative_statements for f in facts):
+            implications.append("Conflicting viewpoints exist and warrant further investigation")
+
+        if not implications:
+            implications.append("Further research recommended to deepen understanding")
+
+        return implications
     
     def _identify_gaps(self, facts: List[ResolvedFact]) -> List[str]:
-        """Identify knowledge gaps"""
-        # Simplified - would analyze coverage
-        return ["Additional sources may provide more complete picture"]
+        """Identify knowledge gaps by analyzing fact coverage and confidence."""
+        gaps: List[str] = []
+
+        if not facts:
+            gaps.append("No facts were synthesized; the topic needs initial research")
+            return gaps
+
+        # Gap: insufficient source diversity
+        all_sources: Set[str] = set()
+        for f in facts:
+            all_sources.update(f.sources)
+        if len(all_sources) < 3:
+            gaps.append(f"Only {len(all_sources)} source(s) contributed; additional sources needed")
+
+        # Gap: low average confidence
+        avg_conf = sum(f.confidence for f in facts) / len(facts)
+        if avg_conf < 0.6:
+            gaps.append(
+                f"Average confidence is low ({avg_conf:.0%}); corroboration from authoritative sources needed"
+            )
+
+        # Gap: too many unresolved conflicts
+        conflicted = [f for f in facts if f.alternative_statements]
+        if conflicted:
+            gaps.append(
+                f"{len(conflicted)} fact(s) have conflicting alternatives that need resolution"
+            )
+
+        # Gap: single-source facts
+        single_source = [f for f in facts if len(f.sources) <= 1]
+        if len(single_source) > len(facts) * 0.6:
+            gaps.append(
+                "Most facts rely on a single source; cross-verification recommended"
+            )
+
+        # Gap: narrow topic coverage (few distinct resolution methods)
+        methods = set(f.resolution_method for f in facts)
+        if len(methods) <= 1 and len(facts) > 3:
+            gaps.append("Facts come from a narrow analysis pathway; broader approaches may reveal more")
+
+        if not gaps:
+            gaps.append("Coverage appears adequate; periodic refreshes recommended")
+
+        return gaps
     
     def _generate_recommendations(
         self,
@@ -470,26 +566,50 @@ class ConflictResolver:
         return conflicts
     
     def _facts_conflict(self, fact1: Fact, fact2: Fact) -> bool:
-        """Check if two facts conflict"""
-        # Simple conflict detection
-        # Would use more sophisticated NLP in production
-        
-        # Check for contradictory keywords
-        contradiction_markers = [
-            ("is", "is not"),
-            ("was", "was not"),
-            ("will", "will not"),
-            ("increases", "decreases"),
-            ("positive", "negative")
-        ]
-        
+        """Check if two facts conflict using keyword opposition and numerical divergence."""
         text1 = fact1.statement.lower()
         text2 = fact2.statement.lower()
-        
-        for pos, neg in contradiction_markers:
+
+        # 1. Antonym-pair contradiction detection
+        contradiction_pairs = [
+            ("is", "is not"), ("was", "was not"), ("will", "will not"),
+            ("can", "cannot"), ("does", "does not"), ("should", "should not"),
+            ("increases", "decreases"), ("increase", "decrease"),
+            ("positive", "negative"), ("growth", "decline"),
+            ("higher", "lower"), ("more", "less"), ("better", "worse"),
+            ("true", "false"), ("supports", "opposes"),
+            ("improved", "worsened"), ("rising", "falling"),
+            ("succeeded", "failed"), ("accept", "reject"),
+        ]
+
+        for pos, neg in contradiction_pairs:
             if (pos in text1 and neg in text2) or (neg in text1 and pos in text2):
                 return True
-        
+
+        # 2. Negation pattern detection (e.g., "X is effective" vs "X is not effective")
+        negation_re = re.compile(r"\b(not|no|never|neither|nor|hardly|barely|scarcely)\b")
+        neg1 = bool(negation_re.search(text1))
+        neg2 = bool(negation_re.search(text2))
+
+        # If statements share significant content but differ in negation
+        words1 = set(text1.split())
+        words2 = set(text2.split())
+        if words1 and words2:
+            overlap = len(words1 & words2) / max(len(words1), len(words2))
+            if overlap > 0.5 and neg1 != neg2:
+                return True
+
+        # 3. Numerical divergence (e.g., "costs $10" vs "costs $100")
+        nums1 = [float(m) for m in re.findall(r'[\d]+(?:\.[\d]+)?', text1)]
+        nums2 = [float(m) for m in re.findall(r'[\d]+(?:\.[\d]+)?', text2)]
+        if nums1 and nums2 and overlap > 0.4 if words1 and words2 else False:
+            for n1 in nums1:
+                for n2 in nums2:
+                    if n1 != 0 and n2 != 0:
+                        ratio = max(n1, n2) / min(n1, n2)
+                        if ratio > 2.0:
+                            return True
+
         return False
     
     def _classify_conflict(self, fact1: Fact, fact2: Fact) -> str:

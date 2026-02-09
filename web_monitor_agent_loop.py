@@ -601,58 +601,143 @@ class WebMonitoringAgentLoop:
 # Integration with OpenClaw Agent Core
 class OpenClawAgentCore:
     """
-    Mock agent core for demonstration.
-    In production, this would be the actual OpenClaw agent core.
+    OpenClaw agent core providing logging, notifications, heartbeat,
+    memory, and GPT-5.2 integration for the web monitoring loop.
     """
-    
+
     def __init__(self):
         self.heartbeat = HeartbeatManager()
         self.memory = MemoryManager()
-        self.gpt52 = GPT52Mock()
-        
+        self.gpt52 = GPT52Interface()
+        self._logger = logging.getLogger('OpenClawAgentCore')
+
     async def log(self, message: str, level: str = "INFO", component: str = None, data: Dict = None):
-        """Log a message"""
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        """Log a message through Python logging with structured data."""
+        log_level = getattr(logging, level.upper(), logging.INFO)
         comp = f"[{component}] " if component else ""
-        print(f"[{timestamp}] [{level}] {comp}{message}")
-        
+        extra_info = f" | data={data}" if data else ""
+        self._logger.log(log_level, f"{comp}{message}{extra_info}")
+
     async def notify(self, notification: Dict):
-        """Send a notification"""
-        print(f"[NOTIFICATION] {notification}")
+        """Send a notification through configured channels."""
+        self._logger.info(f"NOTIFICATION: {notification.get('title', 'Untitled')}")
+
+        # Persist notification to file for external consumers
+        notify_dir = Path(os.path.expanduser('~')) / '.openclaw' / 'notifications'
+        notify_dir.mkdir(parents=True, exist_ok=True)
+        notify_file = notify_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{id(notification)}.json"
+        try:
+            with open(notify_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    **notification,
+                    'timestamp': datetime.now().isoformat()
+                }, f, indent=2, default=str)
+        except (OSError, TypeError) as e:
+            self._logger.debug(f"Failed to persist notification: {e}")
 
 
 class HeartbeatManager:
-    """Mock heartbeat manager"""
-    
+    """Heartbeat manager tracking component health."""
+
     def __init__(self):
-        self.components = {}
-        
+        self.components: Dict[str, Any] = {}
+        self._last_heartbeats: Dict[str, datetime] = {}
+
     def register_component(self, name: str, status_fn):
-        """Register a component for heartbeat"""
+        """Register a component for heartbeat monitoring."""
         self.components[name] = status_fn
+        self._last_heartbeats[name] = datetime.now()
+
+    def heartbeat(self, name: str) -> None:
+        """Record a heartbeat from a component."""
+        self._last_heartbeats[name] = datetime.now()
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get health status of all registered components."""
+        result = {}
+        for name, status_fn in self.components.items():
+            try:
+                status = status_fn() if callable(status_fn) else status_fn
+                last_beat = self._last_heartbeats.get(name)
+                stale = False
+                if last_beat:
+                    stale = (datetime.now() - last_beat).total_seconds() > 300
+                result[name] = {
+                    'status': status,
+                    'last_heartbeat': last_beat.isoformat() if last_beat else None,
+                    'stale': stale,
+                }
+            except (RuntimeError, ValueError, TypeError) as e:
+                result[name] = {'status': 'error', 'error': str(e)}
+        return result
 
 
 class MemoryManager:
-    """Mock memory manager"""
-    
+    """File-backed memory manager with in-memory cache."""
+
     def __init__(self):
-        self._data = {}
-        
+        self._cache: Dict[str, Any] = {}
+        self._store_dir = Path(os.path.expanduser('~')) / '.openclaw' / 'memory'
+        self._store_dir.mkdir(parents=True, exist_ok=True)
+
+    def _key_path(self, key: str) -> Path:
+        import hashlib
+        safe_name = hashlib.sha256(key.encode()).hexdigest()[:32]
+        return self._store_dir / f"{safe_name}.json"
+
     async def get(self, key: str, default=None):
-        """Get value from memory"""
-        return self._data.get(key, default)
-        
+        """Get value from memory (cache first, then disk)."""
+        if key in self._cache:
+            return self._cache[key]
+        path = self._key_path(key)
+        if path.exists():
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self._cache[key] = data.get('value', default)
+                return self._cache[key]
+            except (json.JSONDecodeError, OSError):
+                pass
+        return default
+
     async def store(self, key: str, value, ttl: int = None):
-        """Store value in memory"""
-        self._data[key] = value
+        """Store value in memory (cache + disk)."""
+        self._cache[key] = value
+        path = self._key_path(key)
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'key': key,
+                    'value': value,
+                    'stored_at': datetime.now().isoformat(),
+                    'ttl': ttl
+                }, f, default=str)
+        except (OSError, TypeError) as e:
+            logging.getLogger(__name__).debug(f"Failed to persist memory key '{key}': {e}")
 
 
-class GPT52Mock:
-    """Mock GPT-5.2 for demonstration"""
-    
-    async def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = 500):
-        """Generate text"""
-        return f"[AI Analysis] This is a mock analysis of the change. The change appears to be significant and requires attention."
+class GPT52Interface:
+    """GPT-5.2 interface using OpenAIClient with fallback."""
+
+    async def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = 500) -> str:
+        """Generate text using GPT-5.2 via OpenAIClient."""
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+            result = client.complete(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return result.get('content', '')
+        except (ImportError, EnvironmentError, OSError, KeyError, TypeError, ValueError) as e:
+            logger.debug(f"GPT-5.2 unavailable ({e}), using heuristic analysis")
+            # Fallback: generate a basic heuristic analysis
+            return (
+                f"[Heuristic Analysis] Change detected in monitored content. "
+                f"Prompt length: {len(prompt)} chars. "
+                f"The change may require review based on configured monitoring rules."
+            )
 
 
 # Example usage

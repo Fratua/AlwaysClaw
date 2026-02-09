@@ -498,9 +498,19 @@ class ResourceThrottler:
         )
         
         if allocation:
+            # Extract the actual allocation ID from the allocations map
+            allocation_id = None
+            for alloc_id, alloc_obj in self.allocator.allocations.items():
+                if (alloc_obj.user_id == user_id
+                        and alloc_obj.task_id == task_id
+                        and alloc_obj.resource_type == resource_type
+                        and alloc_obj.allocated == requested):
+                    allocation_id = alloc_id
+                    break
+
             return {
                 "allowed": True,
-                "allocation_id": allocation,  # This would be the ID in real implementation
+                "allocation_id": allocation_id or f"{user_id}:{task_id}:{resource_type.value}",
                 "throttle_delay_ms": 0,
             }
         

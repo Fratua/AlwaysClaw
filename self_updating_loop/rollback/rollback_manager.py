@@ -639,14 +639,67 @@ class AutoRollbackTriggers:
         return error_rate > threshold
     
     def _check_performance(self, config: Dict[str, Any]) -> bool:
-        """Check for performance degradation"""
-        # Implementation would track performance metrics
-        return False
-    
+        """
+        Check for performance degradation using system metrics.
+
+        Compares current CPU and memory usage against threshold
+        multipliers.  Returns True (trigger fired) when the system is
+        significantly degraded.
+        """
+        threshold_multiplier = config.get("threshold", 1.5)
+        try:
+            import psutil as _psutil
+            cpu_percent = _psutil.cpu_percent(interval=0.1)
+            mem = _psutil.virtual_memory()
+
+            # Consider degraded when CPU > threshold * 50% (baseline 50%)
+            # or memory usage > threshold * 60% (baseline 60%)
+            cpu_degraded = cpu_percent > (threshold_multiplier * 50.0)
+            mem_degraded = mem.percent > (threshold_multiplier * 60.0)
+
+            return cpu_degraded or mem_degraded
+        except ImportError:
+            # psutil not available -- cannot determine performance
+            return False
+        except (OSError, AttributeError):
+            return False
+
     def _check_service_availability(self, config: Dict[str, Any]) -> bool:
-        """Check if critical services are available"""
-        # Implementation would check service health
-        return False
+        """
+        Check if critical services are available by verifying that key
+        system processes are alive and responding.
+
+        Returns True (trigger fired) when a critical service is found
+        to be unavailable.
+        """
+        try:
+            import psutil as _psutil
+
+            # Check that the current process is healthy
+            current = _psutil.Process()
+            if current.status() in ("zombie", "dead"):
+                return True
+
+            # Verify key child processes (if any) are still running
+            children = current.children(recursive=False)
+            for child in children:
+                try:
+                    if child.status() in ("zombie", "dead"):
+                        return True
+                except _psutil.NoSuchProcess:
+                    return True
+
+            # Check system-wide: enough memory available
+            mem = _psutil.virtual_memory()
+            if mem.available < 100 * 1024 * 1024:  # < 100 MB available
+                return True
+
+            return False
+        except ImportError:
+            # psutil not available -- cannot check services
+            return False
+        except (OSError, AttributeError):
+            return False
     
     def record_health_check(self, healthy: bool, details: Dict[str, Any] = None):
         """Record a health check result"""

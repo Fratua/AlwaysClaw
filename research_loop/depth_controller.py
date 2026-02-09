@@ -4,6 +4,7 @@ Manages research depth, adaptive research, and resource allocation.
 """
 
 import logging
+import os
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 
@@ -86,14 +87,42 @@ class DepthController:
         return config
     
     async def _check_resources(self) -> Dict[str, Any]:
-        """Check available resources"""
-        # This would check actual resources
-        # For now, return all clear
-        return {
+        """Check actual system resources using psutil (with graceful fallback)."""
+        result = {
             "low_tokens": False,
             "rate_limited": False,
             "memory_available": True
         }
+
+        try:
+            import psutil
+
+            # Check memory: flag if more than 85% used
+            mem = psutil.virtual_memory()
+            if mem.percent > 85:
+                result["memory_available"] = False
+                result["low_tokens"] = True  # Conserve resources when memory is tight
+                logger.warning(f"High memory usage: {mem.percent:.1f}%")
+
+            # Check CPU: flag rate limiting if sustained high CPU
+            cpu_percent = psutil.cpu_percent(interval=0.5)
+            if cpu_percent > 90:
+                result["rate_limited"] = True
+                logger.warning(f"High CPU usage: {cpu_percent:.1f}%")
+
+            # Check disk: flag if disk is nearly full (>95%)
+            try:
+                disk = psutil.disk_usage(os.path.abspath(os.sep))
+                if disk.percent > 95:
+                    result["memory_available"] = False
+                    logger.warning(f"Disk nearly full: {disk.percent:.1f}%")
+            except OSError:
+                pass
+
+        except ImportError:
+            logger.debug("psutil not installed; resource checks skipped")
+
+        return result
     
     def _reduce_depth_config(self, config: Any) -> Any:
         """Reduce depth configuration for limited resources"""

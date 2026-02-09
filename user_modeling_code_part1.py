@@ -396,17 +396,103 @@ class ContextualPreferenceLearner:
         self.context_profiles: Dict[str, Dict] = {}
         
     def detect_context(self) -> Dict[str, Any]:
-        """Detect current context dimensions"""
+        """Detect current context dimensions."""
         now = datetime.now()
         return {
             "time_of_day": self._classify_time_of_day(now),
             "day_of_week": now.strftime("%A").lower(),
-            "location": "unknown",  # Would detect from system
-            "active_application": None,  # Would detect from system
-            "current_task": None,  # Would infer
-            "stress_level": None,  # Would estimate
-            "meeting_status": "free"  # Would check calendar
+            "location": self._detect_location(),
+            "active_application": self._detect_active_application(),
+            "current_task": self._infer_current_task(),
+            "stress_level": self._estimate_stress_level(),
+            "meeting_status": self._check_meeting_status()
         }
+
+    def _detect_location(self) -> str:
+        """Detect location from network/system info."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['powershell', '-Command', '(Get-NetConnectionProfile).Name'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                network = result.stdout.strip()
+                if any(kw in network.lower() for kw in ['office', 'corp', 'work']):
+                    return 'office'
+                elif any(kw in network.lower() for kw in ['home', 'personal']):
+                    return 'home'
+                return network
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return "unknown"
+
+    def _detect_active_application(self) -> Optional[str]:
+        """Detect the currently active application."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['powershell', '-Command',
+                 '(Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Select-Object -First 1).ProcessName'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return None
+
+    def _infer_current_task(self) -> Optional[str]:
+        """Infer current task from active window title."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['powershell', '-Command',
+                 '(Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Select-Object -First 1).MainWindowTitle'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                title = result.stdout.strip()
+                if any(kw in title.lower() for kw in ['code', 'visual studio', 'vim', 'pycharm']):
+                    return 'coding'
+                elif any(kw in title.lower() for kw in ['outlook', 'gmail', 'mail']):
+                    return 'email'
+                elif any(kw in title.lower() for kw in ['teams', 'zoom', 'slack', 'discord']):
+                    return 'communication'
+                elif any(kw in title.lower() for kw in ['chrome', 'firefox', 'edge', 'browser']):
+                    return 'browsing'
+                return 'other'
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return None
+
+    def _estimate_stress_level(self) -> Optional[float]:
+        """Estimate stress level from system activity patterns."""
+        try:
+            import psutil
+            cpu = psutil.cpu_percent(interval=0.5)
+            # High CPU + many processes may indicate stress/multitasking
+            proc_count = len(list(psutil.process_iter()))
+            stress = min(1.0, (cpu / 100) * 0.5 + min(proc_count / 200, 0.5))
+            return round(stress, 2)
+        except ImportError:
+            return None
+
+    def _check_meeting_status(self) -> str:
+        """Check if user is in a meeting."""
+        try:
+            import psutil
+            meeting_apps = ['teams', 'zoom', 'webex', 'gotomeeting', 'skype']
+            for proc in psutil.process_iter(['name']):
+                try:
+                    name = (proc.info['name'] or '').lower()
+                    if any(app in name for app in meeting_apps):
+                        return 'in_meeting'
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except ImportError:
+            pass
+        return "free"
         
     def _classify_time_of_day(self, dt: datetime) -> str:
         """Classify time into periods"""

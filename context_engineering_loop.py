@@ -304,28 +304,126 @@ class TokenCounter:
 
 class SemanticRelevanceScorer:
     """Semantic relevance using embeddings and similarity metrics."""
-    
+
     def __init__(self):
         self.cache = {}
         self.embedding_dim = 384  # MiniLM dimension
-        
-    async def score(self, content: str, query: str) -> float:
-        """Calculate semantic relevance score."""
-        # Simplified version - would use actual embeddings in production
-        content_words = set(content.lower().split())
-        query_words = set(query.lower().split())
-        
+        self._model = None
+        self._use_embeddings = False
+        self._init_model()
+
+    def _init_model(self):
+        """Attempt to load sentence-transformers model for real embeddings."""
+        try:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer('all-MiniLM-L6-v2')
+            self._use_embeddings = True
+            logger.info("SemanticRelevanceScorer: using sentence-transformers embeddings")
+        except ImportError:
+            logger.info(
+                "sentence-transformers not installed; falling back to "
+                "TF-IDF keyword matching for semantic relevance"
+            )
+            self._model = None
+            self._use_embeddings = False
+
+    def _tfidf_similarity(self, content: str, query: str) -> float:
+        """TF-IDF weighted keyword matching as fallback."""
+        import math
+
+        content_lower = content.lower()
+        query_lower = query.lower()
+
+        # Tokenize
+        content_words = re.findall(r'\b\w+\b', content_lower)
+        query_words = re.findall(r'\b\w+\b', query_lower)
+
         if not content_words or not query_words:
             return 0.0
-        
-        # Jaccard similarity as proxy
-        intersection = len(content_words & query_words)
-        union = len(content_words | query_words)
-        
-        return intersection / union if union > 0 else 0.0
-    
+
+        # Build term frequency maps
+        content_tf: Dict[str, float] = {}
+        for w in content_words:
+            content_tf[w] = content_tf.get(w, 0) + 1
+        for w in content_tf:
+            content_tf[w] /= len(content_words)
+
+        query_tf: Dict[str, float] = {}
+        for w in query_words:
+            query_tf[w] = query_tf.get(w, 0) + 1
+        for w in query_tf:
+            query_tf[w] /= len(query_words)
+
+        # IDF approximation using both documents as corpus
+        all_words = set(content_tf.keys()) | set(query_tf.keys())
+        idf: Dict[str, float] = {}
+        for w in all_words:
+            doc_count = (1 if w in content_tf else 0) + (1 if w in query_tf else 0)
+            idf[w] = math.log(2.0 / doc_count) + 1.0
+
+        # Compute TF-IDF vectors and cosine similarity
+        dot_product = 0.0
+        norm_c = 0.0
+        norm_q = 0.0
+        for w in all_words:
+            c_val = content_tf.get(w, 0.0) * idf[w]
+            q_val = query_tf.get(w, 0.0) * idf[w]
+            dot_product += c_val * q_val
+            norm_c += c_val ** 2
+            norm_q += q_val ** 2
+
+        if norm_c == 0 or norm_q == 0:
+            return 0.0
+        return dot_product / (norm_c ** 0.5 * norm_q ** 0.5)
+
+    async def score(self, content: str, query: str) -> float:
+        """Calculate semantic relevance score using embeddings or keyword fallback."""
+        if not content or not query:
+            return 0.0
+
+        # Check cache
+        cache_key = hashlib.md5(f"{content[:200]}|{query[:200]}".encode()).hexdigest()
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+
+        if self._use_embeddings and self._model is not None:
+            try:
+                embeddings = self._model.encode([content, query], convert_to_numpy=True)
+                # Cosine similarity
+                cos_sim = float(np.dot(embeddings[0], embeddings[1]) / (
+                    np.linalg.norm(embeddings[0]) * np.linalg.norm(embeddings[1]) + 1e-8
+                ))
+                score = max(0.0, min(1.0, (cos_sim + 1.0) / 2.0))
+            except (RuntimeError, ValueError, TypeError) as e:
+                logger.debug(f"Embedding scoring failed, using fallback: {e}")
+                score = self._tfidf_similarity(content, query)
+        else:
+            score = self._tfidf_similarity(content, query)
+
+        self.cache[cache_key] = score
+        # Limit cache size
+        if len(self.cache) > 10000:
+            self.cache.clear()
+        return score
+
     async def batch_score(self, contents: List[str], query: str) -> List[float]:
         """Score multiple contents efficiently."""
+        if self._use_embeddings and self._model is not None and contents:
+            try:
+                all_texts = contents + [query]
+                embeddings = self._model.encode(all_texts, convert_to_numpy=True)
+                query_emb = embeddings[-1]
+                query_norm = np.linalg.norm(query_emb) + 1e-8
+                scores = []
+                for i in range(len(contents)):
+                    cos_sim = float(
+                        np.dot(embeddings[i], query_emb)
+                        / (np.linalg.norm(embeddings[i]) * query_norm + 1e-8)
+                    )
+                    scores.append(max(0.0, min(1.0, (cos_sim + 1.0) / 2.0)))
+                return scores
+            except (RuntimeError, ValueError, TypeError) as e:
+                logger.debug(f"Batch embedding scoring failed: {e}")
         return [await self.score(c, query) for c in contents]
 
 
@@ -847,9 +945,63 @@ class ContextMonitor:
                 logger.error(f"Monitoring error: {e}")
                 await asyncio.sleep(self.config.monitoring_interval)
     
+    def set_context_source(self, context_source) -> None:
+        """Register the ContextEngineeringLoop for real token tracking."""
+        self._context_source = context_source
+
     async def capture_snapshot(self) -> ContextSnapshot:
-        """Capture current state of context window."""
-        # Simplified - would integrate with actual context
+        """Capture current state of context window from the actual context source."""
+        source = getattr(self, '_context_source', None)
+
+        if source is not None:
+            counter = source.token_tracker.counter
+            memory = source.memory
+
+            # Count system tokens (from configuration overhead)
+            system_tokens = 0
+            conversation_tokens = 0
+            tool_output_tokens = 0
+            memory_tokens = 0
+
+            # Sum tokens across memory tiers
+            for exchange in memory.hot_memory:
+                user_tok = counter.count_tokens(exchange.user_message)
+                asst_tok = counter.count_tokens(exchange.assistant_response)
+                conversation_tokens += user_tok + asst_tok
+
+            for exchange in memory.warm_memory:
+                memory_tokens += counter.count_tokens(
+                    exchange.user_message + exchange.assistant_response
+                )
+
+            # Add fact tokens
+            for fact in memory.facts:
+                memory_tokens += counter.count_tokens(fact.content)
+
+            # Get recent usage from tracker for tool outputs
+            tracker = source.token_tracker
+            for entry in list(tracker.usage_log)[-100:]:
+                if entry.component == 'tool_outputs':
+                    tool_output_tokens += entry.tokens_used
+                elif entry.component == 'system_prompt':
+                    system_tokens += entry.tokens_used
+
+            total_tokens = system_tokens + conversation_tokens + tool_output_tokens + memory_tokens
+            available_tokens = max(0, self.config.model_context_limit - total_tokens)
+            utilization_rate = total_tokens / self.config.model_context_limit if self.config.model_context_limit > 0 else 0.0
+
+            return ContextSnapshot(
+                timestamp=datetime.utcnow(),
+                total_tokens=total_tokens,
+                system_tokens=system_tokens,
+                conversation_tokens=conversation_tokens,
+                tool_output_tokens=tool_output_tokens,
+                memory_tokens=memory_tokens,
+                available_tokens=available_tokens,
+                utilization_rate=utilization_rate
+            )
+
+        # Fallback when no context source is registered
         return ContextSnapshot(
             timestamp=datetime.utcnow(),
             total_tokens=0,

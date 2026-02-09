@@ -340,9 +340,22 @@ class AlertRule:
     suppress_duration: timedelta
     
     def evaluate(self, metrics: MetricsSnapshot) -> bool:
-        """Evaluate rule against metrics"""
-        # Simplified evaluation - would use proper expression parser
-        return False
+        """Evaluate rule condition against current metrics using safe_eval."""
+        from safe_eval import safe_eval
+
+        # Build evaluation context from metrics
+        context = {
+            **metrics.gauges,
+            **{k: float(v) for k, v in metrics.counters.items()},
+            'timestamp': metrics.timestamp.timestamp() if metrics.timestamp else 0,
+        }
+
+        try:
+            result = safe_eval(self.condition, context)
+            return bool(result)
+        except (NameError, TypeError, ValueError, SyntaxError, AttributeError) as e:
+            logger.debug(f"AlertRule '{self.name}' evaluation failed: {e}")
+            return False
 
 
 @dataclass

@@ -41,7 +41,8 @@ class MemoryWriter:
     
     def __init__(self, memory_path: str = "MEMORY.md"):
         self.memory_path = Path(memory_path)
-        self.knowledge_graph = None  # Would be initialized
+        # Dict-based knowledge graph: topic -> {related_topics, facts, last_updated}
+        self.knowledge_graph: Dict[str, Dict[str, Any]] = {}
         self.update_tracker = UpdateTracker()
     
     async def consolidate(
@@ -78,10 +79,23 @@ class MemoryWriter:
                 research_task
             )
         
-        # Step 3: Update knowledge graph
-        if self.knowledge_graph:
-            graph_update = await self.knowledge_graph.add_knowledge(synthesis_result)
-            result.knowledge_graph_updates = len(graph_update.nodes_added) + len(graph_update.edges_added)
+        # Step 3: Update knowledge graph dict with new topic and facts
+        topic = synthesis_result.synthesis.topic
+        facts_list = [kp for kp in synthesis_result.synthesis.key_points if kp]
+        if topic not in self.knowledge_graph:
+            self.knowledge_graph[topic] = {
+                "related_topics": [],
+                "facts": facts_list,
+                "last_updated": datetime.now().isoformat()
+            }
+            result.knowledge_graph_updates = 1 + len(facts_list)
+        else:
+            existing_facts = self.knowledge_graph[topic].get("facts", [])
+            new_facts = [f for f in facts_list if f not in existing_facts]
+            existing_facts.extend(new_facts)
+            self.knowledge_graph[topic]["facts"] = existing_facts
+            self.knowledge_graph[topic]["last_updated"] = datetime.now().isoformat()
+            result.knowledge_graph_updates = len(new_facts)
         
         # Step 4: Write to MEMORY.md
         await self._write_to_memory(merged, research_task)
@@ -137,18 +151,28 @@ class MemoryWriter:
         existing: Dict[str, Any]
     ) -> MergedKnowledge:
         """Merge new synthesis with existing knowledge"""
+        # Extract key facts from synthesis key_points
+        key_facts = self._extract_key_facts(synthesis)
+
+        # Extract sources from consensus areas
+        sources = self._extract_sources(synthesis)
+
         # Create merged knowledge
         merged = MergedKnowledge(
             topic=synthesis.synthesis.topic,
             summary=synthesis.summaries.get("brief", Summary(level="brief", content="")).content,
-            key_facts=[],  # Would extract from synthesis
+            key_facts=key_facts,
             detailed_content=synthesis.synthesis.content,
-            confidence_score=synthesis.confidence_score
+            sources=sources,
+            confidence_score=synthesis.confidence_score,
+            related_topics=list(set(
+                synthesis.synthesis.knowledge_gaps + synthesis.synthesis.recommendations
+            ))[:10]
         )
-        
+
         # Mark as updated
         merged.updated_entries.append(synthesis.synthesis.topic)
-        
+
         return merged
     
     async def _create_new_entry(
@@ -157,22 +181,26 @@ class MemoryWriter:
         task: ResearchTask
     ) -> MergedKnowledge:
         """Create new knowledge entry"""
-        # Extract sources
-        sources = []  # Would extract from synthesis
-        
+        # Extract real key facts and sources from synthesis
+        key_facts = self._extract_key_facts(synthesis)
+        sources = self._extract_sources(synthesis)
+
         # Create merged knowledge
         merged = MergedKnowledge(
             topic=synthesis.synthesis.topic,
             summary=synthesis.summaries.get("brief", Summary(level="brief", content="")).content,
-            key_facts=[],  # Would extract
+            key_facts=key_facts,
             detailed_content=synthesis.synthesis.content,
             sources=sources,
-            confidence_score=synthesis.confidence_score
+            confidence_score=synthesis.confidence_score,
+            related_topics=list(set(
+                synthesis.synthesis.knowledge_gaps + synthesis.synthesis.recommendations
+            ))[:10]
         )
-        
+
         # Mark as new
         merged.new_entries.append(synthesis.synthesis.topic)
-        
+
         return merged
     
     async def _write_to_memory(
@@ -337,13 +365,131 @@ class MemoryWriter:
         return content + log_entry
     
     async def _update_cross_references(self, merged: MergedKnowledge) -> int:
-        """Update cross-references between topics"""
+        """Update cross-references between topics in the knowledge graph."""
         count = 0
-        
-        # This would update links between related topics
-        # For now, just return count
-        
+        topic = merged.topic
+
+        # Ensure the main topic exists in the knowledge graph
+        if topic not in self.knowledge_graph:
+            self.knowledge_graph[topic] = {
+                "related_topics": [],
+                "facts": [],
+                "last_updated": datetime.now().isoformat()
+            }
+
+        # Add facts to the graph
+        for fact in merged.key_facts:
+            if fact.statement not in self.knowledge_graph[topic].get("facts", []):
+                self.knowledge_graph[topic].setdefault("facts", []).append(fact.statement)
+
+        self.knowledge_graph[topic]["last_updated"] = datetime.now().isoformat()
+
+        # Build bidirectional links between this topic and related topics
+        for related in merged.related_topics:
+            # Add forward link
+            existing_related = self.knowledge_graph[topic].get("related_topics", [])
+            if related not in existing_related:
+                existing_related.append(related)
+                self.knowledge_graph[topic]["related_topics"] = existing_related
+                count += 1
+
+            # Add reverse link
+            if related not in self.knowledge_graph:
+                self.knowledge_graph[related] = {
+                    "related_topics": [topic],
+                    "facts": [],
+                    "last_updated": datetime.now().isoformat()
+                }
+                count += 1
+            else:
+                reverse_related = self.knowledge_graph[related].get("related_topics", [])
+                if topic not in reverse_related:
+                    reverse_related.append(topic)
+                    self.knowledge_graph[related]["related_topics"] = reverse_related
+                    count += 1
+
+        # Also link topics that share key facts with existing entries
+        for other_topic, other_info in self.knowledge_graph.items():
+            if other_topic == topic:
+                continue
+            other_facts = set(other_info.get("facts", []))
+            my_facts = set(self.knowledge_graph[topic].get("facts", []))
+            if other_facts & my_facts:
+                # Shared facts create a cross-reference
+                if other_topic not in self.knowledge_graph[topic].get("related_topics", []):
+                    self.knowledge_graph[topic].setdefault("related_topics", []).append(other_topic)
+                    count += 1
+                if topic not in other_info.get("related_topics", []):
+                    other_info.setdefault("related_topics", []).append(topic)
+                    count += 1
+
+        self.update_tracker.track({
+            "type": "cross_reference_update",
+            "topic": topic,
+            "references_added": count
+        })
+
         return count
+
+    def _extract_key_facts(self, synthesis: SynthesisResult) -> List[Fact]:
+        """Extract Fact objects from synthesis key_points and content."""
+        facts = []
+
+        # Extract from key_points
+        for point in synthesis.synthesis.key_points:
+            if not point or len(point.strip()) < 5:
+                continue
+            # Determine confidence from synthesis confidence score
+            if synthesis.confidence_score > 0.7:
+                confidence = "high"
+            elif synthesis.confidence_score > 0.4:
+                confidence = "medium"
+            else:
+                confidence = "low"
+
+            facts.append(Fact(
+                statement=point.strip(),
+                category="key_finding",
+                confidence=confidence,
+                source_attribution=synthesis.synthesis.topic
+            ))
+
+        # Extract bullet points from synthesis content (lines starting with - or *)
+        if synthesis.synthesis.content:
+            for line in synthesis.synthesis.content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith(("- ", "* ", "1.", "2.", "3.", "4.", "5.")):
+                    # Clean up the bullet point
+                    text = re.sub(r'^[-*\d.)\s]+', '', stripped).strip()
+                    if len(text) > 10 and text not in [f.statement for f in facts]:
+                        facts.append(Fact(
+                            statement=text,
+                            category="detail",
+                            confidence="medium",
+                            source_attribution=synthesis.synthesis.topic
+                        ))
+
+        return facts[:20]  # Limit to 20 key facts
+
+    def _extract_sources(self, synthesis: SynthesisResult) -> List[DiscoveredSource]:
+        """Extract source references from synthesis consensus areas."""
+        sources = []
+        seen_urls = set()
+
+        for area in synthesis.consensus_areas:
+            for source_name in area.supporting_sources:
+                if source_name not in seen_urls:
+                    seen_urls.add(source_name)
+                    sources.append(DiscoveredSource(
+                        url=source_name if source_name.startswith("http") else f"source://{source_name}",
+                        title=source_name,
+                        engine="synthesis",
+                        query=synthesis.synthesis.topic,
+                        rank=0,
+                        credibility_score=area.confidence
+                    ))
+
+        return sources
 
 
 class UpdateTracker:
@@ -363,7 +509,7 @@ class UpdateTracker:
 
 
 class Summary:
-    """Summary placeholder"""
+    """Lightweight summary fallback used when models.Summary is not available in dict lookups."""
     def __init__(self, level: str, content: str):
         self.level = level
         self.content = content

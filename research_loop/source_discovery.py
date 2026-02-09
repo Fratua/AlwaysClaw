@@ -765,8 +765,7 @@ class SearchEngineManager:
         self._initialize_engines()
     
     def _initialize_engines(self):
-        """Initialize available search engines"""
-        # These would be actual implementations
+        """Initialize all available search engine backends."""
         self.engines = {
             "google": GoogleSearchEngine(),
             "bing": BingSearchEngine(),

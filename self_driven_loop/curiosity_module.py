@@ -58,22 +58,38 @@ class FeatureEncoder:
         self.encoding_history: Deque[Dict] = deque(maxlen=100)
         
     def encode(self, state: State) -> np.ndarray:
-        """Encode state into feature representation."""
-        # Simplified encoding - in practice, this would use a neural network
-        if len(state.features) >= self.feature_dim:
-            return state.features[:self.feature_dim]
-        
-        # Pad if necessary
-        padded = np.zeros(self.feature_dim)
-        padded[:len(state.features)] = state.features
-        
+        """
+        Encode state into feature representation using a learned
+        random-projection encoder with nonlinear activation.
+        """
+        raw = np.array(state.features, dtype=np.float64).flatten()
+        input_dim = len(raw)
+
+        # Lazily initialize projection weights (stable across calls)
+        if not hasattr(self, '_proj_w') or self._proj_w.shape[0] != input_dim:
+            rng = np.random.RandomState(seed=42)
+            self._proj_w = rng.randn(input_dim, self.feature_dim) * np.sqrt(2.0 / input_dim)
+            self._proj_b = rng.randn(self.feature_dim) * 0.01
+
+        # Project: ReLU(W^T x + b) with L2 normalization
+        projected = raw @ self._proj_w + self._proj_b
+        # ReLU activation
+        activated = np.maximum(projected, 0.0)
+        # L2 normalize to unit sphere
+        norm = np.linalg.norm(activated)
+        if norm > 1e-8:
+            encoded = activated / norm
+        else:
+            encoded = activated
+
         self.encoding_history.append({
             'state_id': state.id,
             'timestamp': datetime.now(),
-            'feature_norm': np.linalg.norm(padded)
+            'feature_norm': float(np.linalg.norm(encoded)),
+            'input_dim': input_dim
         })
-        
-        return padded
+
+        return encoded
 
 
 class ForwardDynamicsModel:

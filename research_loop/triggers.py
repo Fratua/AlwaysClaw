@@ -224,8 +224,10 @@ class CuriosityEngine:
     
     def __init__(self, config: Optional[ResearchLoopConfig] = None):
         self.config = config or default_config
-        self.knowledge_graph = None  # Would be initialized with actual KG
-        self.interest_model = None   # Would be initialized with interest model
+        # Knowledge graph: topic -> {related_topics, facts, last_updated}
+        self.knowledge_graph: Dict[str, Dict[str, Any]] = {}
+        # Interest model: topic -> {interest_level, exposure_count, last_accessed}
+        self.interest_model: Dict[str, Dict[str, Any]] = {}
         self.curiosity_score_threshold = self.config.triggers.min_curiosity_score
         self.daily_task_count = 0
         self.last_reset = datetime.now()
@@ -362,95 +364,205 @@ class CuriosityEngine:
         return tasks
     
     async def _identify_knowledge_gaps(self) -> List[KnowledgeGap]:
-        """Identify gaps in current knowledge base"""
+        """Identify gaps in current knowledge base by analyzing the knowledge graph."""
         gaps = []
-        
-        # This would query the actual knowledge graph
-        # For now, return simulated gaps
-        
-        # Example gaps that would be detected:
-        example_gaps = [
-            KnowledgeGap(
-                topic="quantum computing applications",
-                description="Limited understanding of practical quantum computing applications",
-                importance_score=0.85,
-                recommended_depth=ResearchDepth.MEDIUM,
-                related_topics=["quantum mechanics", "computer science", "cryptography"]
-            ),
-            KnowledgeGap(
-                topic="climate change mitigation strategies",
-                description="Need updated information on latest mitigation approaches",
-                importance_score=0.75,
-                recommended_depth=ResearchDepth.DEEP,
-                related_topics=["environmental science", "policy", "technology"]
-            )
-        ]
-        
-        return example_gaps
+
+        if not self.knowledge_graph:
+            return gaps
+
+        now = datetime.now()
+
+        for topic, info in self.knowledge_graph.items():
+            facts = info.get("facts", [])
+            related = info.get("related_topics", [])
+            last_updated = info.get("last_updated")
+
+            # Gap: topic has few facts recorded
+            if len(facts) < 3:
+                importance = min(1.0, 0.6 + (3 - len(facts)) * 0.1)
+                gaps.append(KnowledgeGap(
+                    topic=topic,
+                    description=f"Only {len(facts)} facts recorded for '{topic}'",
+                    importance_score=round(importance, 2),
+                    recommended_depth=ResearchDepth.MEDIUM,
+                    related_topics=related[:5]
+                ))
+
+            # Gap: stale information (older than 7 days)
+            if last_updated:
+                try:
+                    if isinstance(last_updated, str):
+                        last_updated = datetime.fromisoformat(last_updated)
+                    age_days = (now - last_updated).days
+                    if age_days > 7:
+                        importance = min(1.0, 0.5 + age_days * 0.02)
+                        gaps.append(KnowledgeGap(
+                            topic=topic,
+                            description=f"Information is {age_days} days old for '{topic}'",
+                            importance_score=round(importance, 2),
+                            recommended_depth=ResearchDepth.SHALLOW,
+                            related_topics=related[:5]
+                        ))
+                except (ValueError, TypeError):
+                    pass
+
+            # Gap: related topics not yet in the graph
+            for rel in related:
+                if rel not in self.knowledge_graph:
+                    gaps.append(KnowledgeGap(
+                        topic=rel,
+                        description=f"Related topic '{rel}' (from '{topic}') not yet researched",
+                        importance_score=0.65,
+                        recommended_depth=ResearchDepth.SHALLOW,
+                        related_topics=[topic]
+                    ))
+
+        # Deduplicate by topic, keeping highest importance
+        seen: Dict[str, KnowledgeGap] = {}
+        for gap in gaps:
+            if gap.topic not in seen or gap.importance_score > seen[gap.topic].importance_score:
+                seen[gap.topic] = gap
+
+        return sorted(seen.values(), key=lambda g: g.importance_score, reverse=True)
     
     async def _find_related_topics(self) -> List[RelatedTopic]:
-        """Find topics related to current knowledge"""
+        """Find topics related to current knowledge by traversing the knowledge graph."""
         related = []
-        
-        # This would use the knowledge graph to find related topics
-        # For now, return simulated related topics
-        
-        example_related = [
-            RelatedTopic(
-                name="neuromorphic computing",
-                connection="Related to AI and machine learning interests",
-                novelty_score=0.82
-            ),
-            RelatedTopic(
-                name="federated learning",
-                connection="Extension of distributed machine learning knowledge",
-                novelty_score=0.78
-            )
-        ]
-        
-        return example_related
+
+        if not self.knowledge_graph:
+            return related
+
+        # Collect all topics that appear as related but are not primary entries,
+        # or have low exposure in the interest model
+        known_topics = set(self.knowledge_graph.keys())
+
+        for topic, info in self.knowledge_graph.items():
+            for rel_topic in info.get("related_topics", []):
+                # Compute novelty: higher if not yet in graph or low exposure
+                if rel_topic in known_topics:
+                    exposure = 0
+                    if rel_topic in self.interest_model:
+                        exposure = self.interest_model[rel_topic].get("exposure_count", 0)
+                    novelty = max(0.0, min(1.0, 1.0 - exposure * 0.1))
+                else:
+                    novelty = 0.9  # High novelty for unknown topics
+
+                if novelty >= self.curiosity_score_threshold * 0.8:
+                    related.append(RelatedTopic(
+                        name=rel_topic,
+                        connection=f"Related to known topic: {topic}",
+                        novelty_score=round(novelty, 2)
+                    ))
+
+        # Deduplicate by name, keeping highest novelty
+        seen: Dict[str, RelatedTopic] = {}
+        for rt in related:
+            if rt.name not in seen or rt.novelty_score > seen[rt.name].novelty_score:
+                seen[rt.name] = rt
+
+        return sorted(seen.values(), key=lambda r: r.novelty_score, reverse=True)
     
     async def _detect_interesting_trends(self) -> List[TrendingTopic]:
-        """Detect trending topics in user interest areas"""
+        """Detect trending topics based on interest model activity patterns."""
         trends = []
-        
-        # This would query trend APIs and news sources
-        # For now, return simulated trends
-        
-        example_trends = [
-            TrendingTopic(
-                topic="large language models",
-                significance="Rapid developments in LLM capabilities",
-                relevance_score=0.9,
-                source="tech_news"
-            ),
-            TrendingTopic(
-                topic="renewable energy storage",
-                significance="Breakthrough in battery technology",
-                relevance_score=0.75,
-                source="science_news"
-            )
-        ]
-        
-        return trends
+
+        if not self.interest_model:
+            return trends
+
+        now = datetime.now()
+
+        # Sort topics by interest level to find what the user cares about most
+        sorted_interests = sorted(
+            self.interest_model.items(),
+            key=lambda item: item[1].get("interest_level", 0),
+            reverse=True
+        )
+
+        for topic, model_info in sorted_interests[:20]:
+            interest_level = model_info.get("interest_level", 0)
+            exposure_count = model_info.get("exposure_count", 0)
+            last_accessed = model_info.get("last_accessed")
+
+            # Only consider topics with meaningful interest
+            if interest_level < 0.3:
+                continue
+
+            # Check if the topic has recent activity (accessed within 3 days)
+            recency_boost = 0.0
+            if last_accessed:
+                try:
+                    if isinstance(last_accessed, str):
+                        last_accessed = datetime.fromisoformat(last_accessed)
+                    days_since = (now - last_accessed).days
+                    if days_since <= 3:
+                        recency_boost = 0.2
+                except (ValueError, TypeError):
+                    pass
+
+            # Topics with high interest and frequent exposure are trending
+            relevance = min(1.0, interest_level * 0.6 + min(exposure_count, 10) * 0.03 + recency_boost)
+
+            if relevance >= self.curiosity_score_threshold * 0.7:
+                # Determine source based on whether it exists in knowledge graph
+                source = "knowledge_graph" if topic in self.knowledge_graph else "interest_model"
+                trends.append(TrendingTopic(
+                    topic=topic,
+                    significance=f"High interest ({interest_level:.1f}) with {exposure_count} exposures",
+                    relevance_score=round(relevance, 2),
+                    source=source
+                ))
+
+        return sorted(trends, key=lambda t: t.relevance_score, reverse=True)[:10]
     
     async def _serendipitous_discovery(self) -> List[SerendipitousDiscovery]:
-        """Discover unexpected connections"""
+        """Discover unexpected connections by finding shared related topics across distant domains."""
         discoveries = []
-        
-        # This would analyze knowledge graph for unexpected connections
-        # For now, return simulated discoveries
-        
-        example_discoveries = [
-            SerendipitousDiscovery(
-                topic="biomimicry in architecture",
-                connection="Unexpected link between biology knowledge and design interests",
-                interest_score=0.8,
-                discovered_via="knowledge_graph_analysis"
-            )
-        ]
-        
-        return discoveries
+
+        if not self.knowledge_graph or len(self.knowledge_graph) < 2:
+            return discoveries
+
+        topics = list(self.knowledge_graph.keys())
+
+        # Compare each pair of topics to find unexpected shared related topics
+        for i, topic_a in enumerate(topics):
+            related_a = set(self.knowledge_graph[topic_a].get("related_topics", []))
+            if not related_a:
+                continue
+
+            for topic_b in topics[i + 1:]:
+                related_b = set(self.knowledge_graph[topic_b].get("related_topics", []))
+                if not related_b:
+                    continue
+
+                # Find shared related topics that create a bridge
+                shared = related_a & related_b
+
+                # Only interesting if topics themselves are not directly related
+                if topic_b in related_a or topic_a in related_b:
+                    continue
+
+                for bridge in shared:
+                    # Calculate interest score from interest model
+                    interest_a = self.interest_model.get(topic_a, {}).get("interest_level", 0.5)
+                    interest_b = self.interest_model.get(topic_b, {}).get("interest_level", 0.5)
+                    interest_score = min(1.0, (interest_a + interest_b) / 2 + 0.1)
+
+                    discoveries.append(SerendipitousDiscovery(
+                        topic=f"{topic_a} and {topic_b}",
+                        connection=f"Unexpected link via shared concept '{bridge}'",
+                        interest_score=round(interest_score, 2),
+                        discovered_via="knowledge_graph_cross_analysis"
+                    ))
+
+        # Deduplicate and sort by interest score
+        seen_topics = set()
+        unique = []
+        for d in sorted(discoveries, key=lambda x: x.interest_score, reverse=True):
+            if d.topic not in seen_topics:
+                seen_topics.add(d.topic)
+                unique.append(d)
+
+        return unique[:5]
     
     def _reset_daily_count(self):
         """Reset daily task count if a day has passed"""

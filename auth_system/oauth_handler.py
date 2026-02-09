@@ -813,48 +813,146 @@ class OAuthHandler:
         
         return tokens
     
+    # Provider-specific selectors for login pages
+    _PROVIDER_SELECTORS = {
+        'google': {
+            'username': 'input[type="email"], input#identifierId',
+            'username_next': '#identifierNext button, button[type="submit"]',
+            'password': 'input[type="password"], input[name="Passwd"]',
+            'password_next': '#passwordNext button, button[type="submit"]',
+            'consent_allow': 'button#submit_approve_access, button[data-idom-class="nCP5yc"]',
+        },
+        'microsoft': {
+            'username': 'input[type="email"], input[name="loginfmt"]',
+            'username_next': 'input[type="submit"]#idSIButton9',
+            'password': 'input[type="password"], input[name="passwd"]',
+            'password_next': 'input[type="submit"]#idSIButton9',
+            'consent_allow': 'input[type="submit"]#idBtn_Accept',
+        },
+        'github': {
+            'username': 'input#login_field',
+            'username_next': None,
+            'password': 'input#password',
+            'password_next': 'input[type="submit"][name="commit"]',
+            'consent_allow': 'button#js-oauth-authorize-btn, button[name="authorize"]',
+        },
+        'facebook': {
+            'username': 'input#email, input[name="email"]',
+            'username_next': None,
+            'password': 'input#pass, input[name="pass"]',
+            'password_next': 'button[name="login"], button[type="submit"]',
+            'consent_allow': 'button[name="__CONFIRM__"]',
+        },
+        'apple': {
+            'username': 'input#account_name_text_field',
+            'username_next': '#sign-in',
+            'password': 'input#password_text_field',
+            'password_next': '#sign-in',
+            'consent_allow': 'button.button-primary',
+        },
+    }
+
+    # Generic fallback selectors
+    _GENERIC_SELECTORS = {
+        'username': 'input[type="email"], input[name="email"], input[name="username"], input[name="login"]',
+        'username_next': 'button[type="submit"], input[type="submit"]',
+        'password': 'input[type="password"]',
+        'password_next': 'button[type="submit"], input[type="submit"]',
+        'consent_allow': 'button[type="submit"]',
+    }
+
+    def _detect_provider(self, page_url: str) -> str:
+        """Detect OAuth provider from page URL."""
+        url_lower = page_url.lower()
+        for provider in self._PROVIDER_SELECTORS:
+            if provider in url_lower:
+                return provider
+        return 'generic'
+
     async def _handle_provider_login(
-        self, 
-        page, 
-        username: str, 
+        self,
+        page,
+        username: str,
         password: str
     ) -> None:
-        """Handle provider login page automation."""
-        # This would be implemented with specific selectors for each provider
-        # For now, generic implementation
+        """Handle provider login page automation with provider-specific selectors."""
+        provider = self._detect_provider(page.url)
+        selectors = self._PROVIDER_SELECTORS.get(provider, self._GENERIC_SELECTORS)
+        logger.debug(f"Using {provider} selectors for login automation")
+
         try:
-            # Wait for and fill username
+            # Fill username
             username_field = await page.wait_for_selector(
-                'input[type="email"], input[name="email"], input[name="username"]',
-                timeout=5000
+                selectors['username'],
+                timeout=8000
             )
             if username_field:
                 await username_field.fill(username)
-                
-                # Click next/submit
-                next_button = await page.query_selector(
-                    'button[type="submit"], input[type="submit"]'
-                )
-                if next_button:
-                    await next_button.click()
-            
-            # Wait for and fill password
+
+                # Click next if there is a separate step
+                next_selector = selectors.get('username_next')
+                if next_selector:
+                    next_button = await page.query_selector(next_selector)
+                    if next_button:
+                        await next_button.click()
+                        # Wait for password page to load
+                        await page.wait_for_timeout(1500)
+
+            # Fill password
             password_field = await page.wait_for_selector(
-                'input[type="password"]',
-                timeout=5000
+                selectors['password'],
+                timeout=8000
             )
             if password_field:
                 await password_field.fill(password)
-                
-                # Submit
-                submit_button = await page.query_selector(
-                    'button[type="submit"], input[type="submit"]'
-                )
-                if submit_button:
-                    await submit_button.click()
-            
+
+                # Submit password
+                submit_selector = selectors.get('password_next')
+                if submit_selector:
+                    submit_button = await page.query_selector(submit_selector)
+                    if submit_button:
+                        await submit_button.click()
+                        await page.wait_for_timeout(2000)
+
+            # Handle consent/authorization screen if present
+            consent_selector = selectors.get('consent_allow')
+            if consent_selector:
+                try:
+                    consent_button = await page.wait_for_selector(
+                        consent_selector,
+                        timeout=3000
+                    )
+                    if consent_button:
+                        await consent_button.click()
+                except (TimeoutError, OSError):
+                    pass  # No consent screen, continue
+
         except (OSError, ValueError, TimeoutError) as e:
-            logger.warning(f"Automated login handling failed: {e}")
+            logger.warning(f"Automated login handling failed for {provider}: {e}")
+            # Try generic fallback if provider-specific failed
+            if provider != 'generic':
+                logger.info("Retrying with generic selectors")
+                try:
+                    fallback = self._GENERIC_SELECTORS
+                    username_field = await page.wait_for_selector(
+                        fallback['username'], timeout=5000
+                    )
+                    if username_field:
+                        await username_field.fill(username)
+                        next_btn = await page.query_selector(fallback['username_next'])
+                        if next_btn:
+                            await next_btn.click()
+
+                    password_field = await page.wait_for_selector(
+                        fallback['password'], timeout=5000
+                    )
+                    if password_field:
+                        await password_field.fill(password)
+                        submit_btn = await page.query_selector(fallback['password_next'])
+                        if submit_btn:
+                            await submit_btn.click()
+                except (OSError, ValueError, TimeoutError) as fallback_err:
+                    logger.warning(f"Generic fallback login also failed: {fallback_err}")
     
     async def refresh_token(
         self,

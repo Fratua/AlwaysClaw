@@ -237,9 +237,32 @@ class OneForOneSupervisor(Supervisor):
         self.restart_history[child_id].append(time.time())
         
     async def _escalate_failure(self, child_id: str):
-        """Escalate failure to parent supervisor."""
+        """Escalate failure to parent supervisor via file-based notification."""
         logger.critical(f"Escalating failure for {child_id}")
-        # Implementation would notify parent
+
+        # Write failure notification file for parent/system supervisor
+        import tempfile
+        from pathlib import Path
+        notification_dir = Path(tempfile.gettempdir()) / "openclaw_failures"
+        try:
+            notification_dir.mkdir(parents=True, exist_ok=True)
+            notification_file = notification_dir / f"{child_id}_{time.time()}.json"
+            payload = {
+                "child_id": child_id,
+                "event": "max_restarts_exceeded",
+                "restart_history": self.restart_history.get(child_id, []),
+                "max_restarts": self.max_restarts,
+                "timestamp": time.time(),
+            }
+            notification_file.write_text(json.dumps(payload))
+        except OSError as e:
+            logger.error(f"Failed to write failure notification: {e}")
+
+        # Propagate failure upward: stop the failed child permanently
+        spec = self.children.get(child_id)
+        if spec:
+            spec.restart_policy = RestartPolicy.TEMPORARY
+        await self._terminate_child(child_id)
 
 
 class RestForOneSupervisor(Supervisor):
@@ -994,58 +1017,123 @@ class SystemSupervisor:
 # EXAMPLE USAGE
 # =============================================================================
 
+async def _heartbeat_agent_task(agent_name: str):
+    """A long-running agent task that emits heartbeats."""
+    logger.info(f"Agent {agent_name} started")
+    try:
+        while True:
+            logger.debug(f"Agent {agent_name} heartbeat")
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        logger.info(f"Agent {agent_name} shutting down")
+
+
+async def _core_orchestrator_task():
+    """Core orchestrator agent entry point."""
+    await _heartbeat_agent_task("A001_CORE")
+
+
+async def _browser_agent_task():
+    """Browser agent entry point."""
+    await _heartbeat_agent_task("A002_BROWSER")
+
+
+async def _security_agent_task():
+    """Security agent entry point."""
+    await _heartbeat_agent_task("A010_SECURITY")
+
+
+async def _heartbeat_monitor_task():
+    """System heartbeat monitoring agent entry point."""
+    await _heartbeat_agent_task("A014_HEARTBEAT")
+
+
 async def example_usage():
     """Example of how to use the process management system."""
-    
+
     # Create system supervisor
     system = SystemSupervisor()
-    
+
     # Create worker pools
     cpu_pool = PreforkWorkerPool(
         name="CPUWorkers",
         min_workers=4,
         max_tasks_per_child=1000
     )
-    
+
     io_pool = ThreadWorkerPool(
         name="IOWorkers",
         min_workers=10,
         max_workers=50
     )
-    
+
     async_pool = AsyncWorkerPool(
         name="AsyncWorkers",
         max_concurrency=500
     )
-    
+
     # Start pools
     await cpu_pool.start()
     await io_pool.start()
-    
+
     # Register with system
     system.worker_pools['cpu'] = cpu_pool
     system.worker_pools['io'] = io_pool
-    
-    # Create supervisors
+
+    # Create supervisors with real agent start functions
     core_supervisor = OneForOneSupervisor(max_restarts=5)
     agent_supervisor = RestForOneSupervisor(max_restarts=3)
-    
-    # Add children to supervisors
-    # (In production, these would be actual process start functions)
-    
+
+    # Register real agent processes as supervised children
+    core_supervisor.add_child(ChildSpec(
+        id="A001_CORE",
+        start_func=_core_orchestrator_task,
+        restart_policy=RestartPolicy.PERMANENT,
+        child_type=ChildType.WORKER,
+    ))
+
+    core_supervisor.add_child(ChildSpec(
+        id="A010_SECURITY",
+        start_func=_security_agent_task,
+        restart_policy=RestartPolicy.PERMANENT,
+        child_type=ChildType.WORKER,
+    ))
+
+    agent_supervisor.add_child(ChildSpec(
+        id="A002_BROWSER",
+        start_func=_browser_agent_task,
+        restart_policy=RestartPolicy.TRANSIENT,
+        child_type=ChildType.WORKER,
+    ))
+
+    agent_supervisor.add_child(ChildSpec(
+        id="A014_HEARTBEAT",
+        start_func=_heartbeat_monitor_task,
+        restart_policy=RestartPolicy.PERMANENT,
+        child_type=ChildType.WORKER,
+    ))
+
+    # Register supervisors with the system
+    system.child_supervisors['core'] = core_supervisor
+    system.child_supervisors['agents'] = agent_supervisor
+
     # Start the system
     await system.start()
-    
+
+    # Start child supervisors
+    await core_supervisor.start()
+    await agent_supervisor.start()
+
     # Submit work
     def example_task(x):
         return x * x
-        
+
     task_id = cpu_pool.submit(example_task, 5)
     logger.info(f"Submitted task: {task_id}")
-    
+
     # Let it run
     await asyncio.sleep(10)
-    
+
     # Graceful shutdown
     await system.stop()
 

@@ -807,9 +807,35 @@ class DashboardServer:
             status: Optional[str] = None,
             limit: int = 100
         ):
-            """List workflows."""
-            # This would query the state backend
-            return JSONResponse({'workflows': [], 'total': 0})
+            """List workflows from file-based state storage."""
+            import os
+            import glob
+
+            state_dir = os.path.join(
+                os.path.expanduser('~'), '.openclaw', 'state', 'workflows'
+            )
+            workflows = []
+
+            if os.path.isdir(state_dir):
+                pattern = os.path.join(state_dir, '*.json')
+                for filepath in sorted(glob.glob(pattern), reverse=True):
+                    if len(workflows) >= limit:
+                        break
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            wf_data = json.loads(f.read())
+                        # Filter by status if specified
+                        if status and wf_data.get('status') != status:
+                            continue
+                        workflows.append(wf_data)
+                    except (json.JSONDecodeError, OSError, KeyError) as e:
+                        logger.debug(f"Skipping workflow file {filepath}: {e}")
+                        continue
+
+            return JSONResponse({
+                'workflows': workflows,
+                'total': len(workflows)
+            })
         
         @app.get("/api/alerts")
         async def get_alerts(

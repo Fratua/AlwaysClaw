@@ -866,16 +866,83 @@ class SSOHandler:
         
         try:
             await page.goto(login_url)
-            
-            # Wait for SAML Response (would need callback server in real implementation)
-            # For now, simplified flow
-            
-            # This would be replaced with actual SAML response handling
-            return SAMLAuthenticationResult(
-                success=False,
-                error="SAML browser flow requires callback server implementation"
-            )
-            
+
+            # Start a callback server to receive the SAML Response POST
+            try:
+                from aiohttp import web
+            except ImportError:
+                return SAMLAuthenticationResult(
+                    success=False,
+                    error="aiohttp is required for SAML callback server (pip install aiohttp)"
+                )
+
+            saml_response_data = {}
+            response_event = asyncio.Event()
+
+            async def handle_saml_callback(request):
+                """Handle SAML ACS POST callback."""
+                if request.method == 'POST':
+                    post_data = await request.post()
+                    saml_response_data.update(dict(post_data))
+                else:
+                    saml_response_data.update(dict(request.query))
+                response_event.set()
+                return web.Response(
+                    text="<html><body><h1>Authentication complete</h1>"
+                         "<p>You can close this window.</p>"
+                         "<script>window.close();</script></body></html>",
+                    content_type='text/html'
+                )
+
+            callback_app = web.Application()
+            # Parse ACS URL to get the callback path
+            from urllib.parse import urlparse
+            acs_parsed = urlparse(handler.config.sp_acs_url)
+            acs_path = acs_parsed.path or '/saml/acs'
+            callback_app.router.add_post(acs_path, handle_saml_callback)
+            callback_app.router.add_get(acs_path, handle_saml_callback)
+
+            runner = web.AppRunner(callback_app)
+            await runner.setup()
+
+            acs_port = acs_parsed.port or 8443
+            acs_host = acs_parsed.hostname or 'localhost'
+            site = web.TCPSite(runner, acs_host, acs_port)
+            await site.start()
+
+            try:
+                # Wait for the IdP to POST back the SAML Response
+                await asyncio.wait_for(response_event.wait(), timeout=300)
+
+                # Extract and parse the SAML Response
+                raw_saml_response = saml_response_data.get('SAMLResponse', '')
+                if not raw_saml_response:
+                    return SAMLAuthenticationResult(
+                        success=False,
+                        error="No SAMLResponse received in callback"
+                    )
+
+                # Verify relay state if present
+                received_relay = saml_response_data.get('RelayState', '')
+                if relay_state and received_relay != relay_state:
+                    return SAMLAuthenticationResult(
+                        success=False,
+                        error="RelayState mismatch - possible CSRF attack"
+                    )
+
+                # Parse and verify the SAML response
+                response_xml = handler.parse_saml_response(raw_saml_response)
+                result = handler.verify_response(response_xml)
+                return result
+
+            except asyncio.TimeoutError:
+                return SAMLAuthenticationResult(
+                    success=False,
+                    error="Timeout waiting for SAML response from IdP"
+                )
+            finally:
+                await runner.cleanup()
+
         finally:
             await page.close()
     

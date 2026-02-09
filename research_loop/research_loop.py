@@ -3,8 +3,11 @@ Main Research Loop Implementation
 """
 
 import asyncio
+import json
 import logging
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Optional, Any
 from collections import defaultdict
 
@@ -402,21 +405,32 @@ class ResearchLoop:
         }
     
     async def _send_heartbeat(self):
-        """Send heartbeat signal to system"""
-        # This would integrate with the main agent heartbeat system
+        """Send heartbeat signal to system by writing a heartbeat JSON file."""
         heartbeat_data = {
             "loop": "research",
             "status": "running" if self.running else "stopped",
             "active_tasks": len(self.active_tasks),
             "queue_size": self.task_queue.qsize(),
-            "stats": self.stats,
+            "stats": {
+                k: (v.isoformat() if isinstance(v, datetime) else v)
+                for k, v in self.stats.items()
+            },
             "timestamp": datetime.now().isoformat()
         }
-        
+
         logger.debug(f"Heartbeat: {heartbeat_data}")
-        
-        # Emit heartbeat event (would integrate with event system)
-        # await event_bus.emit("heartbeat", heartbeat_data)
+
+        # Write heartbeat to a file so other components can monitor liveness
+        heartbeat_path = Path(os.environ.get(
+            "RESEARCH_HEARTBEAT_FILE", "research_heartbeat.json"
+        ))
+        try:
+            heartbeat_path.write_text(
+                json.dumps(heartbeat_data, indent=2, default=str),
+                encoding="utf-8"
+            )
+        except OSError as e:
+            logger.debug(f"Could not write heartbeat file: {e}")
     
     async def _emit_completion_event(
         self,
@@ -424,7 +438,7 @@ class ResearchLoop:
         synthesis: SynthesisResult,
         consolidation: Any
     ):
-        """Emit research completion event"""
+        """Emit research completion event by appending to event log file."""
         event_data = {
             "event": "research_completed",
             "task_id": task.id,
@@ -434,14 +448,13 @@ class ResearchLoop:
             "entries_created": consolidation.entries_created if consolidation else 0,
             "timestamp": datetime.now().isoformat()
         }
-        
+
         logger.info(f"Research completion event: {event_data}")
-        
-        # Would integrate with event bus
-        # await event_bus.emit("research_completed", event_data)
+
+        await self._append_event(event_data)
     
     async def _emit_failure_event(self, task: ResearchTask, error: Exception):
-        """Emit research failure event"""
+        """Emit research failure event by appending to event log file."""
         event_data = {
             "event": "research_failed",
             "task_id": task.id,
@@ -449,11 +462,22 @@ class ResearchLoop:
             "error": str(error),
             "timestamp": datetime.now().isoformat()
         }
-        
+
         logger.error(f"Research failure event: {event_data}")
-        
-        # Would integrate with event bus
-        # await event_bus.emit("research_failed", event_data)
+
+        await self._append_event(event_data)
+
+    async def _append_event(self, event_data: Dict[str, Any]):
+        """Append an event to the research events log file."""
+        event_log_path = Path(os.environ.get(
+            "RESEARCH_EVENT_LOG", "research_events.jsonl"
+        ))
+        try:
+            line = json.dumps(event_data, default=str) + "\n"
+            with open(event_log_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except OSError as e:
+            logger.debug(f"Could not write event log: {e}")
     
     # Public API methods
     

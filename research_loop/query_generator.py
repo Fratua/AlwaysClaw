@@ -3,6 +3,7 @@ Search Query Generation System
 Intelligent query generation and optimization for multi-engine search.
 """
 
+import re
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -67,18 +68,10 @@ class QueryGenerator:
     async def _extract_concepts(self, task: ResearchTask) -> Dict[str, Any]:
         """
         Extract key concepts from research task.
-        
-        Uses GPT-5.2 to analyze the task and extract:
-        - Primary subject
-        - Secondary subjects
-        - Key entities
-        - Temporal context
-        - Geographic context
-        - Domain specificity
+
+        Attempts LLM-based concept extraction via OpenAIClient. Falls back
+        to keyword-based extraction when the LLM is unavailable.
         """
-        # This would use GPT-5.2 in production
-        # For now, use rule-based extraction
-        
         concepts = {
             "primary_subject": task.topic,
             "secondary_subjects": [],
@@ -88,25 +81,115 @@ class QueryGenerator:
             "domain": "general",
             "technical_level": "medium"
         }
-        
-        # Extract from context if available
-        if task.context:
-            # Simple keyword extraction
-            words = task.context.lower().split()
-            
-            # Detect temporal context
-            temporal_keywords = ["latest", "recent", "new", "2024", "2025", "current"]
-            for kw in temporal_keywords:
+
+        # Attempt LLM-based extraction
+        try:
+            from openai_client import OpenAIClient
+            client = OpenAIClient.get_instance()
+
+            prompt = (
+                "Analyze the following research topic and extract structured concepts.\n"
+                f"Topic: {task.topic}\n"
+            )
+            if task.context:
+                prompt += f"Context: {task.context}\n"
+            prompt += (
+                "\nReturn the following fields, one per line, in key: value format:\n"
+                "primary_subject: <main topic>\n"
+                "secondary_subjects: <comma-separated list>\n"
+                "key_entities: <comma-separated list>\n"
+                "temporal_context: <current/historical/none>\n"
+                "geographic_context: <region or none>\n"
+                "domain: <general/technical/scientific/business/other>\n"
+                "technical_level: <low/medium/high>\n"
+            )
+            result = client.generate(prompt, system="You are a research analyst.", max_tokens=300)
+
+            for line in result.strip().splitlines():
+                if ":" not in line:
+                    continue
+                key, _, value = line.partition(":")
+                key = key.strip().lower().replace(" ", "_")
+                value = value.strip()
+                if key == "primary_subject" and value:
+                    concepts["primary_subject"] = value
+                elif key == "secondary_subjects" and value.lower() != "none":
+                    concepts["secondary_subjects"] = [s.strip() for s in value.split(",") if s.strip()]
+                elif key == "key_entities" and value.lower() != "none":
+                    concepts["key_entities"] = [s.strip() for s in value.split(",") if s.strip()]
+                elif key == "temporal_context" and value.lower() != "none":
+                    concepts["temporal_context"] = value
+                elif key == "geographic_context" and value.lower() != "none":
+                    concepts["geographic_context"] = value
+                elif key == "domain" and value:
+                    concepts["domain"] = value
+                elif key == "technical_level" and value:
+                    concepts["technical_level"] = value
+
+            return concepts
+
+        except (ImportError, EnvironmentError, RuntimeError, ValueError) as exc:
+            logger.debug(f"LLM unavailable for concept extraction, using keyword fallback: {exc}")
+
+        # Keyword-based fallback
+        combined_text = (task.topic + " " + (task.context or "")).lower()
+        words = combined_text.split()
+
+        # Temporal context detection
+        temporal_keywords = ["latest", "recent", "new", "2024", "2025", "2026", "current", "today", "now"]
+        historical_keywords = ["history", "historical", "past", "origin", "evolution"]
+        for kw in temporal_keywords:
+            if kw in words:
+                concepts["temporal_context"] = "current"
+                break
+        if not concepts["temporal_context"]:
+            for kw in historical_keywords:
                 if kw in words:
-                    concepts["temporal_context"] = "current"
+                    concepts["temporal_context"] = "historical"
                     break
-            
-            # Detect technical level
-            technical_keywords = ["technical", "implementation", "code", "api", "documentation"]
-            if any(kw in words for kw in technical_keywords):
-                concepts["technical_level"] = "high"
-                concepts["domain"] = "technical"
-        
+
+        # Geographic context detection
+        geo_keywords = {
+            "us": "United States", "usa": "United States", "europe": "Europe",
+            "asia": "Asia", "china": "China", "india": "India", "uk": "United Kingdom",
+            "global": "Global", "worldwide": "Global",
+        }
+        for kw, region in geo_keywords.items():
+            if kw in words:
+                concepts["geographic_context"] = region
+                break
+
+        # Domain detection
+        technical_keywords = ["technical", "implementation", "code", "api", "documentation",
+                              "programming", "software", "algorithm", "framework", "library"]
+        scientific_keywords = ["research", "study", "experiment", "hypothesis", "data",
+                               "analysis", "scientific", "journal", "paper"]
+        business_keywords = ["market", "business", "revenue", "startup", "company",
+                             "investment", "industry", "strategy"]
+
+        if any(kw in words for kw in technical_keywords):
+            concepts["technical_level"] = "high"
+            concepts["domain"] = "technical"
+        elif any(kw in words for kw in scientific_keywords):
+            concepts["domain"] = "scientific"
+        elif any(kw in words for kw in business_keywords):
+            concepts["domain"] = "business"
+
+        # Extract multi-word entities (capitalized phrases in original text)
+        original_text = task.topic + " " + (task.context or "")
+        entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b', original_text)
+        concepts["key_entities"] = list(set(entities))[:10]
+
+        # Extract secondary subjects from context keywords > 5 chars
+        if task.context:
+            stop_words = {"about", "their", "which", "would", "could", "should", "these", "those",
+                          "there", "where", "other", "after", "before", "between"}
+            secondary = [
+                w for w in task.context.split()
+                if len(w) > 5 and w.lower() not in stop_words and w.lower() != task.topic.lower()
+            ]
+            concepts["secondary_subjects"] = list(set(secondary))[:5]
+
         return concepts
     
     async def _generate_variants(
@@ -278,10 +361,34 @@ class QueryGenerator:
         return " ".join(words)
     
     def _add_search_operators(self, text: str) -> str:
-        """Add search operators for more precise results"""
-        # Add quotes around key phrases
-        # This is a simplified version - production would be more sophisticated
-        return text
+        """Add search operators for more precise results."""
+        words = text.split()
+        if len(words) < 2:
+            return text
+
+        # Identify multi-word noun phrases (2-3 consecutive capitalized or
+        # common compound terms) and wrap them in quotes
+        # Heuristic: quote the first 2-3 word chunk that looks like a key phrase
+        compound_patterns = re.findall(r'\b[A-Za-z]+(?:\s+[A-Za-z]+){1,2}\b', text)
+        quoted_text = text
+        quoted_any = False
+        for phrase in compound_patterns[:2]:
+            # Only quote phrases longer than one word and not already quoted
+            phrase_words = phrase.split()
+            if len(phrase_words) >= 2 and f'"{phrase}"' not in quoted_text:
+                quoted_text = quoted_text.replace(phrase, f'"{phrase}"', 1)
+                quoted_any = True
+                break  # Only quote the primary phrase to avoid over-constraining
+
+        if not quoted_any and len(words) >= 3:
+            # Quote the first two meaningful words as a phrase
+            meaningful = [w for w in words if len(w) > 3]
+            if len(meaningful) >= 2:
+                phrase = f"{meaningful[0]} {meaningful[1]}"
+                if phrase in quoted_text:
+                    quoted_text = quoted_text.replace(phrase, f'"{phrase}"', 1)
+
+        return quoted_text
     
     def _rank_and_deduplicate(self, queries: List[SearchQuery]) -> List[SearchQuery]:
         """Rank queries and remove duplicates"""
