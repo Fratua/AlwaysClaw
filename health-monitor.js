@@ -30,6 +30,9 @@ class HealthMonitor extends EventEmitter {
       history: []
     };
     this.thresholdBreaches = new Map();
+    this._diskCache = null;
+    this._diskCacheTime = 0;
+    this._diskCacheTtl = 5 * 60 * 1000; // 5 minutes
   }
 
   start() {
@@ -183,6 +186,11 @@ class HealthMonitor extends EventEmitter {
   }
 
   async checkDisk() {
+    // Return cached result if still fresh (avoids spawning PowerShell every check)
+    if (this._diskCache && (Date.now() - this._diskCacheTime) < this._diskCacheTtl) {
+      return this._diskCache;
+    }
+
     try {
       if (process.platform === 'win32') {
         // Use PowerShell to get disk stats on Windows
@@ -214,11 +222,17 @@ class HealthMonitor extends EventEmitter {
           return total === 0 || (d.Used / total) < this.options.diskThreshold;
         });
 
-        return { healthy, drives: driveInfo };
+        const result = { healthy, drives: driveInfo };
+        this._diskCache = result;
+        this._diskCacheTime = Date.now();
+        return result;
       }
 
       // Non-Windows fallback
-      return { healthy: true, drives: [], message: 'Non-Windows platform' };
+      const result = { healthy: true, drives: [], message: 'Non-Windows platform' };
+      this._diskCache = result;
+      this._diskCacheTime = Date.now();
+      return result;
     } catch (error) {
       logger.warn('[HealthMonitor] Disk check failed:', error.message);
       return { healthy: true, error: error.message };
@@ -255,7 +269,7 @@ class HealthMonitor extends EventEmitter {
     try {
       const { getBridge } = require('./python-bridge');
       const bridge = getBridge();
-      if (bridge && bridge.healthCheck) {
+      if (bridge && bridge.isReady && typeof bridge.healthCheck === 'function') {
         const result = await bridge.healthCheck();
         return {
           healthy: result.healthy !== false,
@@ -265,7 +279,7 @@ class HealthMonitor extends EventEmitter {
           pid: result.pid,
         };
       }
-      return { healthy: true, note: 'Bridge not initialized yet' };
+      return { healthy: true, note: 'Bridge not ready yet' };
     } catch (error) {
       return { healthy: false, error: error.message };
     }
@@ -326,9 +340,10 @@ class HealthMonitor extends EventEmitter {
   }
 
   isHealthy() {
-    if (!this.metrics.lastCheck) return false;
+    // Before first check completes, assume healthy to avoid false alarms at startup
+    if (!this.metrics.lastCheck) return true;
     const lastHealth = this.metrics.history[this.metrics.history.length - 1];
-    return lastHealth ? lastHealth.status === 'healthy' : false;
+    return lastHealth ? lastHealth.status === 'healthy' : true;
   }
 }
 

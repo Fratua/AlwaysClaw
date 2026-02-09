@@ -6,6 +6,7 @@ For Windows 10 OpenClaw AI Agent Framework
 import os
 import json
 import base64
+import hashlib
 import logging
 import secrets
 import platform
@@ -577,42 +578,83 @@ class EncryptedFileVault:
             try:
                 import ctypes
                 from ctypes import wintypes
-                
+
                 # DPAPI encryption
                 DATA_BLOB = ctypes.Structure
                 # Simplified - in production use proper DPAPI
                 return key  # Placeholder
             except (ImportError, OSError, ValueError) as e:
-                logger.warning(f"DPAPI encryption failed, falling back: {e}")
+                logger.warning(f"DPAPI encryption failed, falling back to PBKDF2: {e}")
 
-        # Fallback: use simple obfuscation
-        # In production, use proper key derivation
-        return base64.urlsafe_b64encode(key)
-    
+        # Fallback: use PBKDF2HMAC-derived key to encrypt with Fernet
+        salt_path = self._get_vault_path() / '.salt'
+        if salt_path.exists():
+            salt = salt_path.read_bytes()
+        else:
+            salt = os.urandom(16)
+            salt_path.parent.mkdir(parents=True, exist_ok=True)
+            salt_path.write_bytes(salt)
+
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=600000,
+        )
+        # Derive a Fernet key from a passphrase (use API key or machine-specific secret)
+        passphrase = (os.environ.get('VAULT_PASSPHRASE', '') or platform.node()).encode()
+        derived = base64.urlsafe_b64encode(kdf.derive(passphrase))
+        f = Fernet(derived)
+        return f.encrypt(key)
+
     def _decrypt_master_key(self, encrypted: bytes) -> bytes:
         """Decrypt master key."""
+        try:
+            # Try Fernet decryption first (new format)
+            salt_path = self._get_vault_path() / '.salt'
+            if salt_path.exists():
+                salt = salt_path.read_bytes()
+                kdf = PBKDF2HMAC(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=salt,
+                    iterations=600000,
+                )
+                passphrase = (os.environ.get('VAULT_PASSPHRASE', '') or platform.node()).encode()
+                derived = base64.urlsafe_b64encode(kdf.derive(passphrase))
+                f = Fernet(derived)
+                return f.decrypt(encrypted)
+        except Exception:
+            pass
+        # Legacy fallback: base64 decode
         try:
             return base64.urlsafe_b64decode(encrypted)
         except (ValueError, TypeError, OSError) as e:
             logger.error(f"Decryption failed for credential: {e}")
             raise
     
+    def _get_vault_path(self) -> Path:
+        """Get the vault storage root path."""
+        vault_path = self.storage_path / 'vault'
+        vault_path.mkdir(parents=True, exist_ok=True)
+        return vault_path
+
     def _get_credential_file(self, service_name: str, username: str) -> Path:
         """Get path to credential file."""
-        # Hash service name for directory
-        service_hash = secrets.token_hex(8)  # Simplified
+        # Deterministic hash so stored credentials can be found again
+        service_hash = hashlib.sha256(service_name.encode()).hexdigest()[:16]
         cred_dir = self.storage_path / 'credentials' / service_hash
         cred_dir.mkdir(parents=True, exist_ok=True)
         return cred_dir / f"{username}.enc"
-    
+
     def _get_mfa_file(
-        self, 
-        service_name: str, 
-        username: str, 
+        self,
+        service_name: str,
+        username: str,
         mfa_type: str
     ) -> Path:
         """Get path to MFA credential file."""
-        service_hash = secrets.token_hex(8)
+        service_hash = hashlib.sha256(service_name.encode()).hexdigest()[:16]
         mfa_dir = self.storage_path / 'mfa' / service_hash
         mfa_dir.mkdir(parents=True, exist_ok=True)
         return mfa_dir / f"{username}_{mfa_type}.enc"
@@ -701,8 +743,20 @@ class EncryptedFileVault:
         self,
         service_name: str
     ) -> Optional[Credentials]:
-        """Get first available credentials for service."""
-        # This would scan the directory - simplified implementation
+        """Get first available credentials for service by scanning credential directory."""
+        service_hash = hashlib.sha256(service_name.encode()).hexdigest()[:16]
+        cred_dir = self.storage_path / 'credentials' / service_hash
+        if not cred_dir.exists():
+            return None
+        for enc_file in cred_dir.glob('*.enc'):
+            try:
+                encrypted = enc_file.read_bytes()
+                cred_json = self.encryption.decrypt(encrypted)
+                cred_data = json.loads(cred_json)
+                return Credentials.from_dict(cred_data)
+            except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
+                logger.debug(f"Skipping credential file {enc_file}: {e}")
+                continue
         return None
     
     async def delete_credentials(

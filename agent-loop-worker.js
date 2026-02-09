@@ -8,6 +8,12 @@ const WorkerBase = require('./worker-base');
 const logger = require('./logger');
 const { getBridge } = require('./python-bridge');
 
+// Supported action types - derived from executeAction switch cases
+const SUPPORTED_ACTIONS = [
+  'gmail.send', 'gmail.read', 'browser.navigate', 'browser.click',
+  'twilio.call', 'twilio.sms', 'tts.speak', 'system.command'
+];
+
 class AgentLoopWorker extends WorkerBase {
   constructor() {
     super();
@@ -23,6 +29,7 @@ class AgentLoopWorker extends WorkerBase {
     this.priority = this.loopConfig.priority || 'normal';
     this.isRunning = false;
     this.currentTask = null;
+    this.currentTaskPromise = null;
     this.taskQueue = [];
     this.bridge = null;
     this.pendingIORequests = new Map();
@@ -72,13 +79,18 @@ class AgentLoopWorker extends WorkerBase {
   }
 
   async runLoop() {
+    let consecutiveErrors = 0;
     while (this.isRunning && !this.isShuttingDown) {
       try {
         await this.executeAgentCycle();
+        consecutiveErrors = 0;
       } catch (error) {
-        logger.error(`[AgentLoop ${this.loopId}] Cycle error:`, error);
+        consecutiveErrors++;
+        logger.error(`[AgentLoop ${this.loopId}] Cycle error (${consecutiveErrors}):`, error);
         this.stats.tasksFailed++;
-        await this.sleep(5000);
+        // Exponential backoff: 5s, 10s, 20s, 40s, max 60s
+        const backoff = Math.min(5000 * Math.pow(2, consecutiveErrors - 1), 60000);
+        await this.sleep(backoff);
       }
     }
   }
@@ -97,7 +109,9 @@ class AgentLoopWorker extends WorkerBase {
     // Check for tasks in queue
     if (this.taskQueue.length > 0) {
       const task = this.taskQueue.shift();
-      await this.processTask(task);
+      this.currentTaskPromise = this.processTask(task);
+      await this.currentTaskPromise;
+      this.currentTaskPromise = null;
     } else {
       // Idle cycle - perform maintenance or wait
       await this.performIdleCycle();
@@ -179,20 +193,26 @@ class AgentLoopWorker extends WorkerBase {
             content: `Process this task and return a JSON list of actions to execute.\n\nTask: ${JSON.stringify(task)}\n\nContext: ${JSON.stringify(context)}\n\nRespond with JSON: {"actions": [{"type": "action.type", "data": {...}}], "response": "summary"}`
           }
         ],
-        system: `You are an AI agent loop processor. Analyze tasks and return structured actions. Available action types: gmail.send, gmail.read, browser.navigate, browser.click, twilio.call, twilio.sms, tts.speak, system.command. Capabilities: ${this.capabilities.join(', ')}`,
+        system: `You are an AI agent loop processor. Analyze tasks and return structured actions. Available action types: ${SUPPORTED_ACTIONS.join(', ')}. Capabilities: ${this.capabilities.join(', ')}`,
         max_tokens: 2048,
         temperature: 0.3,
       });
 
       // Try to parse structured response
+      const content = result.content || '';
+      // First: try parsing the whole response as JSON
       try {
-        const content = result.content || '';
+        return JSON.parse(content);
+      } catch (_wholeParseErr) {
+        // Not valid JSON as-is, try regex extraction
+      }
+      try {
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           return JSON.parse(jsonMatch[0]);
         }
       } catch (parseErr) {
-        // Fall through to default
+        logger.warn(`[AgentLoop ${this.loopId}] Failed to parse GPT-5.2 JSON response: ${content.substring(0, 500)}`);
       }
 
       return {
@@ -267,56 +287,40 @@ class AgentLoopWorker extends WorkerBase {
     return this.bridge.call('gmail.read', action.data || {});
   }
 
-  async executeBrowserNavigate(action) {
-    if (!this.capabilities.includes('browser')) {
-      throw new Error('Browser capability not available');
-    }
+  _sendBrowserRequest(browserAction, data, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
-      const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const requestId = `req-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
       this.pendingIORequests.set(requestId, { resolve, reject });
       this.sendToMaster({
         type: 'io-request',
         data: {
           service: 'browser',
-          action: 'navigate',
-          data: action.data || {},
+          action: browserAction,
+          data: data || {},
           requestId,
         }
       });
-      // Timeout after 30 seconds
       setTimeout(() => {
         if (this.pendingIORequests.has(requestId)) {
           this.pendingIORequests.delete(requestId);
-          reject(new Error('Browser navigate timeout'));
+          reject(new Error(`Browser ${browserAction} timeout`));
         }
-      }, 30000);
+      }, timeoutMs);
     });
+  }
+
+  async executeBrowserNavigate(action) {
+    if (!this.capabilities.includes('browser')) {
+      throw new Error('Browser capability not available');
+    }
+    return this._sendBrowserRequest('navigate', action.data);
   }
 
   async executeBrowserClick(action) {
     if (!this.capabilities.includes('browser')) {
       throw new Error('Browser capability not available');
     }
-    return new Promise((resolve, reject) => {
-      const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      this.pendingIORequests.set(requestId, { resolve, reject });
-      this.sendToMaster({
-        type: 'io-request',
-        data: {
-          service: 'browser',
-          action: 'click',
-          data: action.data || {},
-          requestId,
-        }
-      });
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        if (this.pendingIORequests.has(requestId)) {
-          this.pendingIORequests.delete(requestId);
-          reject(new Error('Browser click timeout'));
-        }
-      }, 30000);
-    });
+    return this._sendBrowserRequest('click', action.data);
   }
 
   async executeTwilioCall(action) {
@@ -398,29 +402,11 @@ class AgentLoopWorker extends WorkerBase {
   }
 
   async performIdleCycle() {
-    // Run a cognitive loop cycle based on this worker's loop ID
-    const loopNames = [
-      'ralph', 'research', 'planning', 'e2e', 'exploration',
-      'discovery', 'bug_finder', 'self_learning', 'meta_cognition',
-      'self_upgrading', 'self_updating', 'self_driven', 'cpel',
-      'context_engineering', 'web_monitor'
-    ];
-
-    const loopName = loopNames[this.loopId % loopNames.length];
-
-    try {
-      const result = await this.bridge.call(`loop.${loopName}.run_cycle`, {
-        loopId: this.loopId,
-        timestamp: Date.now(),
-      });
-
-      if (result && result.success) {
-        logger.debug(`[AgentLoop ${this.loopId}] Idle cycle (${loopName}) completed`);
-      }
-    } catch (error) {
-      // Don't log at error level for idle cycles - these are opportunistic
-      logger.debug(`[AgentLoop ${this.loopId}] Idle cycle skipped: ${error.message}`);
-    }
+    // Cognitive loops are triggered exclusively by the cron scheduler
+    // (via daemon-master's _registerFallbackLoops or the TS SchedulerSystem).
+    // Running them here would cause double-invocation. Instead, idle cycles
+    // just yield to avoid busy-looping.
+    await this.sleep(1000);
   }
 
   async getGmailContext() {
@@ -447,10 +433,10 @@ class AgentLoopWorker extends WorkerBase {
     logger.info(`[AgentLoop ${this.loopId}] Shutting down...`);
 
     // Wait for current task to complete (with timeout)
-    if (this.currentTask) {
+    if (this.currentTaskPromise) {
       try {
         await this.withTimeout(
-          this.currentTask,
+          this.currentTaskPromise,
           10000,
           'Task completion timeout during shutdown'
         );

@@ -3,6 +3,8 @@ Context Window Management for LLM
 Handles token budgeting, compression, and pre-compaction flush
 """
 
+import logging
+import re
 import tiktoken
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
@@ -43,7 +45,11 @@ class ContextWindowManager:
     ):
         self.model = llm_model
         self.budget = budget or ContextBudget()
-        self.encoder = tiktoken.encoding_for_model(llm_model)
+        try:
+            self.encoder = tiktoken.encoding_for_model(llm_model)
+        except KeyError:
+            logger.info(f"tiktoken: model '{llm_model}' not found, using cl100k_base encoding")
+            self.encoder = tiktoken.get_encoding("cl100k_base")
         
         # Thresholds for actions
         self.COMPACTION_THRESHOLD = 0.85  # 85% full → compact
@@ -335,9 +341,9 @@ class ContextWindowManager:
         
         summary = ' | '.join(key_points[:5])  # Limit to 5 key points
         
-        # Ensure it fits in budget
-        if self.count_tokens(summary) > max_tokens:
-            summary = summary[:max_tokens * 4]  # Rough char estimate
+        # Ensure it fits in budget using token counting
+        while self.count_tokens(summary) > max_tokens and len(summary) > 10:
+            summary = summary[:int(len(summary) * 0.8)]
         
         return summary
     
@@ -429,26 +435,34 @@ class ContextWindowManager:
             AgentMessage(role='system', content=flush_prompt)
         ]
         
-        # Get agent response
-        response = await llm_client.generate(flush_context)
-        
+        # Get agent response (returns a plain string)
+        response_text = await llm_client.generate(flush_context)
+        if not isinstance(response_text, str):
+            response_text = getattr(response_text, 'content', str(response_text))
+
         # Check for NO_REPLY
-        if "NO_REPLY" in response.content or not response.content.strip():
+        if "NO_REPLY" in response_text or not response_text.strip():
             return FlushResult(written=False, reason="nothing_to_store")
-        
-        # Parse and execute memory writes
+
+        # Parse and execute memory writes from response text
         memories_written = []
-        
-        # Extract memory write requests from response
-        # This would parse tool calls from the LLM response
-        for tool_call in response.tool_calls:
-            if tool_call['name'] == 'memory_write':
-                try:
-                    result = await memory_tools.write_memory(**tool_call['arguments'])
+
+        # Try to extract JSON memory entries from the response
+        import re
+        json_blocks = re.findall(r'\{[^{}]+\}', response_text)
+        for block in json_blocks:
+            try:
+                parsed = json.loads(block)
+                if 'content' in parsed:
+                    result = await memory_tools.write_memory(
+                        content=parsed.get('content', ''),
+                        category=parsed.get('category', 'semantic'),
+                        importance=parsed.get('importance', 0.5),
+                    )
                     if result.success:
                         memories_written.append(result.memory_id)
-                except (OSError, ConnectionError, TimeoutError, ValueError) as e:
-                    print(f"Failed to write memory: {e}")
+            except (json.JSONDecodeError, OSError, ConnectionError, TimeoutError, ValueError) as e:
+                logging.getLogger(__name__).debug(f"Failed to write memory: {e}")
         
         self.flushed_this_cycle = True
         self.last_flush_time = datetime.now()
@@ -495,7 +509,7 @@ class ContextCompressor:
         This is more sophisticated than the basic compression
         in ContextWindowManager and produces higher quality summaries.
         """
-        current_tokens = sum(len(m.content) // 4 for m in messages)
+        current_tokens = sum(self.manager.count_tokens(m.content) + 4 for m in messages)
         
         if current_tokens <= target_tokens:
             return messages

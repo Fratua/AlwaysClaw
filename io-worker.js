@@ -8,6 +8,9 @@
 const WorkerBase = require('./worker-base');
 const logger = require('./logger');
 const { getBridge } = require('./python-bridge');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 class IOWorker extends WorkerBase {
   constructor() {
@@ -46,6 +49,35 @@ class IOWorker extends WorkerBase {
     logger.info(`[IO Worker ${this.workerId}] ${this.ioService} service initialized`);
   }
 
+  onMessage(msg) {
+    if (msg.type === 'io-request') {
+      const request = msg.data;
+      this.service.execute(request).then(result => {
+        this.sendToMaster({
+          type: 'io-response',
+          data: {
+            requestId: request.requestId,
+            service: request.service,
+            action: request.action,
+            result,
+          }
+        });
+      }).catch(error => {
+        this.sendToMaster({
+          type: 'io-response',
+          data: {
+            requestId: request.requestId,
+            service: request.service,
+            action: request.action,
+            error: error.message,
+          }
+        });
+      });
+      return;
+    }
+    super.onMessage(msg);
+  }
+
   async onTask(data) {
     return await this.service.execute(data);
   }
@@ -79,7 +111,7 @@ class GmailService {
       case 'search':
         return this.bridge.call('gmail.search', request.data || {});
       case 'watch':
-        return { watchId: 'watch-' + Date.now(), note: 'Watch via bridge' };
+        return this.bridge.call('gmail.watch', request.data || {});
       default:
         throw new Error(`Unknown Gmail action: ${request.action}`);
     }
@@ -221,6 +253,7 @@ class BrowserService {
     if (this.browserPool) {
       const sessionId = data.sessionId;
       let pooledPage = sessionId && this._sessionPages.get(sessionId);
+      const isTemporary = !pooledPage;
 
       if (!pooledPage) {
         pooledPage = await this.browserPool.acquirePage();
@@ -228,9 +261,14 @@ class BrowserService {
 
       try {
         await pooledPage.page.click(data.selector, { timeout: data.timeout || 10000 });
-        return { clicked: true, selector: data.selector, sessionId };
+        const result = { clicked: true, selector: data.selector, sessionId };
+        // Release temporary pages that aren't tracked by a session
+        if (isTemporary) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        return result;
       } catch (error) {
-        if (!sessionId || !this._sessionPages.has(sessionId)) {
+        if (isTemporary) {
           await this.browserPool.releasePage(pooledPage);
         }
         throw error;
@@ -244,6 +282,7 @@ class BrowserService {
     if (this.browserPool) {
       const sessionId = data.sessionId;
       let pooledPage = sessionId && this._sessionPages.get(sessionId);
+      const isTemporary = !pooledPage;
 
       if (!pooledPage) {
         pooledPage = await this.browserPool.acquirePage();
@@ -251,9 +290,13 @@ class BrowserService {
 
       try {
         await pooledPage.page.fill(data.selector, data.text || '');
-        return { typed: true, sessionId };
+        const result = { typed: true, sessionId };
+        if (isTemporary) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        return result;
       } catch (error) {
-        if (!sessionId || !this._sessionPages.has(sessionId)) {
+        if (isTemporary) {
           await this.browserPool.releasePage(pooledPage);
         }
         throw error;
@@ -267,6 +310,7 @@ class BrowserService {
     if (this.browserPool) {
       const sessionId = data.sessionId;
       let pooledPage = sessionId && this._sessionPages.get(sessionId);
+      const isTemporary = !pooledPage;
 
       if (!pooledPage) {
         pooledPage = await this.browserPool.acquirePage();
@@ -277,9 +321,17 @@ class BrowserService {
           fullPage: data.fullPage || false,
           type: 'png',
         });
-        return { screenshot: buffer.toString('base64'), size: buffer.length, sessionId };
+        // Write to temp file to avoid large base64 strings in IPC
+        const tmpDir = os.tmpdir();
+        const tmpFile = path.join(tmpDir, `screenshot-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.png`);
+        fs.writeFileSync(tmpFile, buffer);
+        const result = { screenshotPath: tmpFile, size: buffer.length, sessionId };
+        if (isTemporary) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        return result;
       } catch (error) {
-        if (!sessionId || !this._sessionPages.has(sessionId)) {
+        if (isTemporary) {
           await this.browserPool.releasePage(pooledPage);
         }
         throw error;
@@ -290,19 +342,48 @@ class BrowserService {
 
   async evaluate(data) {
     logger.info('[BrowserService] Evaluating script...');
+
+    // Validate script against allowlist of known safe operations
+    const ALLOWED_SCRIPTS = new Map([
+      ['getTitle', '(() => document.title)()'],
+      ['getUrl', '(() => window.location.href)()'],
+      ['getBodyText', '(() => document.body?.innerText || "")()'],
+      ['getLinks', '(() => Array.from(document.querySelectorAll("a[href]")).map(a => a.href))()'],
+      ['getMetaTags', '(() => Array.from(document.querySelectorAll("meta")).map(m => ({name: m.name, content: m.content})))()'],
+    ]);
+
+    let scriptToRun;
+    if (data.scriptName && ALLOWED_SCRIPTS.has(data.scriptName)) {
+      scriptToRun = ALLOWED_SCRIPTS.get(data.scriptName);
+    } else if (data.script) {
+      // Reject scripts containing dangerous patterns
+      const DANGEROUS_PATTERNS = /\b(fetch|XMLHttpRequest|document\.cookie|localStorage|sessionStorage|indexedDB|eval|Function|import\s*\(|require\s*\(|process\.|child_process|__proto__|constructor\s*\[)\b/i;
+      if (DANGEROUS_PATTERNS.test(data.script)) {
+        throw new Error('Script rejected: contains disallowed patterns. Use scriptName with an allowed script name instead.');
+      }
+      scriptToRun = data.script;
+    } else {
+      scriptToRun = '(() => null)()';
+    }
+
     if (this.browserPool) {
       const sessionId = data.sessionId;
       let pooledPage = sessionId && this._sessionPages.get(sessionId);
+      const isTemporary = !pooledPage;
 
       if (!pooledPage) {
         pooledPage = await this.browserPool.acquirePage();
       }
 
       try {
-        const result = await pooledPage.page.evaluate(data.script || '(() => null)()');
-        return { result, sessionId };
+        const result = await pooledPage.page.evaluate(scriptToRun);
+        const response = { result, sessionId };
+        if (isTemporary) {
+          await this.browserPool.releasePage(pooledPage);
+        }
+        return response;
       } catch (error) {
-        if (!sessionId || !this._sessionPages.has(sessionId)) {
+        if (isTemporary) {
           await this.browserPool.releasePage(pooledPage);
         }
         throw error;
@@ -373,7 +454,7 @@ class TwilioService {
       case 'sms':
         return this.bridge.call('twilio.sms', request.data || {});
       case 'status':
-        return { status: 'completed', note: 'Status check via bridge' };
+        return this.bridge.call('twilio.status', request.data || {});
       default:
         throw new Error(`Unknown Twilio action: ${request.action}`);
     }
@@ -436,9 +517,9 @@ class STTService {
       case 'transcribe':
         return this.bridge.call('stt.transcribe', request.data || {});
       case 'start-listening':
-        return { listening: true, note: 'STT via bridge' };
+        return this.bridge.call('stt.start_listening', request.data || {});
       case 'stop-listening':
-        return { listening: false };
+        return this.bridge.call('stt.stop_listening', request.data || {});
       default:
         throw new Error(`Unknown STT action: ${request.action}`);
     }

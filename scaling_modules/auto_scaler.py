@@ -61,14 +61,23 @@ class MetricSnapshot:
     gpt_response_time_ms: float
 
 
-class MetricsCollector:
-    """Collects and stores system metrics"""
+class AutoScalerMetricsCollector:
+    """Collects and stores system metrics for auto-scaling decisions"""
     
     def __init__(self, max_history: int = 3600):
         self.max_history = max_history
         self.metrics_history: deque = deque(maxlen=max_history)
         self._lock = threading.Lock()
     
+    @staticmethod
+    def _get_active_instances() -> int:
+        """Get count of active child processes, handling permission errors."""
+        try:
+            import psutil as _psutil
+            return len(_psutil.Process().children())
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            return 1
+
     def collect(self) -> MetricSnapshot:
         """Collect current metrics"""
         import psutil
@@ -88,7 +97,7 @@ class MetricsCollector:
             request_rate=mc.get_latest('request_rate') if mc else 0.0,
             response_time_ms=mc.get_latest('response_time') if mc else 0.0,
             error_rate=err / max(total, 1),
-            active_instances=len(psutil.Process().children()) if psutil.pid_exists(_os.getpid()) else 1,
+            active_instances=self._get_active_instances(),
             gpt_tokens_per_min=mc.get_latest('gpt_tokens_per_min') if mc else 0.0,
             gpt_response_time_ms=mc.get_latest('gpt_response_time') if mc else 0.0,
         )
@@ -144,7 +153,7 @@ class PredictiveScaler:
     Predictive scaling using time-series analysis
     """
     
-    def __init__(self, metrics_collector: MetricsCollector):
+    def __init__(self, metrics_collector: AutoScalerMetricsCollector):
         self.metrics = metrics_collector
         self.prediction_model = None
         
@@ -292,7 +301,7 @@ class AutoScaler:
         self.policy = policy
         
         # Components
-        self.metrics_collector = MetricsCollector()
+        self.metrics_collector = AutoScalerMetricsCollector()
         self.predictive_scaler = PredictiveScaler(self.metrics_collector)
         
         # Rules
@@ -364,19 +373,20 @@ class AutoScaler:
             if not self.check_cooldown(rule):
                 continue
             
+            if not hasattr(self, '_violation_start_times'):
+                self._violation_start_times = {}
+
             if self.evaluate_rule(rule, metrics):
-                # Track violation
-                if rule.name not in self.rule_violations:
-                    self.rule_violations[rule.name] = []
-                self.rule_violations[rule.name].append(time.time())
-                
-                # Check if violation duration met
-                violations = self.rule_violations[rule.name]
-                cutoff = time.time() - rule.duration_seconds
-                recent_violations = [v for v in violations if v >= cutoff]
-                
-                if len(recent_violations) >= 1:  # First violation triggers
+                # Track violation start time
+                if rule.name not in self._violation_start_times:
+                    self._violation_start_times[rule.name] = time.time()
+                elapsed = time.time() - self._violation_start_times[rule.name]
+                if elapsed >= rule.duration_seconds:
+                    self._violation_start_times.pop(rule.name, None)
                     return rule.action, rule.instance_change
+            else:
+                # Violation cleared - reset start time
+                self._violation_start_times.pop(rule.name, None)
         
         # Check predictive scaling if enabled
         if self.policy in [ScalingPolicy.PREDICTIVE, ScalingPolicy.HYBRID]:
@@ -464,16 +474,18 @@ class AutoScaler:
         """Start auto-scaling"""
         self._scaling_thread = threading.Thread(
             target=self.scaling_loop,
-            daemon=True
+            daemon=False
         )
         self._scaling_thread.start()
         logger.info("Auto-scaling started")
-    
+
     def stop(self):
         """Stop auto-scaling"""
         self._stop_event.set()
         if self._scaling_thread:
-            self._scaling_thread.join(timeout=10)
+            self._scaling_thread.join(timeout=15)
+            if self._scaling_thread.is_alive():
+                logger.warning("Auto-scaling thread did not terminate in time")
         logger.info("Auto-scaling stopped")
     
     def get_status(self) -> Dict:

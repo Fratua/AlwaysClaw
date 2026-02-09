@@ -5,12 +5,33 @@
 
 const cluster = require('cluster');
 const os = require('os');
+const fs = require('fs');
 const path = require('path');
 const EventEmitter = require('events');
 const logger = require('./logger');
 const ControlServer = require('./control-server');
 const MessageBus = require('./message-bus');
 const { getBridge } = require('./python-bridge');
+
+// Cognitive loop schedules extracted from _registerFallbackLoops for maintainability
+const COGNITIVE_LOOP_SCHEDULES = [
+  { name: 'ralph', method: 'loop.ralph.run_cycle', cron: '*/5 * * * *' },
+  { name: 'research', method: 'loop.research.run_cycle', cron: '*/10 * * * *' },
+  { name: 'planning', method: 'loop.planning.run_cycle', cron: '*/10 * * * *' },
+  { name: 'e2e', method: 'loop.e2e.run_cycle', cron: '*/15 * * * *' },
+  { name: 'exploration', method: 'loop.exploration.run_cycle', cron: '*/10 * * * *' },
+  { name: 'discovery', method: 'loop.discovery.run_cycle', cron: '*/15 * * * *' },
+  { name: 'bug_finder', method: 'loop.bug_finder.run_cycle', cron: '*/30 * * * *' },
+  { name: 'self_learning', method: 'loop.self_learning.run_cycle', cron: '*/20 * * * *' },
+  { name: 'meta_cognition', method: 'loop.meta_cognition.run_cycle', cron: '*/15 * * * *' },
+  { name: 'self_upgrading', method: 'loop.self_upgrading.run_cycle', cron: '0 * * * *' },
+  { name: 'self_updating', method: 'loop.self_updating.run_cycle', cron: '*/30 * * * *' },
+  { name: 'self_driven', method: 'loop.self_driven.run_cycle', cron: '*/10 * * * *' },
+  { name: 'cpel', method: 'loop.cpel.run_cycle', cron: '*/15 * * * *' },
+  { name: 'context_engineering', method: 'loop.context_engineering.run_cycle', cron: '*/15 * * * *' },
+  { name: 'debugging', method: 'loop.debugging.run_cycle', cron: '*/20 * * * *' },
+  { name: 'web_monitor', method: 'loop.web_monitor.run_cycle', cron: '*/10 * * * *' },
+];
 
 class DaemonMaster extends EventEmitter {
   constructor(options = {}) {
@@ -31,6 +52,8 @@ class DaemonMaster extends EventEmitter {
     this.agentLoopWorkers = new Map();
     this.ioWorkers = new Map();
     this.taskWorkers = new Map();
+    this._workerMetadata = new WeakMap();
+    this._workerRestartHistory = new Map(); // key: "type-index/service", value: [timestamps]
     this.restartCount = 0;
     this.lastRestartTime = Date.now();
     this.isShuttingDown = false;
@@ -267,13 +290,13 @@ class DaemonMaster extends EventEmitter {
     };
 
     const worker = cluster.fork(workerEnv);
-    
-    // Attach metadata directly to worker object for reliable access on exit
-    worker._meta = { type: 'agent-loop', index, service: null };
-    
+
+    // Store metadata in WeakMap to avoid attaching properties to worker objects
+    this._workerMetadata.set(worker, { type: 'agent-loop', index, service: null });
+
     worker.on('message', (msg) => this.handleWorkerMessage(worker, msg));
     worker.on('exit', (code, signal) => this.handleWorkerExit(worker, code, signal));
-    
+
     this.agentLoopWorkers.set(worker.id, {
       worker,
       index,
@@ -301,13 +324,12 @@ class DaemonMaster extends EventEmitter {
       };
 
       const worker = cluster.fork(workerEnv);
-      
-      // Attach metadata directly to worker object
-      worker._meta = { type: 'io', index: null, service };
-      
+
+      this._workerMetadata.set(worker, { type: 'io', index: null, service });
+
       worker.on('message', (msg) => this.handleWorkerMessage(worker, msg));
       worker.on('exit', (code, signal) => this.handleWorkerExit(worker, code, signal));
-      
+
       this.ioWorkers.set(service, {
         worker,
         service,
@@ -329,10 +351,9 @@ class DaemonMaster extends EventEmitter {
       };
 
       const worker = cluster.fork(workerEnv);
-      
-      // Attach metadata directly to worker object
-      worker._meta = { type: 'task', index: i, service: null };
-      
+
+      this._workerMetadata.set(worker, { type: 'task', index: i, service: null });
+
       worker.on('message', (msg) => this.handleWorkerMessage(worker, msg));
       worker.on('exit', (code, signal) => this.handleWorkerExit(worker, code, signal));
       
@@ -349,7 +370,7 @@ class DaemonMaster extends EventEmitter {
   handleWorkerMessage(worker, message) {
     // Also route through message bus for inter-worker communication
     if (this.messageBus) {
-      const meta = worker._meta || { type: 'unknown', service: null };
+      const meta = this._workerMetadata.get(worker) || { type: 'unknown', service: null };
       this.messageBus.handleWorkerMessage(worker.id, meta.type, message);
     }
     
@@ -370,33 +391,8 @@ class DaemonMaster extends EventEmitter {
       case 'request-restart':
         this.restartWorker(worker.id);
         break;
-      case 'python-bridge-request':
-        // Direct bridge request from worker (bypasses message bus)
-        if (!this.bridgeReady || !this.bridge) {
-          if (!worker.isDead()) {
-            worker.send({
-              type: 'python-bridge-response',
-              data: { id: message.data.id, error: 'Bridge not ready' },
-            });
-          }
-        } else {
-          this.bridge.call(message.data.method, message.data.params).then(result => {
-            if (!worker.isDead()) {
-              worker.send({
-                type: 'python-bridge-response',
-                data: { id: message.data.id, result },
-              });
-            }
-          }).catch(error => {
-            if (!worker.isDead()) {
-              worker.send({
-                type: 'python-bridge-response',
-                data: { id: message.data.id, error: error.message },
-              });
-            }
-          });
-        }
-        break;
+      // python-bridge-request is handled exclusively by the message bus (via routeBridgeRequest)
+      // to avoid double bridge calls. See initializeMessageBus().
       case 'log':
         logger.log(message.level || 'info', `[Worker ${worker.id}] ${message.message}`, message.meta);
         break;
@@ -405,9 +401,21 @@ class DaemonMaster extends EventEmitter {
     }
   }
 
+  _getRestartBackoff(restartKey) {
+    const history = this._workerRestartHistory.get(restartKey) || [];
+    const now = Date.now();
+    // Remove entries older than 60s
+    const recent = history.filter(ts => now - ts < 60000);
+    recent.push(now);
+    this._workerRestartHistory.set(restartKey, recent);
+    const consecutiveRestarts = recent.length;
+    if (consecutiveRestarts <= 1) return this.options.restartDelay;
+    return Math.min(5000 * Math.pow(2, consecutiveRestarts - 1), 60000);
+  }
+
   handleWorkerExit(worker, code, signal) {
-    // Get worker metadata (reliably attached during fork)
-    const meta = worker._meta || { type: 'unknown', index: 0, service: null };
+    // Get worker metadata from WeakMap
+    const meta = this._workerMetadata.get(worker) || { type: 'unknown', index: 0, service: null };
     logger.info(`[Master] Worker ${worker.id} (${meta.type}${meta.index !== null ? '-' + meta.index : ''}${meta.service ? '-' + meta.service : ''}) exited (code: ${code}, signal: ${signal})`);
 
     // Reject pending bridge requests associated with this dead worker
@@ -430,18 +438,20 @@ class DaemonMaster extends EventEmitter {
     if (!this.isShuttingDown && code !== 0) {
       this.checkRestartRate();
 
-      // Restart the worker based on its type
+      const restartKey = `${meta.type}-${meta.index !== null ? meta.index : meta.service}`;
+      const backoff = this._getRestartBackoff(restartKey);
+      logger.info(`[Master] Scheduling restart for ${restartKey} in ${backoff}ms`);
+
+      // Restart the worker based on its type with backoff
       setTimeout(() => {
         if (meta.type === 'agent-loop') {
           this.forkAgentLoopWorker(meta.index || 0);
         } else if (meta.type === 'io' && meta.service) {
           this.forkSingleIOWorker(meta.service);
         } else if (meta.type === 'task') {
-          // For task workers, we need to restart the specific one
-          // Since forkTaskWorkers creates multiple, we need a single restart method
           this.restartSingleTaskWorker(meta.index || 0);
         }
-      }, this.options.restartDelay);
+      }, backoff);
     }
   }
   
@@ -453,13 +463,12 @@ class DaemonMaster extends EventEmitter {
     };
 
     const worker = cluster.fork(workerEnv);
-    
-    // Attach metadata directly to worker object
-    worker._meta = { type: 'task', index, service: null };
-    
+
+    this._workerMetadata.set(worker, { type: 'task', index, service: null });
+
     worker.on('message', (msg) => this.handleWorkerMessage(worker, msg));
     worker.on('exit', (code, signal) => this.handleWorkerExit(worker, code, signal));
-    
+
     this.taskWorkers.set(worker.id, {
       worker,
       index,
@@ -477,7 +486,7 @@ class DaemonMaster extends EventEmitter {
     };
 
     const worker = cluster.fork(workerEnv);
-    worker._meta = { type: 'io', index: null, service };
+    this._workerMetadata.set(worker, { type: 'io', index: null, service });
 
     worker.on('message', (msg) => this.handleWorkerMessage(worker, msg));
     worker.on('exit', (code, signal) => this.handleWorkerExit(worker, code, signal));
@@ -492,20 +501,24 @@ class DaemonMaster extends EventEmitter {
   }
 
   dispatchTask(task) {
-    // Find the least busy agent loop worker
-    let bestWorker = null;
-    let bestState = null;
+    // Find a ready worker; skip busy workers
+    let readyWorker = null;
+    let fallbackWorker = null;
 
     for (const [id, info] of this.agentLoopWorkers) {
-      if (!bestWorker || info.state === 'ready') {
-        bestWorker = info.worker;
-        bestState = info.state;
-        if (info.state === 'ready') break;
+      if (info.state === 'ready') {
+        readyWorker = info.worker;
+        break;
+      }
+      // Track a non-busy fallback (starting workers may become ready)
+      if (info.state !== 'busy' && !fallbackWorker) {
+        fallbackWorker = info.worker;
       }
     }
 
-    if (bestWorker) {
-      bestWorker.send({ type: 'task', data: task });
+    const worker = readyWorker || fallbackWorker;
+    if (worker) {
+      worker.send({ type: 'task', data: task });
       return true;
     }
     return false;
@@ -532,7 +545,6 @@ class DaemonMaster extends EventEmitter {
       const { registerAgentLoops } = require('./dist/src/agent-loops');
 
       const dataDir = process.env.STATE_DIR || './data/scheduler';
-      const fs = require('fs');
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
@@ -562,7 +574,8 @@ class DaemonMaster extends EventEmitter {
 
       logger.info('[Master] TS Scheduler started with all loops registered');
     } catch (error) {
-      logger.warn('[Master] TS Scheduler failed, falling back to cron-scheduler:', error.message);
+      const distExists = fs.existsSync('./dist');
+      logger.warn(`[Master] TS Scheduler failed (dist/ exists: ${distExists}): ${error.message}. Falling back to cron-scheduler.`);
       // Fallback to basic cron scheduler
       const CronScheduler = require('./cron-scheduler');
       this.cronScheduler = new CronScheduler();
@@ -575,35 +588,16 @@ class DaemonMaster extends EventEmitter {
   }
 
   _registerFallbackLoops() {
-    const loopSchedules = [
-      { name: 'ralph', method: 'loop.ralph.run_cycle', cron: '*/5 * * * *' },
-      { name: 'research', method: 'loop.research.run_cycle', cron: '*/10 * * * *' },
-      { name: 'planning', method: 'loop.planning.run_cycle', cron: '*/10 * * * *' },
-      { name: 'e2e', method: 'loop.e2e.run_cycle', cron: '*/15 * * * *' },
-      { name: 'exploration', method: 'loop.exploration.run_cycle', cron: '*/10 * * * *' },
-      { name: 'discovery', method: 'loop.discovery.run_cycle', cron: '*/15 * * * *' },
-      { name: 'bug_finder', method: 'loop.bug_finder.run_cycle', cron: '*/30 * * * *' },
-      { name: 'self_learning', method: 'loop.self_learning.run_cycle', cron: '*/20 * * * *' },
-      { name: 'meta_cognition', method: 'loop.meta_cognition.run_cycle', cron: '*/15 * * * *' },
-      { name: 'self_upgrading', method: 'loop.self_upgrading.run_cycle', cron: '0 * * * *' },
-      { name: 'self_updating', method: 'loop.self_updating.run_cycle', cron: '*/30 * * * *' },
-      { name: 'self_driven', method: 'loop.self_driven.run_cycle', cron: '*/10 * * * *' },
-      { name: 'cpel', method: 'loop.cpel.run_cycle', cron: '*/15 * * * *' },
-      { name: 'context_engineering', method: 'loop.context_engineering.run_cycle', cron: '*/15 * * * *' },
-      { name: 'debugging', method: 'loop.debugging.run_cycle', cron: '*/20 * * * *' },
-      { name: 'web_monitor', method: 'loop.web_monitor.run_cycle', cron: '*/10 * * * *' },
-    ];
-
-    for (const loop of loopSchedules) {
+    for (const loop of COGNITIVE_LOOP_SCHEDULES) {
       try {
-        this.cronScheduler.addJob(loop.name, loop.cron, () => {
+        this.cronScheduler.scheduleJob(loop.name, loop.cron, () => {
           this.dispatchLoopCycle(loop.name, loop.method);
         });
       } catch (err) {
         logger.warn(`[Master] Failed to register fallback loop ${loop.name}: ${err.message}`);
       }
     }
-    logger.info(`[Master] Registered ${loopSchedules.length} cognitive loops in fallback scheduler`);
+    logger.info(`[Master] Registered ${COGNITIVE_LOOP_SCHEDULES.length} cognitive loops in fallback scheduler`);
   }
 
   dispatchLoopCycle(loopName, method) {
@@ -734,7 +728,17 @@ class DaemonMaster extends EventEmitter {
         workerInfo.worker.kill('SIGKILL');
       }
     }
-    
+    for (const [id, workerInfo] of this.taskWorkers) {
+      if (!workerInfo.worker.isDead()) {
+        workerInfo.worker.kill('SIGKILL');
+      }
+    }
+    for (const [service, workerInfo] of this.ioWorkers) {
+      if (!workerInfo.worker.isDead()) {
+        workerInfo.worker.kill('SIGKILL');
+      }
+    }
+
     // Save state BEFORE stopping bridge
     await this.saveState();
 
@@ -772,7 +776,7 @@ class DaemonMaster extends EventEmitter {
   async saveState() {
     // Persist daemon state to memory DB before shutdown
     try {
-      if (this.bridge && this.bridge.isRunning) {
+      if (this.bridge && this.bridge.isReady) {
         await this.bridge.call('memory.store', {
           id: 'daemon-state',
           type: 'system',
@@ -800,7 +804,7 @@ class DaemonMaster extends EventEmitter {
 
   handleStateUpdate(workerId, data) {
     // Persist worker state updates to memory DB (fire-and-forget)
-    if (this.bridge && this.bridge.isRunning) {
+    if (this.bridge && this.bridge.isReady) {
       this.bridge.call('memory.store', {
         type: 'episodic',
         content: JSON.stringify(data),

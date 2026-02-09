@@ -7,6 +7,7 @@
 const WorkerBase = require('./worker-base');
 const logger = require('./logger');
 const { getBridge } = require('./python-bridge');
+const fs = require('fs');
 
 class TaskWorker extends WorkerBase {
   constructor() {
@@ -120,8 +121,6 @@ class TaskWorker extends WorkerBase {
           workerId: this.workerId
         }
       });
-
-      throw error;
     } finally {
       this.isProcessing = false;
       this.currentTask = null;
@@ -130,7 +129,7 @@ class TaskWorker extends WorkerBase {
 
   async onTask(data) {
     const task = {
-      id: data.id || `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: data.id || `task-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       type: data.type,
       data: data.payload || data,
       priority: data.priority || 'normal',
@@ -222,13 +221,62 @@ class TaskWorker extends WorkerBase {
 
   async handleAPICall(data) {
     logger.info(`[TaskWorker ${this.workerId}] Making API call`);
-    // Generic API call - use LLM to decide how to handle
-    return { success: true, data: null };
+    const url = data?.url;
+    if (!url) throw new Error('API call requires a url');
+    const method = (data.method || 'GET').toUpperCase();
+    const headers = data.headers || {};
+    const body = data.body ? JSON.stringify(data.body) : undefined;
+    const timeoutMs = data.timeout || 30000;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: method !== 'GET' && method !== 'HEAD' ? body : undefined,
+        signal: controller.signal,
+      });
+      const responseData = await response.text();
+      let parsed;
+      try { parsed = JSON.parse(responseData); } catch { parsed = responseData; }
+      return {
+        success: response.ok,
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        data: parsed,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async handleFileProcess(data) {
     logger.info(`[TaskWorker ${this.workerId}] Processing file`);
-    return { processed: true, outputPath: null };
+    const operation = data?.operation || 'read';
+    const inputPath = data?.inputPath;
+    if (!inputPath) throw new Error('File process requires an inputPath');
+
+    switch (operation) {
+      case 'read': {
+        const content = await fs.promises.readFile(inputPath);
+        const stats = await fs.promises.stat(inputPath);
+        return { processed: true, size: stats.size, content: content.toString('utf-8').substring(0, 10000) };
+      }
+      case 'copy': {
+        const outputPath = data?.outputPath;
+        if (!outputPath) throw new Error('Copy operation requires an outputPath');
+        await fs.promises.copyFile(inputPath, outputPath);
+        const stats = await fs.promises.stat(outputPath);
+        return { processed: true, outputPath, size: stats.size };
+      }
+      case 'stats': {
+        const stats = await fs.promises.stat(inputPath);
+        return { processed: true, size: stats.size, isFile: stats.isFile(), isDirectory: stats.isDirectory(), mtime: stats.mtime.toISOString() };
+      }
+      default:
+        throw new Error(`Unknown file operation: ${operation}`);
+    }
   }
 
   async handleAIProcess(data) {

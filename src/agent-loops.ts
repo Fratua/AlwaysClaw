@@ -5,6 +5,8 @@
 
 import { SchedulerSystem } from './scheduler-system';
 
+const logger = require('../../logger');
+
 /**
  * Predefined schedule constants
  */
@@ -41,11 +43,11 @@ export const SCHEDULES = {
  * Register all 15 agent loops
  */
 export function registerAgentLoops(scheduler: SchedulerSystem): void {
-  console.log('[AgentLoops] Registering 15 agent loops...');
+  logger.info('[AgentLoops] Registering 15 agent loops...');
 
   const bridgeCall = async (method: string, context: Record<string, unknown> = {}) => {
     // Bridge is accessed at runtime from the daemon master
-    const { getBridge } = require('../python-bridge');
+    const { getBridge } = require('../../python-bridge');
     const bridge = getBridge();
     return bridge.call(method, { timestamp: Date.now(), ...context });
   };
@@ -56,7 +58,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Heartbeat Monitor',
     SCHEDULES.EVERY_30_SECONDS,
     async () => {
-      console.log('[Loop:Heartbeat] Sending system heartbeat...');
+      logger.info('[Loop:Heartbeat] Sending system heartbeat...');
       const health = await bridgeCall('health');
       if (process.send) {
         process.send({
@@ -78,12 +80,12 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Gmail Synchronization',
     SCHEDULES.EVERY_2_MINUTES,
     async () => {
-      console.log('[Loop:GmailSync] Syncing Gmail inbox...');
+      logger.info('[Loop:GmailSync] Syncing Gmail inbox...');
       try {
         const result = await bridgeCall('gmail.read', { query: 'is:unread', max_results: 10 });
-        console.log('[Loop:GmailSync] Inbox synced:', typeof result === 'object' ? JSON.stringify(result).substring(0, 200) : result);
+        logger.info('[Loop:GmailSync] Inbox synced:', typeof result === 'object' ? JSON.stringify(result).substring(0, 200) : result);
       } catch (e) {
-        console.warn('[Loop:GmailSync] Gmail sync skipped:', (e as Error).message);
+        logger.warn('[Loop:GmailSync] Gmail sync skipped:', (e as Error).message);
       }
     },
     { 
@@ -99,12 +101,12 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Browser Health Check',
     SCHEDULES.EVERY_MINUTE,
     async () => {
-      console.log('[Loop:BrowserHealth] Checking browser health...');
+      logger.info('[Loop:BrowserHealth] Checking browser health...');
       try {
         const health = await bridgeCall('health');
-        console.log('[Loop:BrowserHealth] Bridge status:', health?.status || 'unknown');
+        logger.info('[Loop:BrowserHealth] Bridge status:', health?.status || 'unknown');
       } catch (e) {
-        console.warn('[Loop:BrowserHealth] Check skipped:', (e as Error).message);
+        logger.warn('[Loop:BrowserHealth] Check skipped:', (e as Error).message);
       }
     },
     { 
@@ -136,12 +138,12 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Twilio Status Check',
     SCHEDULES.EVERY_MINUTE,
     async () => {
-      console.log('[Loop:TwilioStatus] Checking Twilio status...');
+      logger.info('[Loop:TwilioStatus] Checking Twilio status...');
       try {
         const health = await bridgeCall('health');
-        console.log('[Loop:TwilioStatus] System status:', health?.status || 'unknown');
+        logger.info('[Loop:TwilioStatus] System status:', health?.status || 'unknown');
       } catch (e) {
-        console.warn('[Loop:TwilioStatus] Check skipped:', (e as Error).message);
+        logger.warn('[Loop:TwilioStatus] Check skipped:', (e as Error).message);
       }
     },
     { 
@@ -158,7 +160,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     SCHEDULES.EVERY_30_SECONDS,
     async () => {
       const usage = process.memoryUsage();
-      console.log('[Loop:ResourceMonitor] Memory usage:', {
+      logger.info('[Loop:ResourceMonitor] Memory usage:', {
         heapUsed: `${Math.round(usage.heapUsed / 1024 / 1024)}MB`,
         heapTotal: `${Math.round(usage.heapTotal / 1024 / 1024)}MB`,
         external: `${Math.round(usage.external / 1024 / 1024)}MB`,
@@ -183,11 +185,11 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Identity Synchronization',
     SCHEDULES.EVERY_5_MINUTES,
     async () => {
-      console.log('[Loop:IdentitySync] Syncing identity state...');
+      logger.info('[Loop:IdentitySync] Syncing identity state...');
       try {
         await bridgeCall('memory.search', { query: 'identity config', limit: 5 });
       } catch (e) {
-        console.warn('[Loop:IdentitySync] Sync skipped:', (e as Error).message);
+        logger.warn('[Loop:IdentitySync] Sync skipped:', (e as Error).message);
       }
     },
     { 
@@ -203,7 +205,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Soul State Update',
     SCHEDULES.EVERY_MINUTE,
     async () => {
-      console.log('[Loop:SoulUpdate] Updating soul state...');
+      logger.info('[Loop:SoulUpdate] Updating soul state...');
       try {
         await bridgeCall('memory.store', {
           type: 'system',
@@ -212,7 +214,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
           tags: ['soul-state', 'system'],
         });
       } catch (e) {
-        console.warn('[Loop:SoulUpdate] Update skipped:', (e as Error).message);
+        logger.warn('[Loop:SoulUpdate] Update skipped:', (e as Error).message);
       }
     },
     { 
@@ -228,11 +230,11 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Context Cleanup',
     SCHEDULES.EVERY_10_MINUTES,
     async () => {
-      console.log('[Loop:ContextCleanup] Cleaning up old context...');
+      logger.info('[Loop:ContextCleanup] Cleaning up old context...');
       try {
         await bridgeCall('memory.consolidate');
       } catch (e) {
-        console.warn('[Loop:ContextCleanup] Cleanup skipped:', (e as Error).message);
+        logger.warn('[Loop:ContextCleanup] Cleanup skipped:', (e as Error).message);
       }
     },
     { 
@@ -248,12 +250,12 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Notification Digest',
     SCHEDULES.EVERY_15_MINUTES,
     async () => {
-      console.log('[Loop:NotificationDigest] Processing notification digest...');
+      logger.info('[Loop:NotificationDigest] Processing notification digest...');
       try {
         const result = await bridgeCall('memory.search', { query: 'notification', type: 'episodic', limit: 20 });
-        console.log('[Loop:NotificationDigest] Found notifications:', result?.count || 0);
+        logger.info('[Loop:NotificationDigest] Found notifications:', result?.count || 0);
       } catch (e) {
-        console.warn('[Loop:NotificationDigest] Digest skipped:', (e as Error).message);
+        logger.warn('[Loop:NotificationDigest] Digest skipped:', (e as Error).message);
       }
     },
     { 
@@ -269,7 +271,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Log Rotation',
     SCHEDULES.EVERY_HOUR,
     async () => {
-      console.log('[Loop:LogRotation] Log rotation handled by Winston DailyRotateFile');
+      logger.info('[Loop:LogRotation] Log rotation handled by Winston DailyRotateFile');
       // Winston's DailyRotateFile transport handles rotation automatically
     },
     { 
@@ -285,12 +287,12 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Backup Check',
     SCHEDULES.EVERY_30_MINUTES,
     async () => {
-      console.log('[Loop:BackupCheck] Running backup...');
+      logger.info('[Loop:BackupCheck] Running backup...');
       try {
         const result = await bridgeCall('memory.backup');
-        console.log('[Loop:BackupCheck] Backup result:', result?.backed_up ? 'success' : 'failed');
+        logger.info('[Loop:BackupCheck] Backup result:', result?.backed_up ? 'success' : 'failed');
       } catch (e) {
-        console.warn('[Loop:BackupCheck] Backup skipped:', (e as Error).message);
+        logger.warn('[Loop:BackupCheck] Backup skipped:', (e as Error).message);
       }
     },
     { 
@@ -306,9 +308,9 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'API Rate Limit Check',
     SCHEDULES.EVERY_MINUTE,
     async () => {
-      console.log('[Loop:RateLimit] Checking API rate limits...');
+      logger.info('[Loop:RateLimit] Checking API rate limits...');
       const usage = process.cpuUsage();
-      console.log('[Loop:RateLimit] CPU usage:', { user: usage.user, system: usage.system });
+      logger.info('[Loop:RateLimit] CPU usage:', { user: usage.user, system: usage.system });
     },
     { 
       tags: ['system', 'api', 'throttling'],
@@ -323,7 +325,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'User Presence Check',
     SCHEDULES.EVERY_5_MINUTES,
     async () => {
-      console.log('[Loop:PresenceCheck] User presence check completed');
+      logger.info('[Loop:PresenceCheck] User presence check completed');
       // User presence detection requires Windows UI automation (not yet implemented)
     },
     { 
@@ -339,14 +341,14 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Daily Maintenance',
     SCHEDULES.DAILY_2AM,
     async () => {
-      console.log('[Loop:DailyMaintenance] Running daily maintenance...');
+      logger.info('[Loop:DailyMaintenance] Running daily maintenance...');
       try {
         await bridgeCall('memory.consolidate');
         await bridgeCall('memory.backup');
         await bridgeCall('memory.sync');
-        console.log('[Loop:DailyMaintenance] Maintenance complete');
+        logger.info('[Loop:DailyMaintenance] Maintenance complete');
       } catch (e) {
-        console.warn('[Loop:DailyMaintenance] Maintenance error:', (e as Error).message);
+        logger.warn('[Loop:DailyMaintenance] Maintenance error:', (e as Error).message);
       }
     },
     { 
@@ -356,7 +358,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     }
   );
 
-  console.log('[AgentLoops] 15 operational loops registered');
+  logger.info('[AgentLoops] 15 operational loops registered');
 
   // ═══════════════════════════════════════════════════════════
   // Python Cognitive Loops (16-29) - dispatched via bridge
@@ -368,7 +370,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Ralph Loop (Self-Driven Agent)',
     SCHEDULES.EVERY_5_MINUTES,
     async () => {
-      console.log('[Loop:Ralph] Running ralph cycle...');
+      logger.info('[Loop:Ralph] Running ralph cycle...');
       await bridgeCall('loop.ralph.run_cycle');
     },
     { tags: ['cognitive', 'ralph', 'self-driven'], preventOverlap: true, timeout: 240000 }
@@ -380,7 +382,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Research Loop',
     SCHEDULES.EVERY_15_MINUTES,
     async () => {
-      console.log('[Loop:Research] Running research cycle...');
+      logger.info('[Loop:Research] Running research cycle...');
       await bridgeCall('loop.research.run_cycle');
     },
     { tags: ['cognitive', 'research'], preventOverlap: true, timeout: 600000 }
@@ -392,7 +394,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Planning Loop',
     SCHEDULES.EVERY_10_MINUTES,
     async () => {
-      console.log('[Loop:Planning] Running planning cycle...');
+      logger.info('[Loop:Planning] Running planning cycle...');
       await bridgeCall('loop.planning.run_cycle');
     },
     { tags: ['cognitive', 'planning'], preventOverlap: true, timeout: 300000 }
@@ -404,7 +406,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'End-to-End Loop',
     SCHEDULES.EVERY_10_MINUTES,
     async () => {
-      console.log('[Loop:E2E] Running E2E cycle...');
+      logger.info('[Loop:E2E] Running E2E cycle...');
       await bridgeCall('loop.e2e.run_cycle');
     },
     { tags: ['cognitive', 'e2e'], preventOverlap: true, timeout: 300000 }
@@ -416,7 +418,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Exploration Loop',
     SCHEDULES.EVERY_30_MINUTES,
     async () => {
-      console.log('[Loop:Exploration] Running exploration cycle...');
+      logger.info('[Loop:Exploration] Running exploration cycle...');
       await bridgeCall('loop.exploration.run_cycle');
     },
     { tags: ['cognitive', 'exploration'], preventOverlap: true, timeout: 600000 }
@@ -428,7 +430,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Discovery Loop',
     SCHEDULES.EVERY_30_MINUTES,
     async () => {
-      console.log('[Loop:Discovery] Running discovery cycle...');
+      logger.info('[Loop:Discovery] Running discovery cycle...');
       await bridgeCall('loop.discovery.run_cycle');
     },
     { tags: ['cognitive', 'discovery'], preventOverlap: true, timeout: 600000 }
@@ -440,7 +442,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Bug Finder Loop',
     SCHEDULES.EVERY_15_MINUTES,
     async () => {
-      console.log('[Loop:BugFinder] Running bug finder cycle...');
+      logger.info('[Loop:BugFinder] Running bug finder cycle...');
       await bridgeCall('loop.bug_finder.run_cycle');
     },
     { tags: ['cognitive', 'bug-finder', 'quality'], preventOverlap: true, timeout: 300000 }
@@ -452,7 +454,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Self-Learning Loop',
     SCHEDULES.EVERY_HOUR,
     async () => {
-      console.log('[Loop:SelfLearning] Running self-learning cycle...');
+      logger.info('[Loop:SelfLearning] Running self-learning cycle...');
       await bridgeCall('loop.self_learning.run_cycle');
     },
     { tags: ['cognitive', 'self-learning'], preventOverlap: true, timeout: 1800000 }
@@ -464,7 +466,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Meta-Cognition Loop',
     SCHEDULES.EVERY_HOUR,
     async () => {
-      console.log('[Loop:MetaCognition] Running meta-cognition cycle...');
+      logger.info('[Loop:MetaCognition] Running meta-cognition cycle...');
       await bridgeCall('loop.meta_cognition.run_cycle');
     },
     { tags: ['cognitive', 'meta-cognition'], preventOverlap: true, timeout: 1800000 }
@@ -476,7 +478,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Self-Upgrading Loop',
     SCHEDULES.DAILY_3AM,
     async () => {
-      console.log('[Loop:SelfUpgrading] Running self-upgrading cycle...');
+      logger.info('[Loop:SelfUpgrading] Running self-upgrading cycle...');
       await bridgeCall('loop.self_upgrading.run_cycle');
     },
     { tags: ['cognitive', 'self-upgrading'], preventOverlap: true, timeout: 3600000 }
@@ -488,7 +490,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Self-Updating Loop',
     SCHEDULES.DAILY_4AM,
     async () => {
-      console.log('[Loop:SelfUpdating] Running self-updating cycle...');
+      logger.info('[Loop:SelfUpdating] Running self-updating cycle...');
       await bridgeCall('loop.self_updating.run_cycle');
     },
     { tags: ['cognitive', 'self-updating'], preventOverlap: true, timeout: 3600000 }
@@ -500,7 +502,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Self-Driven Loop',
     SCHEDULES.EVERY_30_MINUTES,
     async () => {
-      console.log('[Loop:SelfDriven] Running self-driven cycle...');
+      logger.info('[Loop:SelfDriven] Running self-driven cycle...');
       await bridgeCall('loop.self_driven.run_cycle');
     },
     { tags: ['cognitive', 'self-driven'], preventOverlap: true, timeout: 600000 }
@@ -512,7 +514,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Context/Prompt Engineering Loop',
     SCHEDULES.EVERY_HOUR,
     async () => {
-      console.log('[Loop:CPEL] Running CPEL cycle...');
+      logger.info('[Loop:CPEL] Running CPEL cycle...');
       await bridgeCall('loop.cpel.run_cycle');
     },
     { tags: ['cognitive', 'cpel', 'prompt-engineering'], preventOverlap: true, timeout: 1800000 }
@@ -524,7 +526,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Context Engineering Loop',
     SCHEDULES.EVERY_15_MINUTES,
     async () => {
-      console.log('[Loop:ContextEng] Running context engineering cycle...');
+      logger.info('[Loop:ContextEng] Running context engineering cycle...');
       await bridgeCall('loop.context_engineering.run_cycle');
     },
     { tags: ['cognitive', 'context-engineering'], preventOverlap: true, timeout: 300000 }
@@ -536,13 +538,13 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Web Monitor Loop',
     SCHEDULES.EVERY_10_MINUTES,
     async () => {
-      console.log('[Loop:WebMonitor] Running web monitor cycle...');
+      logger.info('[Loop:WebMonitor] Running web monitor cycle...');
       await bridgeCall('loop.web_monitor.run_cycle');
     },
     { tags: ['cognitive', 'web-monitor'], preventOverlap: true, timeout: 300000 }
   );
 
-  console.log('[AgentLoops] 15 cognitive loops registered');
+  logger.info('[AgentLoops] 15 cognitive loops registered');
 
   // ═══════════════════════════════════════════════════════════
   // Operational Cron Jobs (absorbed from cron-scheduler.js)
@@ -554,7 +556,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Daily Cleanup',
     '0 0 * * *',
     async () => {
-      console.log('[Cron:Cleanup] Running cleanup...');
+      logger.info('[Cron:Cleanup] Running cleanup...');
       await bridgeCall('memory.consolidate');
     },
     { tags: ['cron', 'maintenance', 'cleanup'], preventOverlap: true, timeout: 600000 }
@@ -566,7 +568,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Daily Backup',
     SCHEDULES.DAILY_2AM,
     async () => {
-      console.log('[Cron:Backup] Running backup...');
+      logger.info('[Cron:Backup] Running backup...');
       await bridgeCall('memory.backup');
     },
     { tags: ['cron', 'backup'], preventOverlap: true, timeout: 600000 }
@@ -578,7 +580,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Weekly Report',
     SCHEDULES.WEEKLY_MONDAY_9AM,
     async () => {
-      console.log('[Cron:WeeklyReport] Generating weekly report...');
+      logger.info('[Cron:WeeklyReport] Generating weekly report...');
     },
     { tags: ['cron', 'reports'], preventOverlap: true, timeout: 600000 }
   );
@@ -589,11 +591,11 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'Periodic Health Check',
     SCHEDULES.EVERY_5_MINUTES,
     async () => {
-      console.log('[Cron:HealthCheck] Running health check...');
+      logger.info('[Cron:HealthCheck] Running health check...');
       try {
         await bridgeCall('health');
       } catch (e) {
-        console.error('[Cron:HealthCheck] Bridge health check failed:', e);
+        logger.error('[Cron:HealthCheck] Bridge health check failed:', e);
       }
     },
     { tags: ['cron', 'health'], preventOverlap: true, timeout: 30000 }
@@ -605,7 +607,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
     'State Persistence',
     SCHEDULES.EVERY_10_MINUTES,
     async () => {
-      console.log('[Cron:StatePersist] Persisting state...');
+      logger.info('[Cron:StatePersist] Persisting state...');
     },
     { tags: ['cron', 'state'], preventOverlap: true, timeout: 60000 }
   );
@@ -622,7 +624,7 @@ export function registerAgentLoops(scheduler: SchedulerSystem): void {
   );
 
   const totalLoops = scheduler.cronEngine.getAllJobs().length;
-  console.log(`[AgentLoops] All ${totalLoops} loops registered successfully (15 operational + 15 cognitive + 6 cron)`);
+  logger.info(`[AgentLoops] All ${totalLoops} loops registered successfully (15 operational + 15 cognitive + 6 cron)`);
 }
 
 /**

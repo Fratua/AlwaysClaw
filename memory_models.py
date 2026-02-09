@@ -44,7 +44,7 @@ class MemoryChunk:
     def __post_init__(self):
         if not self.content_hash:
             self.content_hash = hashlib.sha256(
-                self.content.encode('utf-8')
+                self.content.encode('utf-8', errors='replace')
             ).hexdigest()
     
     @property
@@ -268,7 +268,8 @@ class DailyLogEntry:
         content_lines = []
         metadata = {}
         in_metadata = False
-        
+        event_type = 'general'
+
         for line in lines[1:]:
             if line.startswith('**Type**:'):
                 event_type = line.replace('**Type**:', '').strip()
@@ -280,15 +281,15 @@ class DailyLogEntry:
                     metadata[parts[0]] = parts[1]
             elif line.strip() and not line.startswith('**'):
                 content_lines.append(line)
-        
+
         # Create timestamp from time (assume today)
         today = datetime.now().date()
         hour, minute = map(int, time_str.split(':'))
         timestamp = datetime.combine(today, datetime.min.time().replace(hour=hour, minute=minute))
-        
+
         return cls(
             timestamp=timestamp,
-            event_type=event_type if 'event_type' in locals() else 'general',
+            event_type=event_type,
             title=title,
             content='\n'.join(content_lines).strip(),
             metadata=metadata

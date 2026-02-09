@@ -10,7 +10,10 @@ import threading
 import time
 import queue
 import os
+import logging
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class TTSEngine(Enum):
@@ -61,6 +64,7 @@ class TTSOrchestrator:
 
         # Request queue
         self._request_queue: queue.PriorityQueue = queue.PriorityQueue()
+        self._queue_counter = 0  # Monotonic tie-breaker for equal priorities
         self._processing = False
         self._worker_thread: Optional[threading.Thread] = None
 
@@ -111,55 +115,55 @@ class TTSOrchestrator:
             if os.environ.get('AZURE_SPEECH_KEY'):
                 from azure_tts_adapter import AzureTTSAdapter
                 self._adapters[TTSEngine.AZURE] = AzureTTSAdapter()
-                print("[TTS] Azure adapter initialized")
+                logger.info("[TTS] Azure adapter initialized")
         except (ImportError, OSError) as e:
-            print(f"[TTS] Azure TTS not available: {e}")
+            logger.warning(f"[TTS] Azure TTS not available: {e}")
 
         # ElevenLabs
         try:
             if os.environ.get('ELEVENLABS_API_KEY'):
                 from elevenlabs_tts_adapter import ElevenLabsTTSAdapter
                 self._adapters[TTSEngine.ELEVENLABS] = ElevenLabsTTSAdapter()
-                print("[TTS] ElevenLabs adapter initialized")
+                logger.info("[TTS] ElevenLabs adapter initialized")
         except (ImportError, OSError) as e:
-            print(f"[TTS] ElevenLabs TTS not available: {e}")
+            logger.warning(f"[TTS] ElevenLabs TTS not available: {e}")
 
         # OpenAI
         try:
             if os.environ.get('OPENAI_API_KEY'):
                 from openai_tts_adapter import OpenAITTSAdapter
                 self._adapters[TTSEngine.OPENAI] = OpenAITTSAdapter()
-                print("[TTS] OpenAI adapter initialized")
+                logger.info("[TTS] OpenAI adapter initialized")
         except (ImportError, OSError) as e:
-            print(f"[TTS] OpenAI TTS not available: {e}")
+            logger.warning(f"[TTS] OpenAI TTS not available: {e}")
 
         # SAPI (always available on Windows)
         try:
             from sapi_tts_adapter import SAPITTSAdapter
             self._adapters[TTSEngine.SAPI] = SAPITTSAdapter()
-            print("[TTS] SAPI adapter initialized")
+            logger.info("[TTS] SAPI adapter initialized")
         except (ImportError, OSError) as e:
-            print(f"[TTS] SAPI TTS not available: {e}")
+            logger.warning(f"[TTS] SAPI TTS not available: {e}")
 
     def _start_worker(self):
         """Start request processing worker"""
         self._processing = True
-        self._worker_thread = threading.Thread(target=self._process_queue)
-        self._worker_thread.daemon = True
+        self._shutdown_event = threading.Event()
+        self._worker_thread = threading.Thread(target=self._process_queue, daemon=False)
         self._worker_thread.start()
 
     def _process_queue(self):
         """Process TTS requests from queue"""
-        while self._processing:
+        while self._processing and not self._shutdown_event.is_set():
             try:
-                priority, request, callback = self._request_queue.get(timeout=1)
+                priority, _counter, request, callback = self._request_queue.get(timeout=5)
                 response = self._execute_request(request)
                 if callback:
                     callback(response)
             except queue.Empty:
                 continue
             except (RuntimeError, OSError) as e:
-                print(f"[TTS] Queue processing error: {e}")
+                logger.error(f"[TTS] Queue processing error: {e}")
 
     def _execute_request(self, request: TTSRequest) -> TTSResponse:
         """Execute TTS request"""
@@ -193,6 +197,8 @@ class TTSOrchestrator:
                 )
             else:
                 audio_data = adapter.text_to_speech(text, voice_id=request.voice_id)
+                if audio_data is None:
+                    raise RuntimeError(f"TTS adapter {engine.value} returned None")
                 response = TTSResponse(
                     success=True,
                     audio_data=audio_data,
@@ -208,12 +214,11 @@ class TTSOrchestrator:
                 error=str(e)
             )
 
-        # Update latency stats
+        # Update latency stats using Welford's online algorithm
         latency_ms = (time.time() - start_time) * 1000
-        self._stats['avg_latency_ms'] = (
-            (self._stats['avg_latency_ms'] * (self._stats['requests_total'] - 1) + latency_ms)
-            / self._stats['requests_total']
-        )
+        n = self._stats['requests_total']
+        old_mean = self._stats['avg_latency_ms']
+        self._stats['avg_latency_ms'] = old_mean + (latency_ms - old_mean) / n
 
         return response
 
@@ -225,11 +230,17 @@ class TTSOrchestrator:
 
         # Use priority order
         for engine_name in self.config['priority_order']:
-            engine = TTSEngine(engine_name)
+            try:
+                engine = TTSEngine(engine_name)
+            except ValueError:
+                logger.warning(f"Unknown TTS engine in priority_order: {engine_name}")
+                continue
             if engine in self._adapters:
                 return engine
 
         # Fallback to any available
+        if not self._adapters:
+            raise RuntimeError("No TTS adapters available")
         return next(iter(self._adapters.keys()))
 
     def speak(
@@ -267,7 +278,8 @@ class TTSOrchestrator:
         )
 
         if async_mode:
-            self._request_queue.put((request.priority, request, callback))
+            self._queue_counter += 1
+            self._request_queue.put((request.priority, self._queue_counter, request, callback))
             return None
         else:
             return self._execute_request(request)
@@ -293,9 +305,13 @@ class TTSOrchestrator:
     def shutdown(self):
         """Shutdown orchestrator"""
         self._processing = False
+        if hasattr(self, '_shutdown_event'):
+            self._shutdown_event.set()
 
         if self._worker_thread:
             self._worker_thread.join(timeout=5)
+            if self._worker_thread.is_alive():
+                logger.warning("TTS worker thread did not terminate in time")
 
         for adapter in self._adapters.values():
             if hasattr(adapter, 'shutdown'):

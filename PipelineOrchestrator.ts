@@ -9,6 +9,8 @@ import { CheerioParser } from './CheerioParser';
 import { JSONLDExtractor } from './JSONLDExtractor';
 import { PipelineConfig, PipelineContext } from './types';
 
+const logger = require('../../logger');
+
 export class PipelineOrchestrator extends EventEmitter {
   private browserPool: BrowserPool;
   private rateLimiter: RateLimiter;
@@ -41,14 +43,14 @@ export class PipelineOrchestrator extends EventEmitter {
       this.emit('pipelineStarted', { url, pipeline: pipeline.name });
       await this.rateLimiter.acquire(context.domain);
 
-      const isDuplicate = await this.dedupEngine.isDuplicate(url, url);
+      context.html = await this.fetchContent(url, pipeline.parser);
+      context.metadata.parserUsed = pipeline.parser === 'dynamic' ? 'playwright' : 'cheerio';
+
+      const isDuplicate = await this.dedupEngine.isDuplicate(context.html, url);
       if (isDuplicate) {
         this.emit('duplicateDetected', { url });
         return { skipped: true, reason: 'duplicate' };
       }
-
-      context.html = await this.fetchContent(url, pipeline.parser);
-      context.metadata.parserUsed = pipeline.parser === 'dynamic' ? 'playwright' : 'cheerio';
 
       const parser = new CheerioParser();
       await parser.load(context.html);
@@ -99,8 +101,14 @@ export class PipelineOrchestrator extends EventEmitter {
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       return response.text();
     }
-    // Dynamic rendering would use DynamicRenderer here
-    throw new Error('Dynamic rendering not implemented in this example');
+    // Dynamic rendering via BrowserPool
+    const pooledPage = await this.browserPool.acquirePage();
+    try {
+      await pooledPage.page.goto(url, { waitUntil: 'networkidle' });
+      return await pooledPage.page.content();
+    } finally {
+      await this.browserPool.releasePage(pooledPage);
+    }
   }
 
   private async runExtractors(extractorNames: string[], html: string): Promise<any> {
@@ -117,7 +125,7 @@ export class PipelineOrchestrator extends EventEmitter {
           results.links = this.extractLinks(html);
           break;
         default:
-          console.warn(`Unknown extractor: ${name}`);
+          logger.warn(`Unknown extractor: ${name}`);
       }
     }
     return results;
@@ -146,7 +154,7 @@ export class PipelineOrchestrator extends EventEmitter {
         case 'clean': result = this.cleanData(result); break;
         case 'validate': result = this.validateData(result); break;
         case 'enrich': result = await this.enrichData(result); break;
-        default: console.warn(`Unknown processor: ${processor}`);
+        default: logger.warn(`Unknown processor: ${processor}`);
       }
     }
     return result;
@@ -168,11 +176,40 @@ export class PipelineOrchestrator extends EventEmitter {
   }
 
   private validateData(data: any): any {
-    return data;
+    if (data === null || data === undefined) return data;
+    const validated: any = { ...data };
+
+    // Validate URL format in link arrays
+    if (Array.isArray(validated.links)) {
+      validated.links = validated.links.filter((link: string) => {
+        try { new URL(link); return true; } catch { return false; }
+      });
+    }
+
+    // Reject entries with empty content
+    if (typeof validated === 'object') {
+      for (const [key, value] of Object.entries(validated)) {
+        if (value === '' || value === null || value === undefined) {
+          delete validated[key];
+        }
+      }
+    }
+
+    validated._validation = { validatedAt: Date.now(), fieldsChecked: Object.keys(validated).length };
+    return validated;
   }
 
   private async enrichData(data: any): Promise<any> {
-    return data;
+    if (data === null || data === undefined) return data;
+    const enriched: any = { ...data };
+
+    enriched._enrichment = {
+      extractedAt: new Date().toISOString(),
+      contentLength: JSON.stringify(data).length,
+      fieldCount: Object.keys(data).length,
+    };
+
+    return enriched;
   }
 
   private formatOutput(data: any, format: string): any {

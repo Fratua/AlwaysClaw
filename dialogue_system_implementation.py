@@ -17,7 +17,6 @@ from typing import Dict, List, Optional, Any, Callable, Tuple
 from enum import Enum, auto
 from collections import deque
 import sqlite3
-import redis
 
 # ============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -893,10 +892,10 @@ class ContextManager:
                 """INSERT OR REPLACE INTO memory_entries
                    (id, type, content, source_file, importance_score)
                    VALUES (?, 'conversation_context', ?, 'dialogue_system', 0.6)""",
-                (f"ctx_{context.session_id}" if hasattr(context, 'session_id') else f"ctx_{id(context)}",
+                (f"ctx_{getattr(context, 'session_id', id(context))}",
                  json.dumps({
-                     'turns': context.turns[-20:] if hasattr(context, 'turns') else [],
-                     'metadata': context.metadata if hasattr(context, 'metadata') else {},
+                     'turns': getattr(context, 'turns', [])[-20:],
+                     'metadata': getattr(context, 'metadata', {}),
                  }, default=str)),
             )
             conn.commit()
@@ -1352,7 +1351,7 @@ class ResponseTimingManager:
         
         latency_ms = self._get_elapsed_ms()
         if latency_ms > self.constraints.max_first_response_ms:
-            print(f"Warning: Response latency {latency_ms}ms exceeded target")
+            logger.warning(f"Response latency {latency_ms}ms exceeded target {self.constraints.max_first_response_ms}ms")
             
         return response
         
@@ -1443,7 +1442,10 @@ class ResponseTimingManager:
         return int((datetime.now() - self.request_start_time).total_seconds() * 1000)
         
     async def _deliver_acknowledgment(self, acknowledgment: str):
-        """Deliver an acknowledgment message via the bridge stdout protocol."""
+        """Deliver an acknowledgment message via the bridge stdout protocol.
+
+        Raises OSError if delivery fails, so callers know the ack wasn't delivered.
+        """
         try:
             import sys, json
             response = {
@@ -1455,6 +1457,7 @@ class ResponseTimingManager:
             sys.stdout.flush()
         except (OSError, BrokenPipeError) as e:
             logger.warning(f"Failed to deliver acknowledgment: {e}")
+            raise
 
     async def _deliver_chunk(self, chunk: str):
         """Deliver a streamed response chunk via the bridge stdout protocol."""

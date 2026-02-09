@@ -328,30 +328,34 @@ class BottleneckDetector:
         metrics['consumer_lag'] = max(0, getattr(self, '_pending_count', 0) - getattr(self, '_processed_count', 0))
 
         # LLM metrics - from MetricsCollector
+        # get_latest() returns a Metric object; extract .value or use default
         mc = self._metrics_collector if hasattr(self, '_metrics_collector') else None
-        metrics['gpt_response_time_ms'] = mc.get_latest('gpt_response_time') if mc else 0.0
-        metrics['gpt_tokens_per_min'] = mc.get_latest('gpt_tokens_per_min') if mc else 0.0
+        def _val(name, default=0.0):
+            m = mc.get_latest(name) if mc else None
+            return m.value if m is not None else default
+        metrics['gpt_response_time_ms'] = _val('gpt_response_time')
+        metrics['gpt_tokens_per_min'] = _val('gpt_tokens_per_min')
         metrics['gpt_queue_depth'] = len(getattr(self, '_pending_llm_requests', []))
 
         # DB metrics
-        metrics['slow_query_count'] = mc.get_latest('slow_query_count') if mc else 0
-        metrics['db_connection_count'] = mc.get_latest('db_connections') if mc else 0
-        metrics['avg_query_time_ms'] = mc.get_latest('avg_query_time_ms') if mc else 0.0
+        metrics['slow_query_count'] = _val('slow_query_count', 0)
+        metrics['db_connection_count'] = _val('db_connections', 0)
+        metrics['avg_query_time_ms'] = _val('avg_query_time_ms')
 
         # Cache metrics
-        hits = mc.get_latest('cache_hits') if mc else 0
-        misses = mc.get_latest('cache_misses') if mc else 0
+        hits = _val('cache_hits', 0)
+        misses = _val('cache_misses', 0)
         metrics['cache_hit_rate'] = hits / max(hits + misses, 1)
-        metrics['cache_eviction_rate'] = mc.get_latest('cache_evictions') if mc else 0.0
+        metrics['cache_eviction_rate'] = _val('cache_evictions', 0.0)
 
         # System metrics via psutil
         vm = psutil.virtual_memory()
         metrics['memory_fragmentation'] = 1.0 - (vm.available / max(vm.total, 1))
 
         # Browser metrics
-        metrics['browser_pool_utilization'] = mc.get_latest('browser_active_pages') / max(mc.get_latest('browser_max_pages') if mc else 1, 1) if mc else 0.0
-        metrics['browser_wait_time_ms'] = mc.get_latest('browser_wait_time') if mc else 0.0
-        metrics['browser_crashes_per_min'] = mc.get_latest('browser_crashes_per_min') if mc else 0.0
+        metrics['browser_pool_utilization'] = _val('browser_active_pages', 0.0) / max(_val('browser_max_pages', 1.0), 1.0)
+        metrics['browser_wait_time_ms'] = _val('browser_wait_time', 0.0)
+        metrics['browser_crashes_per_min'] = _val('browser_crashes_per_min', 0.0)
 
         # GC metrics
         gc_stats = gc.get_stats()
@@ -513,16 +517,18 @@ class BottleneckDetector:
         """Start bottleneck detection"""
         self._detection_thread = threading.Thread(
             target=self.detection_loop,
-            daemon=True
+            daemon=False
         )
         self._detection_thread.start()
         logger.info("Bottleneck detection started")
-    
+
     def stop(self) -> None:
         """Stop bottleneck detection"""
         self._stop_event.set()
         if self._detection_thread:
-            self._detection_thread.join(timeout=10)
+            self._detection_thread.join(timeout=15)
+            if self._detection_thread.is_alive():
+                logger.warning("Bottleneck detection thread did not terminate in time")
         logger.info("Bottleneck detection stopped")
     
     def get_active_bottlenecks(self) -> List[DetectedBottleneck]:

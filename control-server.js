@@ -4,6 +4,7 @@
  */
 
 const http = require('http');
+const crypto = require('crypto');
 const logger = require('./logger');
 
 class ControlServer {
@@ -60,8 +61,11 @@ class ControlServer {
   handleRequest(req, res) {
     this.metrics.requests++;
     
-    // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:' + this.options.port);
+    // Set CORS headers - only set origin if explicitly configured
+    const corsOrigin = process.env.CONTROL_CORS_ORIGIN;
+    if (corsOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
     
@@ -71,7 +75,7 @@ class ControlServer {
       return;
     }
 
-    const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+    const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost:' + this.options.port}`);
     const path = parsedUrl.pathname;
     
     logger.debug(`[ControlServer] ${req.method} ${path}`);
@@ -79,15 +83,19 @@ class ControlServer {
     try {
       switch (path) {
         case '/health':
+          if (!this.authenticateRequest(req, res)) return;
           this.handleHealth(req, res);
           break;
         case '/workers':
+          if (!this.authenticateRequest(req, res)) return;
           this.handleWorkers(req, res);
           break;
         case '/metrics':
+          if (!this.authenticateRequest(req, res)) return;
           this.handleMetrics(req, res);
           break;
         case '/status':
+          if (!this.authenticateRequest(req, res)) return;
           this.handleStatus(req, res);
           break;
         case '/control/restart-worker':
@@ -136,9 +144,15 @@ class ControlServer {
       return false;
     }
 
-    // Check API key
+    // Check API key with timing-safe comparison
     const providedKey = req.headers['x-api-key'] || new URL(req.url, `http://${req.headers.host}`).searchParams.get('api_key');
-    if (providedKey !== apiKey) {
+    if (!providedKey) {
+      this.sendError(res, 401, 'Invalid or missing API key');
+      return false;
+    }
+    const apiKeyBuf = Buffer.from(apiKey);
+    const providedBuf = Buffer.from(providedKey);
+    if (apiKeyBuf.length !== providedBuf.length || !crypto.timingSafeEqual(apiKeyBuf, providedBuf)) {
       this.sendError(res, 401, 'Invalid or missing API key');
       return false;
     }
@@ -317,20 +331,19 @@ class ControlServer {
     // Gracefully restart all workers
     logger.info('[ControlServer] Restarting all workers...');
 
-    // Restart agent loop workers
-    for (const [id, info] of this.daemon?.agentLoopWorkers || []) {
+    // Collect worker IDs first to avoid modifying maps during iteration
+    const agentLoopIds = Array.from(this.daemon?.agentLoopWorkers?.keys() || []);
+    const ioWorkerIds = Array.from(this.daemon?.ioWorkers?.values() || [])
+      .map(info => info.worker?.id).filter(Boolean);
+    const taskWorkerIds = Array.from(this.daemon?.taskWorkers?.keys() || []);
+
+    for (const id of agentLoopIds) {
       this.daemon?.restartWorker(id);
     }
-
-    // Restart IO workers
-    for (const [service, info] of this.daemon?.ioWorkers || []) {
-      if (info.worker) {
-        this.daemon?.restartWorker(info.worker.id);
-      }
+    for (const id of ioWorkerIds) {
+      this.daemon?.restartWorker(id);
     }
-
-    // Restart task workers
-    for (const [id, info] of this.daemon?.taskWorkers || []) {
+    for (const id of taskWorkerIds) {
       this.daemon?.restartWorker(id);
     }
 

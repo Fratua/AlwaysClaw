@@ -8,7 +8,7 @@ import json
 import secrets
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Callable, Tuple
 
@@ -226,8 +226,11 @@ class JWTValidator:
         for key in jwks.get('keys', []):
             if key_id is None or key.get('kid') == key_id:
                 # Convert JWK to PEM format
-                return jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
-        
+                try:
+                    return jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
+                except (ValueError, TypeError, KeyError) as e:
+                    raise JWTError(f"Failed to parse JWK key: {e}") from e
+
         raise JWTError(f"Key not found: {key_id}")
     
     def decode_without_verification(self, token: str) -> DecodedJWT:
@@ -285,7 +288,7 @@ class JWTGenerator:
         Returns:
             Signed JWT access token
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=expires_in or self.config.access_token_ttl)
         
         payload = {
@@ -340,7 +343,7 @@ class JWTGenerator:
         Returns:
             Signed JWT refresh token
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=expires_in or self.config.refresh_token_ttl)
         
         payload = {
@@ -378,7 +381,7 @@ class JWTGenerator:
         Returns:
             Signed JWT ID token
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=expires_in)
         
         payload = {
@@ -409,9 +412,9 @@ class JWTGenerator:
         )
     
     def _generate_key_id(self, public_key: str) -> str:
-        """Generate key ID from public key."""
-        # Use first 16 bytes of SHA-256 hash
-        key_hash = secrets.token_urlsafe(8)
+        """Generate deterministic key ID from public key hash."""
+        import hashlib
+        key_hash = hashlib.sha256(public_key.encode()).hexdigest()[:16]
         return key_hash
 
 

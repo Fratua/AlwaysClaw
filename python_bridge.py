@@ -7,10 +7,12 @@ All logging goes to stderr only.
 import sys
 import json
 import os
+import re
 import traceback
 import logging
 import sqlite3
 import shutil
+import threading
 from typing import Any, Callable, Dict, Optional
 
 # Force all logging to stderr so stdout stays clean for JSON-RPC
@@ -43,7 +45,29 @@ class PythonBridge:
         self._twilio_manager = None
         self._twilio_import_failed = False
         self._stopping = False
+        self._async_loop = None
+        self._async_thread = None
+        self._start_async_loop()
         self._register_builtin_handlers()
+
+    def _start_async_loop(self):
+        """Start a dedicated background event loop thread for async bridge calls."""
+        import asyncio
+        self._async_loop = asyncio.new_event_loop()
+        self._async_thread = threading.Thread(
+            target=self._async_loop.run_forever,
+            daemon=True,
+            name='bridge-async-loop'
+        )
+        self._async_thread.start()
+
+    def _run_async(self, coro, timeout=30):
+        """Run an async coroutine on the background event loop and return the result."""
+        import asyncio
+        if self._async_loop is None or not self._async_loop.is_running():
+            self._start_async_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, self._async_loop)
+        return future.result(timeout=timeout)
 
     def _register_builtin_handlers(self):
         """Register built-in handlers."""
@@ -108,7 +132,7 @@ class PythonBridge:
             )
 
         try:
-            self.db_connection = sqlite3.connect(db_path)
+            self.db_connection = sqlite3.connect(db_path, check_same_thread=False)
         except sqlite3.OperationalError as e:
             raise sqlite3.OperationalError(
                 f"Cannot open memory database at {db_path}: {e}\n"
@@ -126,15 +150,19 @@ class PythonBridge:
                 lines = schema_sql.split('\n')
                 filtered = []
                 skip_block = False
+                skipped_vec = False
                 for line in lines:
                     if 'CREATE VIRTUAL TABLE' in line and 'vec0' in line:
                         skip_block = True
+                        skipped_vec = True
                         continue
                     if skip_block and line.strip() == ');':
                         skip_block = False
                         continue
                     if not skip_block:
                         filtered.append(line)
+                if skipped_vec:
+                    logger.info("Skipping sqlite-vec virtual table (extension not available)")
                 filtered_sql = '\n'.join(filtered)
                 self.db_connection.executescript(filtered_sql)
                 logger.info(f"Memory DB initialized at {db_path}")
@@ -142,6 +170,24 @@ class PythonBridge:
                 logger.error(f"Failed to apply memory schema: {e}")
         else:
             logger.warning(f"Memory schema not found at {schema_path}")
+
+    def _ensure_db_connection(self):
+        """Verify DB connection is alive, reconnect if stale."""
+        if self.db_connection is None:
+            self._initialize_memory_db()
+            return
+        try:
+            self.db_connection.execute("SELECT 1")
+        except sqlite3.Error:
+            logger.warning("DB connection stale, reconnecting...")
+            db_path = os.environ.get('MEMORY_DB_PATH', './data/memory.db')
+            try:
+                self.db_connection = sqlite3.connect(db_path, check_same_thread=False)
+                self.db_connection.row_factory = sqlite3.Row
+                logger.info("DB reconnected successfully")
+            except sqlite3.Error as e:
+                logger.error(f"DB reconnection failed: {e}")
+                self.db_connection = None
 
     # ── Built-in handlers ────────────────────────────────────────
 
@@ -325,8 +371,15 @@ class PythonBridge:
         """Lazy-initialize and cache the Twilio manager."""
         if self._twilio_manager is None and not self._twilio_import_failed:
             try:
-                from twilio_voice_integration import TwilioVoiceManager
-                self._twilio_manager = TwilioVoiceManager()
+                from twilio_voice_integration import TwilioVoiceManager, TwilioConfig
+                config = TwilioConfig(
+                    account_sid=os.environ.get('TWILIO_ACCOUNT_SID', ''),
+                    auth_token=os.environ.get('TWILIO_AUTH_TOKEN', ''),
+                    phone_number=os.environ.get('TWILIO_PHONE_NUMBER', ''),
+                    webhook_url=os.environ.get('TWILIO_WEBHOOK_URL', ''),
+                    stream_url=os.environ.get('TWILIO_STREAM_URL', ''),
+                )
+                self._twilio_manager = TwilioVoiceManager(config)
                 logger.info("Twilio manager initialized")
             except ImportError:
                 self._twilio_import_failed = True
@@ -340,7 +393,7 @@ class PythonBridge:
 
     def _handle_gmail_send(self, **params):
         to_addr = params.get('to', '')
-        if not to_addr or '@' not in to_addr:
+        if not to_addr or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', to_addr):
             return {"sent": False, "error": f"Invalid recipient address: {to_addr!r}"}
         try:
             from gmail_client_implementation import GmailClient
@@ -401,11 +454,11 @@ class PythonBridge:
             return {"called": False, "error": "No 'to' number provided"}
         try:
             manager = self._get_twilio_manager()
-            return manager.make_call(
+            call_sid = self._run_async(manager.make_call(
                 to_number=params.get('to', ''),
-                twiml_url=params.get('twiml_url', ''),
-                from_number=params.get('from', ''),
-            )
+                from_number=params.get('from', '') or None,
+            ))
+            return {"called": True, "call_sid": call_sid}
         except ImportError:
             return {"called": False, "error": "Twilio client not available"}
         except (ConnectionError, TimeoutError, OSError, ValueError) as e:
@@ -441,8 +494,7 @@ class PythonBridge:
             orchestrator = self._get_tts_orchestrator()
             return orchestrator.speak(
                 text=text,
-                voice=params.get('voice'),
-                output_path=params.get('output_path'),
+                voice_id=params.get('voice'),
             )
         except ImportError:
             return {"spoken": False, "error": "TTS orchestrator not available"}
@@ -634,8 +686,8 @@ if __name__ == '__main__':
         if bridge.db_connection is not None:
             try:
                 bridge.db_connection.close()
-            except Exception:
-                pass
+            except (sqlite3.Error, OSError) as e:
+                logger.debug(f"DB close error (ignored): {e}")
 
     atexit.register(_cleanup)
     bridge.run()

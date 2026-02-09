@@ -25,13 +25,45 @@ from typing import Any, Dict, List, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
 
-import jinja2
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
-from googleapiclient.discovery import build
-from plyer import notification
-from twilio.rest import Client
+# Optional dependencies - lazy imported where used to avoid ImportError at startup
+jinja2 = None
+AsyncIOScheduler = None
+CronTrigger = None
+DateTrigger = None
+notification = None
+_twilio_Client = None
+
+def _ensure_jinja2():
+    global jinja2
+    if jinja2 is None:
+        import jinja2 as _jinja2
+        jinja2 = _jinja2
+    return jinja2
+
+def _ensure_scheduler():
+    global AsyncIOScheduler, CronTrigger, DateTrigger
+    if AsyncIOScheduler is None:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler as _AS
+        from apscheduler.triggers.cron import CronTrigger as _CT
+        from apscheduler.triggers.date import DateTrigger as _DT
+        AsyncIOScheduler = _AS
+        CronTrigger = _CT
+        DateTrigger = _DT
+    return AsyncIOScheduler
+
+def _ensure_notification():
+    global notification
+    if notification is None:
+        from plyer import notification as _n
+        notification = _n
+    return notification
+
+def _ensure_twilio():
+    global _twilio_Client
+    if _twilio_Client is None:
+        from twilio.rest import Client
+        _twilio_Client = Client
+    return _twilio_Client
 
 
 # =============================================================================
@@ -899,7 +931,7 @@ class AIEvaluator:
                 category=str(data.get('category', 'general')),
                 confidence=float(data.get('confidence', 0.8)),
             )
-        except (ImportError, RuntimeError, EnvironmentError, ValueError, KeyError):
+        except (ImportError, RuntimeError, OSError, ValueError, KeyError):
             return EmailAnalysis(
                 sentiment=0.0,
                 urgency=0.5,
@@ -1062,7 +1094,9 @@ class ActionExecutor:
         """Evaluate conditional expression."""
         # Simplified implementation using Jinja2
         try:
-            template = jinja2.Template(f"{{{{ {condition} }}}}")
+            jinja2 = _ensure_jinja2()
+            sandbox_env = jinja2.sandbox.SandboxedEnvironment()
+            template = sandbox_env.from_string(f"{{{{ {condition} }}}}")
             result = template.render(**context.variables)
             return result.lower() in ('true', '1', 'yes')
         except (ValueError, KeyError) as e:
@@ -1110,7 +1144,7 @@ class ActionExecutor:
         message = params.get('message', email.subject)
         urgency = params.get('urgency', 'normal')
         
-        notification.notify(
+        _ensure_notification().notify(
             title=title,
             message=message,
             timeout=10 if urgency == 'normal' else 0
@@ -1211,9 +1245,10 @@ class TemplateEngine:
     """Advanced template engine for email generation."""
     
     def __init__(self, template_dir: str = "templates/emails"):
-        self.env = jinja2.Environment(
-            loader=jinja2.FileSystemLoader(template_dir),
-            autoescape=jinja2.select_autoescape(['html', 'xml']),
+        _j = _ensure_jinja2()
+        self.env = _j.Environment(
+            loader=_j.FileSystemLoader(template_dir),
+            autoescape=_j.select_autoescape(['html', 'xml']),
             trim_blocks=True,
             lstrip_blocks=True
         )
@@ -1306,7 +1341,7 @@ class EmailScheduler:
     """Advanced email scheduling system."""
     
     def __init__(self, template_engine: TemplateEngine):
-        self.scheduler = AsyncIOScheduler()
+        self.scheduler = _ensure_scheduler()()
         self.template_engine = template_engine
         self.executor = ActionExecutor()
     
@@ -1562,6 +1597,7 @@ class GmailAdapter:
     """Gmail API adapter for email operations."""
     
     def __init__(self, credentials):
+        from googleapiclient.discovery import build
         self.service = build('gmail', 'v1', credentials=credentials)
     
     async def fetch_emails(

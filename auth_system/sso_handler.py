@@ -17,7 +17,7 @@ import asyncio
 import logging
 import aiohttp
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urlencode, urlparse
@@ -167,7 +167,7 @@ class SAMLHandler:
             Tuple of (base64_encoded_request, request_id)
         """
         request_id = f"_{secrets.token_hex(16)}"
-        issue_instant = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        issue_instant = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         
         # Build AuthnRequest XML
         authn_request = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -205,6 +205,7 @@ class SAMLHandler:
     
     def _sign_request(self, request_xml: str) -> str:
         """Sign SAML request using XML digital signature."""
+        allow_unsigned = getattr(self.config, 'allow_unsigned', False)
         try:
             from signxml import XMLSigner
             import signxml
@@ -216,11 +217,15 @@ class SAMLHandler:
                 signed_xml = signer.sign(request_xml, key=private_key)
                 return signed_xml
             else:
-                logger.warning("SP_PRIVATE_KEY_PATH not set or file not found, returning unsigned XML")
-                return request_xml
+                if allow_unsigned:
+                    logger.warning("SP_PRIVATE_KEY_PATH not set or file not found, returning unsigned XML (allow_unsigned=True)")
+                    return request_xml
+                raise RuntimeError("SP_PRIVATE_KEY_PATH not set or file not found. Set allow_unsigned=True in config to send unsigned requests.")
         except ImportError:
-            logger.warning("signxml not installed, returning unsigned XML")
-            return request_xml
+            if allow_unsigned:
+                logger.warning("signxml not installed, returning unsigned XML (allow_unsigned=True)")
+                return request_xml
+            raise RuntimeError("signxml is not installed. Install it with 'pip install signxml' or set allow_unsigned=True in config.")
     
     def build_login_url(self, authn_request: str, relay_state: Optional[str] = None) -> str:
         """
@@ -286,6 +291,7 @@ class SAMLHandler:
                 # Check for encrypted assertion
                 encrypted_assertion = response_xml.find('.//saml:EncryptedAssertion', SAML_NAMESPACES)
                 if encrypted_assertion is not None:
+                    logger.warning("Encrypted SAML assertions not yet supported, returning raw assertion")
                     return SAMLAuthenticationResult(
                         success=False,
                         error="Encrypted assertions not yet supported"
@@ -373,7 +379,7 @@ class SAMLHandler:
             Tuple of (base64_encoded_request, request_id)
         """
         request_id = f"_{secrets.token_hex(16)}"
-        issue_instant = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        issue_instant = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         
         logout_request = f"""<?xml version="1.0" encoding="UTF-8"?>
         <samlp:LogoutRequest
@@ -879,7 +885,7 @@ class SSOHandler:
         nonce = secrets.token_urlsafe(32)
         
         # Generate authorization URL
-        auth_url, code_challenge, code_verifier = handler.generate_authn_url(
+        auth_url, code_challenge, code_verifier = handler.generate_auth_url(
             state=state,
             nonce=nonce,
             scopes=scopes
