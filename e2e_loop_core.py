@@ -932,26 +932,49 @@ class LLMTaskExecutor(TaskExecutor):
         
         logger.info(f"Executing LLM task: {task.name}")
 
-        try:
-            from openai_client import OpenAIClient
-            client = OpenAIClient.get_instance()
-            system_prompt = config.get('system', '')
-            result = client.complete(
-                messages=[{"role": "user", "content": resolved_prompt}],
-                system=system_prompt,
-                max_tokens=config.get('max_tokens', 4096),
-                temperature=config.get('temperature', 0.7),
-            )
-            return {
-                'response': result['content'],
-                'tokens_used': result.get('usage', {}).get('total_tokens', 0),
-            }
-        except (ImportError, RuntimeError, EnvironmentError) as e:
-            logger.warning(f"LLM call failed, returning placeholder: {e}")
-            return {
-                'response': f'LLM response for: {resolved_prompt[:50]}...',
-                'tokens_used': 0,
-            }
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                from openai_client import OpenAIClient
+                client = OpenAIClient.get_instance()
+                system_prompt = config.get('system', '')
+                result = client.complete(
+                    messages=[{"role": "user", "content": resolved_prompt}],
+                    system=system_prompt,
+                    max_tokens=config.get('max_tokens', 4096),
+                    temperature=config.get('temperature', 0.7),
+                )
+                return {
+                    'response': result['content'],
+                    'tokens_used': result.get('usage', {}).get('total_tokens', 0),
+                }
+            except ImportError as e:
+                # No point retrying a missing package
+                logger.error(f"LLM unavailable - openai_client package not installed: {e}")
+                return {
+                    'error': f'LLM unavailable: openai_client package not installed ({e})',
+                    'tokens_used': 0,
+                }
+            except (RuntimeError, EnvironmentError, ConnectionError, TimeoutError) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt  # exponential backoff: 1s, 2s, 4s
+                    logger.warning(
+                        f"LLM call failed (attempt {attempt + 1}/{max_retries}), "
+                        f"retrying in {delay}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        f"LLM call failed after {max_retries} attempts: {e}"
+                    )
+
+        return {
+            'error': f'LLM call failed after {max_retries} retries: {last_error}',
+            'tokens_used': 0,
+        }
     
     def _resolve_template(self, template: str, evaluator: ExpressionEvaluator) -> str:
         """Resolve template variables."""
@@ -1409,20 +1432,30 @@ class E2EWorkflowEngine:
         approval_id = f"{workflow_id}:{task_id}"
         event = asyncio.Event()
         self._approval_callbacks[approval_id] = event
-        
-        # Set timeout
-        timeout = task_def.task_config.approval_timeout or 3600  # 1 hour default
-        
+
+        # Set timeout (default 300 seconds)
+        timeout = task_def.task_config.approval_timeout or 300
+
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout)
-            
-            # Check approval result
+
+            # Read actual approval decision from workflow state
             state = await self.state_backend.load_workflow_state(workflow_id)
-            # In real implementation, store approval result in state
-            return True
-            
+            approval_key = f"approval_{task_id}"
+            approval_record = state.variables.get(approval_key, {})
+            return approval_record.get('approved', False)
+
         except asyncio.TimeoutError:
-            logger.warning(f"Approval timeout for task {task_id}")
+            logger.warning(f"Approval timeout for task {task_id} after {timeout}s")
+            # Store timeout in state
+            state = await self.state_backend.load_workflow_state(workflow_id)
+            approval_key = f"approval_{task_id}"
+            state.variables[approval_key] = {
+                'approved': False,
+                'reason': 'timed_out',
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+            await self.state_backend.save_workflow_state(state)
             return False
         finally:
             if approval_id in self._approval_callbacks:
@@ -1437,23 +1470,36 @@ class E2EWorkflowEngine:
     ) -> bool:
         """Submit human approval response."""
         approval_id = f"{workflow_id}:{task_id}"
-        
-        # Update task state
+
+        # Load state and store the approval decision with timestamp
         state = await self.state_backend.load_workflow_state(workflow_id)
+        if not state:
+            logger.error(f"Workflow {workflow_id} not found for approval submission")
+            return False
+
+        approval_key = f"approval_{task_id}"
+        state.variables[approval_key] = {
+            'approved': approved,
+            'response_data': response_data,
+            'timestamp': datetime.utcnow().isoformat(),
+        }
+
+        # Update task state
         task_state = state.get_task_state(task_id)
-        
+
         if approved:
             task_state.status = TaskStatus.RUNNING
         else:
             task_state.status = TaskStatus.CANCELLED
             task_state.outputs = {'approval_rejected': True, 'data': response_data}
-        
+
         await self.state_backend.save_task_state(workflow_id, task_id, task_state)
-        
+        await self.state_backend.save_workflow_state(state)
+
         # Signal waiting task
         if approval_id in self._approval_callbacks:
             self._approval_callbacks[approval_id].set()
-        
+
         return True
     
     async def _execute_compensations(

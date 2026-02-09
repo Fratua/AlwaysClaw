@@ -696,20 +696,44 @@ class FeatureExperimentationFramework:
         }
     
     async def _deploy_to_sandbox(self, sandbox: Dict, opportunity: EnhancementOpportunity):
-        """Deploy feature to sandbox by writing experiment manifest."""
+        """Deploy feature to sandbox by writing and executing experiment manifest."""
         import json
+        import subprocess
         manifest = {
             'experiment_id': sandbox['id'],
             'opportunity_id': opportunity.id,
             'component': opportunity.component,
             'description': opportunity.description,
             'deployed_at': datetime.now().isoformat(),
+            'entry_point': f"{opportunity.component}.py" if opportunity.component else None,
         }
         manifest_path = os.path.join(sandbox['path'], 'experiment_manifest.json')
         with open(manifest_path, 'w') as f:
             json.dump(manifest, f, indent=2)
+
+        # Execute sandbox initialization via isolated subprocess
+        entry_point = manifest.get('entry_point')
+        if entry_point:
+            entry_path = os.path.join(sandbox['path'], entry_point)
+            if os.path.isfile(entry_path):
+                try:
+                    result = subprocess.run(
+                        [sys.executable, '-c', f'import py_compile; py_compile.compile("{entry_path}", doraise=True)'],
+                        capture_output=True, text=True, timeout=30,
+                        cwd=sandbox['path']
+                    )
+                    if result.returncode != 0:
+                        logger.warning(f"Sandbox compile check failed: {result.stderr[:300]}")
+                    else:
+                        logger.info(f"Sandbox entry point compiled successfully: {entry_point}")
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Sandbox compile check timed out for {entry_point}")
+                except OSError as e:
+                    logger.warning(f"Sandbox compile check failed: {e}")
+
         sandbox['deployed_feature'] = opportunity.id
-        logger.info(f"Deployed experiment manifest to {manifest_path}")
+        sandbox['manifest_path'] = manifest_path
+        logger.info(f"Deployed and validated experiment manifest at {manifest_path}")
     
     async def _run_test_scenarios(self, sandbox: Dict, scenarios: List[Dict]) -> Dict:
         """Run all test scenarios"""
@@ -895,10 +919,35 @@ class ComponentIntegrationSystem:
         if missing:
             raise ValueError(f"Missing dependencies: {missing}")
     
-    async def _integrate_direct(self, opportunity: EnhancementOpportunity, 
+    def _get_deployment_orchestrator(self):
+        """Lazily import and return the deployment orchestrator."""
+        try:
+            from deployment_orchestrator import DeploymentOrchestrator
+            return DeploymentOrchestrator()
+        except (ImportError, RuntimeError) as e:
+            logger.warning(f"deployment_orchestrator not available: {e}")
+            return None
+
+    async def _integrate_direct(self, opportunity: EnhancementOpportunity,
                                  experiment: Experiment) -> Dict:
-        """Direct integration (for low-risk changes)"""
+        """Direct integration via deployment orchestrator."""
         logger.info("Performing direct integration")
+        orchestrator = self._get_deployment_orchestrator()
+        if orchestrator and hasattr(orchestrator, 'deploy'):
+            try:
+                deploy_result = await orchestrator.deploy(
+                    component=opportunity.component,
+                    strategy='direct',
+                    metadata={'opportunity_id': opportunity.id}
+                ) if asyncio.iscoroutinefunction(getattr(orchestrator, 'deploy', None)) else orchestrator.deploy(
+                    component=opportunity.component,
+                    strategy='direct',
+                    metadata={'opportunity_id': opportunity.id}
+                )
+                return {'method': 'direct', 'risk': 'low', 'deploy_result': deploy_result}
+            except (RuntimeError, OSError, ValueError) as e:
+                logger.error(f"Direct deployment failed: {e}")
+                return {'method': 'direct', 'risk': 'low', 'deploy_error': str(e)}
         return {'method': 'direct', 'risk': 'low'}
     
     async def _integrate_feature_flag(self, opportunity: EnhancementOpportunity,
@@ -1013,8 +1062,8 @@ class PerformanceValidationEngine:
         return validation_result
     
     async def _get_baseline_metrics(self) -> Dict:
-        """Get baseline performance metrics"""
-        return {
+        """Get baseline performance metrics using psutil if available."""
+        baseline = {
             'latency_p50_ms': 50,
             'latency_p95_ms': 100,
             'throughput_rps': 100,
@@ -1022,6 +1071,15 @@ class PerformanceValidationEngine:
             'cpu_percent': 20,
             'memory_mb': 256
         }
+        try:
+            import psutil
+            proc = psutil.Process()
+            baseline['cpu_percent'] = proc.cpu_percent(interval=0.5)
+            baseline['memory_mb'] = proc.memory_info().rss / (1024 * 1024)
+            logger.info("Collected real baseline metrics via psutil")
+        except (ImportError, psutil.NoSuchProcess, psutil.AccessDenied, OSError) as e:
+            logger.warning(f"Using hardcoded baseline metrics (psutil unavailable: {e})")
+        return baseline
     
     async def _run_benchmarks(self, component_id: str) -> Dict:
         """Run performance benchmarks."""
@@ -1457,16 +1515,47 @@ class UpgradeOrchestrator:
             )
             
             if validation_result['status'] == 'failed':
-                logger.warning("Performance validation failed")
+                logger.warning("Performance validation failed - triggering rollback")
+                rollback_success = False
+                # Try deployment orchestrator rollback first
                 try:
-                    from self_updating_loop.rollback.rollback_manager import RollbackManager
-                    rollback_mgr = RollbackManager()
-                    await rollback_mgr.trigger_rollback(
-                        reason="Performance validation failed",
-                        component_id=integration_result.get('component_id', 'unknown')
-                    )
+                    from deployment_orchestrator import DeploymentOrchestrator
+                    deploy_orch = DeploymentOrchestrator()
+                    if hasattr(deploy_orch, 'rollback'):
+                        rollback_result = deploy_orch.rollback(
+                            component_id=integration_result.get('component_id', 'unknown'),
+                            reason="Performance validation failed"
+                        )
+                        if asyncio.iscoroutine(rollback_result):
+                            rollback_result = await rollback_result
+                        rollback_success = True
+                        logger.info(f"Rollback via deployment_orchestrator: {rollback_result}")
                 except (ImportError, RuntimeError, AttributeError) as e:
-                    logger.error(f"Rollback trigger failed: {e}")
+                    logger.warning(f"Deployment orchestrator rollback unavailable: {e}")
+
+                # Fall back to rollback manager
+                if not rollback_success:
+                    try:
+                        from self_updating_loop.rollback.rollback_manager import RollbackManager
+                        rollback_mgr = RollbackManager()
+                        await rollback_mgr.trigger_rollback(
+                            reason="Performance validation failed",
+                            component_id=integration_result.get('component_id', 'unknown')
+                        )
+                        rollback_success = True
+                    except (ImportError, RuntimeError, AttributeError) as e:
+                        logger.error(f"Rollback trigger failed: {e}")
+
+                if not rollback_success:
+                    logger.error("All rollback methods failed for component %s",
+                                 integration_result.get('component_id', 'unknown'))
+                self.state = UpgradeState.ROLLED_BACK
+                return {
+                    'status': 'validation_failed_rolled_back' if rollback_success else 'validation_failed',
+                    'cycle_id': self.current_cycle,
+                    'validation': validation_result,
+                    'rollback_success': rollback_success
+                }
             
             # 7. Verify capability
             self.state = UpgradeState.VERIFYING

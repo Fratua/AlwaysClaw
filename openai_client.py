@@ -4,9 +4,12 @@ Shared singleton used by all Python loops and bridge handlers.
 Model defaults to gpt-5.2 but can be overridden via OPENAI_MODEL env var.
 """
 
+import hashlib
+import json
 import os
 import logging
-from typing import List, Dict, Any, Optional
+from collections import OrderedDict
+from typing import AsyncGenerator, List, Dict, Any, Optional
 
 try:
     import openai
@@ -14,6 +17,8 @@ except ImportError:
     openai = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+_CACHE_MAX_SIZE = 128
 
 
 class OpenAIClient:
@@ -39,6 +44,7 @@ class OpenAIClient:
             return
 
         self.client = openai.OpenAI(api_key=self.api_key)
+        self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         logger.info(f"OpenAIClient initialized with model={self.model}")
 
     @classmethod
@@ -74,6 +80,14 @@ class OpenAIClient:
                 "OPENAI_API_KEY is not set. Set the environment variable to enable GPT-5.2 API calls."
             )
 
+        # Build cache key for deduplication
+        cache_key = self._make_cache_key(messages, system, max_tokens, temperature, reasoning)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            self._cache.move_to_end(cache_key)
+            logger.debug("Returning cached completion result")
+            return cached
+
         try:
             full_messages = []
             if system:
@@ -96,15 +110,23 @@ class OpenAIClient:
             choice = response.choices[0]
             content = choice.message.content or ""
 
-            return {
+            usage = getattr(response, 'usage', None)
+            result = {
                 "content": content,
                 "model": response.model,
                 "usage": {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
+                    "prompt_tokens": getattr(usage, 'prompt_tokens', 0) if usage else 0,
+                    "completion_tokens": getattr(usage, 'completion_tokens', 0) if usage else 0,
+                    "total_tokens": getattr(usage, 'total_tokens', 0) if usage else 0,
                 },
             }
+
+            # Store in LRU cache
+            self._cache[cache_key] = result
+            if len(self._cache) > _CACHE_MAX_SIZE:
+                self._cache.popitem(last=False)
+
+            return result
         except openai.APIConnectionError as e:
             logger.error(f"GPT-5.2 connection error: {e}")
             raise
@@ -117,6 +139,65 @@ class OpenAIClient:
         except openai.APIError as e:
             logger.error(f"GPT-5.2 API error: {e}")
             raise
+
+    def _make_cache_key(
+        self,
+        messages: List[Dict[str, str]],
+        system: str,
+        max_tokens: int,
+        temperature: float,
+        reasoning: Optional[Dict[str, str]],
+    ) -> str:
+        """Build a deterministic hash key for the request parameters."""
+        raw = json.dumps(
+            {"messages": messages, "system": system, "max_tokens": max_tokens,
+             "temperature": temperature, "reasoning": reasoning, "model": self.model},
+            sort_keys=True,
+        )
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    async def stream_complete(
+        self,
+        messages: List[Dict[str, str]],
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning: Optional[Dict[str, str]] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Streaming completion that yields content chunks as they arrive.
+
+        Usage::
+
+            async for chunk in client.stream_complete(messages=[...]):
+                print(chunk, end="", flush=True)
+        """
+        if self._disabled:
+            raise EnvironmentError(
+                "OPENAI_API_KEY is not set. Set the environment variable to enable GPT-5.2 API calls."
+            )
+
+        full_messages = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        reasoning_config = reasoning if reasoning is not None else {
+            "effort": self.thinking_mode
+        }
+
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=full_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning=reasoning_config,
+            stream=True,
+        )
+
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
     def generate(self, prompt: str, system: str = "", **kwargs) -> str:
         """Convenience method: single prompt in, text out."""

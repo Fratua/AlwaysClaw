@@ -13,6 +13,8 @@ monitoring during deployments.
 
 import asyncio
 import logging
+import shutil
+import subprocess
 import time
 import yaml
 import json
@@ -77,14 +79,17 @@ class DeploymentResult:
 class DeploymentOrchestrator(ABC):
     """Base class for all deployment strategies."""
 
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, dry_run: bool = True):
         self.config_path = Path(config_path)
         self.config: Dict[str, Any] = {}
+        self.dry_run = dry_run
         self.logger = logging.getLogger(self.__class__.__name__)
         self.state = DeploymentState.PENDING
         self._previous_version: Optional[str] = None
         self._current_version: Optional[str] = None
         self._load_config()
+        # Allow config file to override the dry_run constructor argument
+        self.dry_run = self.config.get("dry_run", dry_run)
 
     def _load_config(self):
         """Load YAML configuration file."""
@@ -244,14 +249,20 @@ class BlueGreenDeployer(DeploymentOrchestrator):
     marker.
     """
 
-    def __init__(self, config_path: str = "blue-green-config.yaml"):
-        super().__init__(config_path)
+    def __init__(self, config_path: str = "blue-green-config.yaml", dry_run: bool = True):
+        super().__init__(config_path, dry_run=dry_run)
         bg = self.config.get("blue_green", {})
         self._envs = bg.get("environments", {})
         self._router = bg.get("router", {})
         self._cutover = bg.get("cutover", {})
         self._rollback_cfg = bg.get("rollback", {})
         self._cleanup_cfg = bg.get("cleanup", {})
+
+        # Nginx config path for real deployments
+        self._nginx_config_path = Path(
+            self._router.get("nginx_config_path", "/etc/nginx/conf.d/openclaw-upstream.conf")
+        )
+        self._nginx_backup_path: Optional[Path] = None
 
         # Track which environment is active
         self._active_env: str = "blue"
@@ -281,6 +292,41 @@ class BlueGreenDeployer(DeploymentOrchestrator):
         rendered = rendered.replace("{{active_weight}}", str(active_weight))
         rendered = rendered.replace("{{standby_weight}}", str(standby_weight))
         return rendered
+
+    def _apply_nginx_config(self, nginx_cfg: str) -> None:
+        """Write nginx config to disk and reload nginx."""
+        # Backup current config if it exists and we haven't backed up yet
+        if self._nginx_backup_path is None and self._nginx_config_path.exists():
+            self._nginx_backup_path = self._nginx_config_path.with_suffix(".conf.bak")
+            shutil.copy2(self._nginx_config_path, self._nginx_backup_path)
+            self.logger.info("Backed up nginx config to %s", self._nginx_backup_path)
+
+        self._nginx_config_path.parent.mkdir(parents=True, exist_ok=True)
+        self._nginx_config_path.write_text(nginx_cfg, encoding="utf-8")
+        self.logger.info("Wrote nginx config to %s", self._nginx_config_path)
+
+        result = subprocess.run(
+            ["nginx", "-s", "reload"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            self.logger.error("nginx reload failed: %s", result.stderr)
+            raise RuntimeError(f"nginx reload failed (rc={result.returncode}): {result.stderr}")
+        self.logger.info("nginx reloaded successfully")
+
+    def _restore_nginx_backup(self) -> None:
+        """Restore nginx config from backup during rollback."""
+        if self._nginx_backup_path and self._nginx_backup_path.exists():
+            shutil.copy2(self._nginx_backup_path, self._nginx_config_path)
+            self.logger.info("Restored nginx config from %s", self._nginx_backup_path)
+            result = subprocess.run(
+                ["nginx", "-s", "reload"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                self.logger.error("nginx reload after restore failed: %s", result.stderr)
+            else:
+                self.logger.info("nginx reloaded with restored config")
 
     async def _collect_metrics(self) -> Dict[str, float]:
         """Collect system metrics for threshold evaluation."""
@@ -345,7 +391,11 @@ class BlueGreenDeployer(DeploymentOrchestrator):
                 "Traffic shift: %d%% -> standby (%s), %d%% -> active (%s)",
                 pct, self._standby_env, 100 - pct, self._active_env,
             )
-            self.logger.debug("Nginx config:\n%s", nginx_cfg)
+
+            if self.dry_run:
+                self.logger.debug("Nginx config (dry_run):\n%s", nginx_cfg)
+            else:
+                self._apply_nginx_config(nginx_cfg)
 
             # Monitor during stabilization
             elapsed = 0.0
@@ -399,7 +449,15 @@ class BlueGreenDeployer(DeploymentOrchestrator):
         active_port = self._env_port(self._active_env)
         standby_port = self._env_port(self._standby_env)
         nginx_cfg = self._generate_nginx_config(active_port, standby_port, 100, 0)
-        self.logger.debug("Rollback nginx config:\n%s", nginx_cfg)
+
+        if self.dry_run:
+            self.logger.debug("Rollback nginx config (dry_run):\n%s", nginx_cfg)
+        else:
+            # Prefer restoring from backup if available
+            if self._nginx_backup_path and self._nginx_backup_path.exists():
+                self._restore_nginx_backup()
+            else:
+                self._apply_nginx_config(nginx_cfg)
 
         # Verify old environment is still healthy
         if self._rollback_cfg.get("verify_rollback", True):
@@ -429,13 +487,17 @@ class CanaryDeployer(DeploymentOrchestrator):
     canary is rolled back automatically.
     """
 
-    def __init__(self, config_path: str = "canary-config.yaml"):
-        super().__init__(config_path)
+    def __init__(self, config_path: str = "canary-config.yaml", dry_run: bool = True):
+        super().__init__(config_path, dry_run=dry_run)
         canary = self.config.get("canary", {})
         self._phases: List[Dict[str, Any]] = canary.get("phases", [])
         self._thresholds: Dict[str, float] = canary.get("thresholds", {})
         self._auto_rollback = canary.get("auto_rollback", {})
         self._analysis = canary.get("analysis", {})
+
+        # Metrics endpoint for real metric collection
+        self._metrics_endpoint: Optional[str] = canary.get("metrics_endpoint")
+        self._metrics_file: Optional[str] = canary.get("metrics_file")
 
         # Runtime state
         self._canary_active = False
@@ -445,20 +507,74 @@ class CanaryDeployer(DeploymentOrchestrator):
     # -- helpers --
 
     async def _check_metrics(self) -> Dict[str, float]:
-        """Collect system and application metrics."""
+        """Collect system and application metrics from real sources."""
         metrics: Dict[str, float] = {
             "error_rate": 0.0,
             "latency_p50_ms": 0.0,
             "latency_p95_ms": 0.0,
             "latency_p99_ms": 0.0,
         }
+
+        # System metrics from psutil
         if _HAS_PSUTIL:
             metrics["cpu_percent"] = psutil.cpu_percent(interval=1)
             metrics["memory_percent"] = psutil.virtual_memory().percent
         else:
             metrics["cpu_percent"] = 0.0
             metrics["memory_percent"] = 0.0
+
+        # Application metrics -- try HTTP endpoint first, then metrics file
+        app_metrics = await self._fetch_app_metrics()
+        if app_metrics:
+            metrics.update(app_metrics)
+        else:
+            self.logger.debug("No application metrics source available; using system metrics only")
+
         return metrics
+
+    async def _fetch_app_metrics(self) -> Optional[Dict[str, float]]:
+        """
+        Fetch application-level metrics (error_rate, latency) from a
+        configurable HTTP endpoint or a local metrics JSON file.
+        """
+        # 1. Try HTTP health/metrics endpoint
+        if self._metrics_endpoint and _HAS_AIOHTTP:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        self._metrics_endpoint,
+                        timeout=aiohttp.ClientTimeout(total=5),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            return {
+                                "error_rate": float(data.get("error_rate", 0.0)),
+                                "latency_p50_ms": float(data.get("latency_p50_ms", 0.0)),
+                                "latency_p95_ms": float(data.get("latency_p95_ms", 0.0)),
+                                "latency_p99_ms": float(data.get("latency_p99_ms", 0.0)),
+                            }
+                        self.logger.warning(
+                            "Metrics endpoint returned %d", resp.status
+                        )
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError) as exc:
+                self.logger.warning("Failed to fetch metrics from endpoint: %s", exc)
+
+        # 2. Try local metrics file
+        if self._metrics_file:
+            try:
+                metrics_path = Path(self._metrics_file)
+                if metrics_path.exists():
+                    data = json.loads(metrics_path.read_text(encoding="utf-8"))
+                    return {
+                        "error_rate": float(data.get("error_rate", 0.0)),
+                        "latency_p50_ms": float(data.get("latency_p50_ms", 0.0)),
+                        "latency_p95_ms": float(data.get("latency_p95_ms", 0.0)),
+                        "latency_p99_ms": float(data.get("latency_p99_ms", 0.0)),
+                    }
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                self.logger.warning("Failed to read metrics file: %s", exc)
+
+        return None
 
     async def _evaluate_phase(self, phase: Dict[str, Any], metrics: Dict[str, float]) -> bool:
         """
@@ -570,8 +686,8 @@ class RollingUpdateDeployer(DeploymentOrchestrator):
     instance stopping and HeartbeatMonitor for health checking when available.
     """
 
-    def __init__(self, config_path: str = "rolling-update-config.yaml"):
-        super().__init__(config_path)
+    def __init__(self, config_path: str = "rolling-update-config.yaml", dry_run: bool = True):
+        super().__init__(config_path, dry_run=dry_run)
         ru = self.config.get("rolling_update", {})
         self._batch_size: int = ru.get("batch_size", 2)
         self._drain_timeout: int = ru.get("drain_timeout_seconds", 30)
@@ -583,6 +699,12 @@ class RollingUpdateDeployer(DeploymentOrchestrator):
         self._auto_rollback: bool = ru.get("auto_rollback", True)
         self._drain_cfg = ru.get("connection_draining", {})
         self._resource_limits = ru.get("resource_limits", {})
+        # Command template for restarting instances (e.g. "python agent_{instance}.py")
+        self._deploy_command: Optional[str] = ru.get("deploy_command")
+        # HTTP endpoint for draining (e.g. "http://localhost:{port}/drain")
+        self._drain_endpoint_template: Optional[str] = ru.get("drain_endpoint_template")
+        # Base port for per-instance health checks (instance index added as offset)
+        self._health_base_port: int = ru.get("health_base_port", 8080)
 
         loops = self.config.get("agent_loops", {})
         self._update_order: List[str] = loops.get("update_order", [])
@@ -639,9 +761,42 @@ class RollingUpdateDeployer(DeploymentOrchestrator):
         drain_timeout = self._drain_cfg.get("timeout_seconds", self._drain_timeout)
         grace = self._drain_cfg.get("grace_period_seconds", 5)
         self.logger.info("Draining connections from %s (timeout=%ds)", instance, drain_timeout)
-        # In production this would signal the load balancer to stop sending
-        # new requests and wait for in-flight requests to complete.
-        await asyncio.sleep(grace)
+
+        if self.dry_run:
+            self.logger.info("dry_run: would drain instance %s", instance)
+            await asyncio.sleep(grace)
+        else:
+            # Signal the instance to stop accepting new work via HTTP endpoint
+            drained = False
+            if self._drain_endpoint_template and _HAS_AIOHTTP:
+                url = self._drain_endpoint_template.replace("{instance}", instance)
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            url, timeout=aiohttp.ClientTimeout(total=drain_timeout)
+                        ) as resp:
+                            if resp.status == 200:
+                                self.logger.info("Drain signal sent to %s via %s", instance, url)
+                                drained = True
+                            else:
+                                self.logger.warning("Drain endpoint returned %d for %s", resp.status, instance)
+                except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+                    self.logger.warning("Failed to signal drain for %s: %s", instance, exc)
+
+            # Wait for the grace period to allow in-flight tasks to finish
+            await asyncio.sleep(grace)
+
+            # Poll the health endpoint until it reports unhealthy (no more work)
+            # or until drain_timeout is exhausted
+            if drained and _HAS_AIOHTTP:
+                elapsed = grace
+                while elapsed < drain_timeout:
+                    still_busy = await self.health_check("localhost", self._health_base_port, endpoint="/health")
+                    if not still_busy:
+                        break
+                    await asyncio.sleep(2)
+                    elapsed += 2
+
         self.logger.info("Instance %s drained", instance)
 
     async def _stop_instance(self, instance: str):
@@ -669,8 +824,35 @@ class RollingUpdateDeployer(DeploymentOrchestrator):
     async def _deploy_instance(self, instance: str, version: str):
         """Deploy new version to an instance."""
         self.logger.info("Deploying version %s to instance %s", version, instance)
-        # In production: restart the agent loop process with the new code
-        await asyncio.sleep(1)
+
+        if self.dry_run:
+            self.logger.info("dry_run: would deploy %s to %s", version, instance)
+            await asyncio.sleep(1)
+        else:
+            # Minimum wait to let OS release resources
+            await asyncio.sleep(1)
+
+            if self._deploy_command:
+                cmd = self._deploy_command.replace("{instance}", instance).replace("{version}", version)
+                self.logger.info("Running deploy command: %s", cmd)
+                try:
+                    result = subprocess.run(
+                        cmd, shell=True, capture_output=True, text=True, timeout=60,
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError(
+                            f"Deploy command failed for {instance} (rc={result.returncode}): {result.stderr}"
+                        )
+                    self.logger.info("Deploy command succeeded for %s", instance)
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError(f"Deploy command timed out for {instance}")
+            else:
+                self.logger.warning("No deploy_command configured; instance %s not restarted", instance)
+
+            # Verify health after deployment
+            healthy = await self._wait_for_healthy("localhost", self._health_base_port, retries=5, interval=3.0)
+            if not healthy:
+                raise RuntimeError(f"Instance {instance} failed health check after deployment")
 
     async def _health_check_instance(self, instance: str) -> bool:
         """Health check a single instance, using HeartbeatMonitor if available."""
@@ -680,8 +862,8 @@ class RollingUpdateDeployer(DeploymentOrchestrator):
                 self.logger.debug("HeartbeatMonitor reports %s healthy", instance)
                 return True
             # Fall through to HTTP check if heartbeat unavailable
-        # Fallback: HTTP health check
-        return await self.health_check("localhost", 8080, endpoint="/health", timeout=10)
+        # Fallback: HTTP health check on configurable port
+        return await self.health_check("localhost", self._health_base_port, endpoint="/health", timeout=10)
 
     async def _check_resource_limits(self) -> bool:
         """Return True if resource usage is within limits."""

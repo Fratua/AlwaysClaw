@@ -35,7 +35,10 @@ try:
     HAS_FASTAPI = True
 except ImportError:
     HAS_FASTAPI = False
-    print("FastAPI not installed. Dashboard server will not be available.")
+    logger.warning(
+        "FastAPI not installed. Dashboard server will not be available. "
+        "Install with: pip install fastapi uvicorn"
+    )
 
 
 class DashboardAPI:

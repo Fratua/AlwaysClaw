@@ -9,10 +9,11 @@ spaced repetition, transfer learning, and retrieval practice.
 """
 
 import asyncio
+import hashlib
 import uuid
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
@@ -303,6 +304,30 @@ class ElasticWeightConsolidation:
 
         return gradients
     
+    async def apply_gradients(self, experience: Experience, learning_rate: float = 0.01) -> Dict[str, float]:
+        """
+        Compute gradients for an experience and apply them to optimal_parameters,
+        regularized by Fisher information to prevent catastrophic forgetting.
+
+        Returns the updated parameter dict.
+        """
+        gradients = await self._compute_gradients(experience)
+
+        for param_name, grad in gradients.items():
+            current_val = self.optimal_parameters.get(param_name, 0.0)
+            optimal_val = self.optimal_parameters.get(param_name, 0.0)
+
+            # EWC regularization term: penalize deviation from optimal params
+            fisher = self.parameter_importance.get(param_name, 0.0)
+            ewc_grad = fisher * (current_val - optimal_val)
+
+            # Update: step along negative gradient + EWC penalty
+            updated = current_val - learning_rate * (grad + self.lambda_ewc * ewc_grad)
+            self.optimal_parameters[param_name] = updated
+
+        logger.debug(f"Applied gradients for experience; updated {len(gradients)} parameters")
+        return dict(self.optimal_parameters)
+
     async def apply_ewc_penalty(self, loss: float, current_params: Dict[str, float]) -> float:
         """Apply EWC regularization penalty to loss function."""
         ewc_penalty = 0.0
@@ -381,17 +406,51 @@ class MemoryReplaySystem:
         
         return samples
     
+    async def train_on_replay(self, learning_fn, batch_size: int = 32) -> Dict[str, Any]:
+        """
+        Sample a batch of experiences and pass them to a learning function.
+
+        Args:
+            learning_fn: An async callable that accepts a List[Experience] and
+                         returns a dict of training results/metrics.
+            batch_size: Number of experiences to sample.
+
+        Returns:
+            Dict with training results from learning_fn plus replay metadata.
+        """
+        samples = await self.sample_for_replay(batch_size)
+        if not samples:
+            return {'trained': False, 'reason': 'no_experiences', 'batch_size': 0}
+
+        result = await learning_fn(samples)
+
+        # Decay retrieval strength for all memories (older = weaker unless replayed)
+        decay_factor = 0.995
+        replayed_ids = {e.id for e in samples}
+        for mem in self.episodic_memory:
+            if mem['experience'].id in replayed_ids:
+                # Strengthen replayed memories
+                mem['retrieval_strength'] = min(1.0, mem['retrieval_strength'] + 0.05)
+            else:
+                mem['retrieval_strength'] *= decay_factor
+
+        return {
+            'trained': True,
+            'batch_size': len(samples),
+            'result': result,
+        }
+
     async def _maintain_buffer(self):
         """Maintain buffer size by removing least important items."""
         # Sort by combined score of importance and recency
         self.episodic_memory.sort(
             key=lambda m: (
-                m['importance'] * 0.7 + 
+                m['importance'] * 0.7 +
                 (1 / (1 + (datetime.now() - m['last_accessed']).days)) * 0.3
             ),
             reverse=True
         )
-        
+
         # Keep top buffer_size items
         self.episodic_memory = self.episodic_memory[:self.buffer_size]
 
@@ -416,6 +475,15 @@ class KnowledgeConsolidationEngine:
             ConsolidationPhase.INDEXING: 0.20
         }
         self.consolidation_active = False
+        self.generalized_skills: List[Dict[str, Any]] = []
+        self._search_index: Dict[str, List[int]] = {}
+        self._content_hashes: Dict[str, str] = {}
+        self._openai_client = None
+        try:
+            from openai_client import OpenAIClient
+            self._openai_client = OpenAIClient.get_instance()
+        except (ImportError, EnvironmentError):
+            logger.debug("OpenAI client unavailable for consolidation engine")
         
     async def schedule_consolidation(self, knowledge_unit: KnowledgeUnit):
         """Schedule knowledge unit for consolidation."""
@@ -452,92 +520,251 @@ class KnowledgeConsolidationEngine:
             self.consolidation_active = False
     
     async def _run_replay_phase(self, duration: timedelta):
-        """Reactivate and strengthen recent knowledge."""
+        """Reactivate and strengthen recent knowledge, weighted by recency and importance."""
         start_time = datetime.now()
-        
+        decay_half_life_days = 14.0
+
+        # Score each knowledge unit by recency decay * importance
+        scored = []
         for knowledge in self.consolidation_queue:
+            age_days = max((datetime.now() - knowledge.last_accessed).total_seconds() / 86400, 0.01)
+            recency_weight = 2.0 ** (-age_days / decay_half_life_days)
+            replay_score = recency_weight * knowledge.confidence
+            scored.append((replay_score, knowledge))
+
+        # Process in priority order (highest score first)
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        for replay_score, knowledge in scored:
             if datetime.now() - start_time >= duration:
                 break
-            
-            # Simulate memory reactivation
+
             await self._reactivate_knowledge(knowledge)
-            logger.debug(f"Reactivated knowledge: {knowledge.id}")
+            # Boost retention proportional to replay score
+            knowledge.retention_score = min(1.0, knowledge.retention_score + 0.05 * replay_score)
+            logger.debug(f"Replayed knowledge {knowledge.id} (score={replay_score:.3f})")
     
     async def _run_integration_phase(self, duration: timedelta):
-        """Merge related knowledge and resolve conflicts."""
+        """Group related knowledge by topic (domain + content similarity) and merge."""
         start_time = datetime.now()
-        
-        # Group related knowledge
+
+        # Group by domain first, then sub-group by content similarity
         knowledge_groups = await self._group_related_knowledge()
-        
+
         for group in knowledge_groups:
             if datetime.now() - start_time >= duration:
                 break
-            
-            # Merge knowledge in group
-            await self._merge_knowledge_group(group)
+
+            # Sub-group within domain by content similarity
+            sub_groups = self._cluster_by_similarity(group, threshold=0.3)
+            for sub_group in sub_groups:
+                if datetime.now() - start_time >= duration:
+                    break
+                await self._merge_knowledge_group(sub_group)
     
     async def _run_generalization_phase(self, duration: timedelta):
-        """Extract general patterns and create transferable skills."""
+        """Extract high-level patterns from grouped knowledge using LLM or keyword extraction."""
         start_time = datetime.now()
-        
-        # Find patterns in consolidated knowledge
-        patterns = await self._extract_patterns()
-        
-        for pattern in patterns:
+
+        # Group knowledge by domain for pattern extraction
+        domain_groups: Dict[str, List[KnowledgeUnit]] = defaultdict(list)
+        for ku in self.consolidation_queue:
+            domain_groups[ku.domain].append(ku)
+
+        for domain, units in domain_groups.items():
             if datetime.now() - start_time >= duration:
                 break
-            
-            # Create generalized skill
+            if len(units) < 2:
+                continue
+
+            all_text = " ".join(
+                f"{ku.summary} {' '.join(ku.concepts)}" for ku in units
+            )
+
+            pattern: Dict[str, Any] = {
+                'type': 'generalized',
+                'domain': domain,
+                'source_count': len(units),
+            }
+
+            # Try LLM-based generalization
+            if self._openai_client:
+                try:
+                    result = self._openai_client.generate(
+                        f"Given these knowledge summaries from the '{domain}' domain, "
+                        f"extract 3-5 high-level patterns or principles that generalize "
+                        f"across them. Return as a JSON list of strings.\n\n{all_text[:3000]}",
+                        max_tokens=500,
+                    )
+                    import json as _json
+                    patterns_list = _json.loads(result.strip())
+                    if isinstance(patterns_list, list):
+                        pattern['principles'] = patterns_list
+                        pattern['method'] = 'llm'
+                except (EnvironmentError, RuntimeError, ValueError, _json.JSONDecodeError) as e:
+                    logger.debug(f"LLM generalization failed, falling back to keywords: {e}")
+                    pattern['principles'] = self._extract_keywords(all_text)
+                    pattern['method'] = 'keyword_extraction'
+            else:
+                pattern['principles'] = self._extract_keywords(all_text)
+                pattern['method'] = 'keyword_extraction'
+
             await self._create_generalized_skill(pattern)
     
     async def _run_indexing_phase(self, duration: timedelta):
-        """Optimize knowledge retrieval structures."""
-        # Update embeddings
-        await self._update_embeddings()
-        
-        # Rebuild indices
-        await self._rebuild_indices()
-        
-        logger.info("Indexing phase completed")
-    
+        """Build a searchable index using content hashing and keyword extraction."""
+        self._search_index = {}
+        self._content_hashes = {}
+
+        for ku in self.consolidation_queue:
+            text = f"{ku.summary} {' '.join(ku.concepts)}".lower()
+
+            # Content hash for dedup / fast lookup
+            content_hash = hashlib.md5(text.encode()).hexdigest()
+            self._content_hashes[ku.id] = content_hash
+
+            # Keyword index
+            keywords = self._extract_keywords(text, top_n=20)
+            for kw in keywords:
+                self._search_index.setdefault(kw, []).append(ku.id)
+
+        logger.info(
+            f"Indexing complete: {len(self._content_hashes)} units, "
+            f"{len(self._search_index)} keywords indexed"
+        )
+
+    def search_index(self, query: str, top_k: int = 10) -> List[str]:
+        """Search the keyword index and return top knowledge unit IDs."""
+        query_tokens = query.lower().split()
+        scores: Dict[str, int] = defaultdict(int)
+        for token in query_tokens:
+            for ku_id in self._search_index.get(token, []):
+                scores[ku_id] += 1
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return [ku_id for ku_id, _ in ranked[:top_k]]
+
     async def _reactivate_knowledge(self, knowledge: KnowledgeUnit):
-        """Simulate knowledge reactivation."""
+        """Reactivate knowledge unit by updating access metadata."""
         knowledge.access_count += 1
         knowledge.last_accessed = datetime.now()
     
     async def _group_related_knowledge(self) -> List[List[KnowledgeUnit]]:
-        """Group related knowledge units."""
-        # Simple grouping by domain
+        """Group related knowledge units by domain."""
         groups: Dict[str, List[KnowledgeUnit]] = defaultdict(list)
         for knowledge in self.consolidation_queue:
             groups[knowledge.domain].append(knowledge)
         return list(groups.values())
+
+    def _cluster_by_similarity(
+        self, units: List[KnowledgeUnit], threshold: float = 0.3
+    ) -> List[List[KnowledgeUnit]]:
+        """Sub-cluster knowledge units by content similarity (Jaccard on keywords)."""
+        if len(units) <= 1:
+            return [units] if units else []
+
+        def _tokens(ku: KnowledgeUnit) -> set:
+            text = f"{ku.summary} {' '.join(ku.concepts)}".lower()
+            return set(text.split())
+
+        clusters: List[List[KnowledgeUnit]] = []
+        assigned = [False] * len(units)
+
+        for i, unit_i in enumerate(units):
+            if assigned[i]:
+                continue
+            cluster = [unit_i]
+            assigned[i] = True
+            tokens_i = _tokens(unit_i)
+
+            for j in range(i + 1, len(units)):
+                if assigned[j]:
+                    continue
+                tokens_j = _tokens(units[j])
+                intersection = len(tokens_i & tokens_j)
+                union = len(tokens_i | tokens_j)
+                jaccard = intersection / union if union > 0 else 0.0
+                if jaccard >= threshold:
+                    cluster.append(units[j])
+                    assigned[j] = True
+
+            clusters.append(cluster)
+
+        return clusters
     
     async def _merge_knowledge_group(self, group: List[KnowledgeUnit]):
-        """Merge knowledge units in a group."""
+        """Merge knowledge units in a group into the primary (first) unit."""
         if len(group) < 2:
             return
-        
-        # Merge concepts and procedures
-        merged_concepts = set()
-        merged_procedures = []
-        
-        for knowledge in group:
-            merged_concepts.update(knowledge.concepts)
-            merged_procedures.extend(knowledge.procedures)
-        
-        logger.info(f"Merged {len(group)} knowledge units")
+
+        primary = group[0]
+
+        merged_concepts = set(primary.concepts)
+        merged_procedures = list(primary.procedures)
+        merged_relationships = list(primary.relationships)
+        confidence_sum = primary.confidence
+
+        for secondary in group[1:]:
+            merged_concepts.update(secondary.concepts)
+            merged_procedures.extend(secondary.procedures)
+            merged_relationships.extend(secondary.relationships)
+            confidence_sum += secondary.confidence
+
+            # Append secondary summary into primary
+            if secondary.summary and secondary.summary != primary.summary:
+                primary.summary = f"{primary.summary}; {secondary.summary}"
+
+            # Remove merged unit from the queue
+            if secondary in self.consolidation_queue:
+                self.consolidation_queue.remove(secondary)
+
+        primary.concepts = list(merged_concepts)
+        primary.procedures = merged_procedures
+        primary.relationships = merged_relationships
+        primary.confidence = min(1.0, confidence_sum / len(group))
+        primary.last_accessed = datetime.now()
+
+        # Try LLM-based merge summary if available
+        if self._openai_client:
+            try:
+                all_text = "; ".join(ku.summary for ku in group if ku.summary)
+                result = self._openai_client.generate(
+                    f"Merge these related knowledge summaries into a single concise summary "
+                    f"(max 200 words):\n{all_text[:2000]}",
+                    max_tokens=300,
+                )
+                if result and len(result.strip()) > 10:
+                    primary.summary = result.strip()
+            except (EnvironmentError, RuntimeError, ValueError) as e:
+                logger.debug(f"LLM merge summary unavailable: {e}")
+
+        logger.info(f"Merged {len(group)} knowledge units into {primary.id}")
     
+    def _extract_keywords(self, text: str, top_n: int = 10) -> List[str]:
+        """Extract top keywords by frequency, filtering common stopwords."""
+        stopwords = {
+            'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+            'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
+            'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+            'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
+            'this', 'that', 'these', 'those', 'it', 'its', 'he', 'she', 'they',
+            'we', 'you', 'i', 'me', 'my', 'our', 'your', 'their', 'about', 'up',
+        }
+        words = text.lower().split()
+        freq: Dict[str, int] = defaultdict(int)
+        for w in words:
+            cleaned = w.strip('.,;:!?()[]{}"\'')
+            if len(cleaned) > 2 and cleaned not in stopwords:
+                freq[cleaned] += 1
+        sorted_words = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+        return [w for w, _ in sorted_words[:top_n]]
+
     async def _extract_patterns(self) -> List[Dict[str, Any]]:
         """Extract patterns from knowledge."""
         patterns = []
-        
-        # Simple pattern extraction
         domain_counts: Dict[str, int] = defaultdict(int)
         for knowledge in self.consolidation_queue:
             domain_counts[knowledge.domain] += 1
-        
         for domain, count in domain_counts.items():
             if count > 2:
                 patterns.append({
@@ -545,31 +772,22 @@ class KnowledgeConsolidationEngine:
                     'domain': domain,
                     'count': count
                 })
-        
         return patterns
-    
+
     async def _create_generalized_skill(self, pattern: Dict[str, Any]):
-        """Create generalized skill from pattern."""
-        logger.info(f"Created generalized skill from pattern: {pattern}")
+        """Store a generalized skill extracted from knowledge patterns."""
+        skill = {
+            'id': str(uuid.uuid4()),
+            'created_at': datetime.now().isoformat(),
+            'domain': pattern.get('domain', 'unknown'),
+            'type': pattern.get('type', 'generalized'),
+            'source_count': pattern.get('source_count', pattern.get('count', 0)),
+            'principles': pattern.get('principles', []),
+            'method': pattern.get('method', 'pattern'),
+        }
+        self.generalized_skills.append(skill)
+        logger.info(f"Created generalized skill {skill['id']} for domain '{skill['domain']}'")
     
-    async def _update_embeddings(self):
-        """Update knowledge embeddings."""
-        logger.info("Updating knowledge embeddings")
-        if hasattr(self, 'knowledge_base') and self.knowledge_base:
-            for item in self.knowledge_base:
-                if not item.get('embedding'):
-                    item['embedding'] = hash(item.get('content', '')) % (2**16)
-        logger.debug("Embedding update complete")
-    
-    async def _rebuild_indices(self):
-        """Rebuild search indices."""
-        logger.info("Rebuilding search indices")
-        if hasattr(self, 'knowledge_base') and self.knowledge_base:
-            self._search_index = {}
-            for i, item in enumerate(self.knowledge_base):
-                for word in str(item.get('content', '')).lower().split():
-                    self._search_index.setdefault(word, []).append(i)
-        logger.debug("Index rebuild complete")
 
 
 # ============================================================================
@@ -1021,36 +1239,58 @@ class SelfLearningLoop:
             'registered_domains': len(self.transfer_learning.domains)
         }
     
+    async def _replay_learning_fn(self, experiences: List[Experience]) -> Dict[str, Any]:
+        """Learning function passed to MemoryReplaySystem.train_on_replay().
+
+        Runs EWC gradient updates on each replayed experience.
+        """
+        updated = 0
+        for exp in experiences:
+            if exp.outcome is not None:
+                await self.ewc.apply_gradients(exp)
+                updated += 1
+        return {'updated_params': updated}
+
     async def _experience_processing_loop(self):
-        """Background loop for processing experiences."""
+        """Background loop for processing experiences and running replay training."""
+        cycle_count = 0
         while self.running:
             try:
                 # Get batch of unprocessed experiences
                 batch = await self.experience_buffer.get_batch(batch_size=32)
-                
+
                 for experience in batch:
-                    # Process experience
                     await self._process_experience(experience)
-                    
-                    # Mark as processed
                     await self.experience_buffer.mark_processed(experience.id)
-                
-                # Wait before next batch
-                await asyncio.sleep(60)  # Check every minute
-                
+
+                # Every 5 cycles, run a memory replay training pass
+                cycle_count += 1
+                if cycle_count % 5 == 0:
+                    replay_result = await self.memory_replay.train_on_replay(
+                        self._replay_learning_fn, batch_size=32
+                    )
+                    if replay_result.get('trained'):
+                        logger.info(
+                            f"Replay training: batch={replay_result['batch_size']}, "
+                            f"result={replay_result.get('result')}"
+                        )
+
+                await asyncio.sleep(60)
+
             except (OSError, RuntimeError, PermissionError) as e:
                 logger.error(f"Error in experience processing loop: {e}")
                 await asyncio.sleep(60)
     
     async def _process_experience(self, experience: Experience):
-        """Process a single experience."""
+        """Process a single experience through EWC training and memory replay."""
         # Store in memory replay
         await self.memory_replay.store_experience(experience, experience.importance)
-        
-        # Update EWC importance if applicable
+
+        # Apply EWC gradient update for task experiences with outcomes
         if experience.type == ExperienceType.TASK and experience.outcome:
             await self.ewc.compute_parameter_importance([experience])
-        
+            await self.ewc.apply_gradients(experience)
+
         logger.debug(f"Processed experience: {experience.id}")
     
     async def _idle_monitoring_loop(self):

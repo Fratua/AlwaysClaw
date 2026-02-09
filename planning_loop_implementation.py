@@ -656,55 +656,88 @@ class HierarchicalGoalManager:
     
     def _llm_decomposition(self, goal: HARDGoal, target_level: GoalLevel,
                            llm_client) -> List[HARDGoal]:
-        """Use LLM for intelligent goal decomposition."""
-        
-        prompt = f"""
+        """Use LLM for intelligent goal decomposition with retry and validation."""
+        import re as _re
+
+        base_prompt = f"""
         Decompose this goal into actionable steps:
-        
+
         Goal: {goal.name}
         Description: {goal.description}
         Current Level: {goal.level.name}
         Target Level: {target_level.name}
-        
+
         Provide a list of subgoals with:
         - name: Short name for the subgoal
         - description: Detailed description
         - estimated_duration_minutes: Estimated time in minutes
         - dependencies: List of indices of subgoals this depends on
-        
-        Return as JSON array.
+
+        Return valid JSON array only.
         """
-        
-        try:
-            response = llm_client.generate(prompt)
-            subgoals_data = json.loads(response)
-            
-            subgoals = []
-            for i, sg_data in enumerate(subgoals_data):
-                subgoal = HARDGoal(
-                    goal_id=f"{goal.goal_id}_sub_{i}",
-                    name=sg_data['name'],
-                    description=sg_data.get('description', ''),
-                    level=GoalLevel(goal.level.value + 1),
-                    parent_id=goal.goal_id,
-                    estimated_duration=timedelta(minutes=sg_data.get('estimated_duration_minutes', 5)),
-                    priority=goal.priority,
-                    hardness=goal.hardness
-                )
-                subgoals.append(subgoal)
-            
-            # Set up dependencies
-            for i, sg_data in enumerate(subgoals_data):
-                deps = sg_data.get('dependencies', [])
-                subgoals[i].depends_on = [
-                    subgoals[d].goal_id for d in deps if 0 <= d < len(subgoals)
-                ]
-            
-            return subgoals
-            
-        except (KeyError, ValueError, TypeError) as e:
-            logger.error(f"LLM decomposition failed: {e}")
-            return self._rule_based_decomposition(goal, target_level)
+
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    prompt = base_prompt + "\n\nIMPORTANT: Return valid JSON only, no markdown or extra text."
+                else:
+                    prompt = base_prompt
+
+                response = llm_client.generate(prompt)
+
+                # Try direct JSON parse
+                try:
+                    subgoals_data = json.loads(response)
+                except json.JSONDecodeError:
+                    # Try extracting JSON array from response via regex
+                    match = _re.search(r'\[.*\]', response, _re.DOTALL)
+                    if match:
+                        subgoals_data = json.loads(match.group(0))
+                    else:
+                        raise json.JSONDecodeError("No JSON array found", response, 0)
+
+                if not isinstance(subgoals_data, list) or not subgoals_data:
+                    raise ValueError("LLM response is not a non-empty JSON array")
+
+                # Validate required fields
+                for item in subgoals_data:
+                    if 'name' not in item:
+                        raise ValueError("Subgoal missing required 'name' field")
+
+                subgoals = []
+                for i, sg_data in enumerate(subgoals_data):
+                    subgoal = HARDGoal(
+                        goal_id=f"{goal.goal_id}_sub_{i}",
+                        name=sg_data['name'],
+                        description=sg_data.get('description', ''),
+                        level=GoalLevel(goal.level.value + 1),
+                        parent_id=goal.goal_id,
+                        estimated_duration=timedelta(minutes=sg_data.get('estimated_duration_minutes', 5)),
+                        priority=goal.priority,
+                        hardness=goal.hardness
+                    )
+                    subgoals.append(subgoal)
+
+                # Set up dependencies
+                for i, sg_data in enumerate(subgoals_data):
+                    deps = sg_data.get('dependencies', [])
+                    subgoals[i].depends_on = [
+                        subgoals[d].goal_id for d in deps if 0 <= d < len(subgoals)
+                    ]
+
+                return subgoals
+
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                last_error = e
+                logger.warning(f"LLM decomposition attempt {attempt + 1}/{max_retries} failed: {e}")
+
+        # All retries failed, try regex extraction of key fields as last resort
+        logger.warning(f"All {max_retries} LLM decomposition retries failed: {last_error}")
+        logger.info("Falling back to rule-based decomposition")
+        return self._rule_based_decomposition(goal, target_level)
     
     def _rule_based_decomposition(self, goal: HARDGoal, 
                                    target_level: GoalLevel) -> List[HARDGoal]:
@@ -1116,31 +1149,43 @@ class DynamicReplanningEngine:
     
     async def _partial_regeneration(self, situation: Dict, plan: ExecutionPlan,
                                      plan_generator: Callable) -> ExecutionPlan:
-        """Regenerate part of the plan."""
-        
-        # Keep completed goals, regenerate pending ones
+        """Regenerate part of the plan. Ensures the plan_generator coroutine
+        completes before returning the new plan."""
+
         remaining_goals = situation['remaining_goals']
-        
+
         if plan_generator and remaining_goals:
-            new_partial = await plan_generator(remaining_goals)
-            
-            # Merge with completed goals
-            new_plan = plan.copy()
-            new_plan.goals = situation['completed_goals'] + new_partial.goals
-            
-            return new_plan
-        
+            # Ensure we properly await the result (handles both sync and async generators)
+            result = plan_generator(remaining_goals)
+            if asyncio.iscoroutine(result):
+                new_partial = await result
+            else:
+                new_partial = result
+
+            if new_partial and hasattr(new_partial, 'goals'):
+                # Merge with completed goals
+                new_plan = plan.copy()
+                new_plan.goals = situation['completed_goals'] + new_partial.goals
+                return new_plan
+
         return plan
-    
+
     async def _full_regeneration(self, situation: Dict, plan: ExecutionPlan,
                                   plan_generator: Callable) -> ExecutionPlan:
-        """Completely regenerate the plan."""
-        
+        """Completely regenerate the plan. Ensures the plan_generator coroutine
+        completes before returning the new plan."""
+
         remaining_goals = situation['remaining_goals']
-        
+
         if plan_generator:
-            return await plan_generator(remaining_goals)
-        
+            result = plan_generator(remaining_goals)
+            if asyncio.iscoroutine(result):
+                new_plan = await result
+            else:
+                new_plan = result
+            if new_plan and hasattr(new_plan, 'goals'):
+                return new_plan
+
         return plan
     
     async def _emergency_fallback(self, situation: Dict, plan: ExecutionPlan,
@@ -1216,45 +1261,70 @@ class ContingencyPlanner:
         return contingencies
     
     def _identify_failure_points(self, plan: ExecutionPlan) -> List[Dict]:
-        """Identify potential failure points in the plan."""
-        
+        """Identify potential failure points using heuristic risk assessment
+        based on task complexity (dependencies, resources, criticality)."""
+
         failure_points = []
-        
+
         for goal in plan.goals:
             risk_score = 0.0
             reasons = []
-            
-            # Check goal criticality
+
+            # Criticality factor (scaled by hardness level)
+            hardness_risk = {
+                HardnessLevel.CRITICAL: 0.35,
+                HardnessLevel.IMPORTANT: 0.15,
+                HardnessLevel.NICE_TO_HAVE: 0.05
+            }
+            criticality = hardness_risk.get(goal.hardness, 0.1)
+            risk_score += criticality
             if goal.hardness == HardnessLevel.CRITICAL:
-                risk_score += 0.3
                 reasons.append("critical_goal")
-            
-            # Check external dependencies
-            if goal.resource_profile.external_services:
-                risk_score += 0.2 * len(goal.resource_profile.external_services)
-                reasons.append("external_dependencies")
-            
-            # Check resource intensity
+
+            # External dependency factor (each external service adds risk)
+            ext_count = len(goal.resource_profile.external_services)
+            if ext_count > 0:
+                ext_risk = min(0.1 * ext_count, 0.4)
+                risk_score += ext_risk
+                reasons.append(f"external_dependencies({ext_count})")
+
+            # Resource intensity factor
             if goal.resource_profile.is_high_demand():
-                risk_score += 0.2
-                reasons.append("resource_intensive")
-            
-            # Check dependency count
-            if len(goal.depends_on) > 3:
                 risk_score += 0.15
-                reasons.append("high_dependency")
-            
-            if risk_score > 0.3:
+                reasons.append("resource_intensive")
+
+            # Dependency complexity factor (more deps = more fragile)
+            dep_count = len(goal.depends_on)
+            if dep_count > 0:
+                dep_risk = min(0.05 * dep_count, 0.3)
+                risk_score += dep_risk
+                if dep_count > 3:
+                    reasons.append(f"high_dependency({dep_count})")
+
+            # Duration factor (long tasks are riskier)
+            duration_hours = goal.estimated_duration.total_seconds() / 3600
+            if duration_hours > 1:
+                risk_score += min(0.1 * duration_hours, 0.2)
+                reasons.append("long_duration")
+
+            # Tight deadline factor
+            if goal.deadline:
+                time_to_deadline = (goal.deadline - datetime.now()).total_seconds()
+                if time_to_deadline > 0:
+                    slack_ratio = time_to_deadline / max(goal.estimated_duration.total_seconds(), 1)
+                    if slack_ratio < 1.5:
+                        risk_score += 0.15
+                        reasons.append("tight_deadline")
+
+            if risk_score > 0.25:
                 failure_points.append({
                     'goal_id': goal.goal_id,
-                    'risk_score': risk_score,
+                    'risk_score': min(risk_score, 1.0),
                     'reasons': reasons,
                     'goal': goal
                 })
-        
-        # Sort by risk score
+
         failure_points.sort(key=lambda p: p['risk_score'], reverse=True)
-        
         return failure_points
     
     async def _generate_contingency(self, failure_point: Dict,

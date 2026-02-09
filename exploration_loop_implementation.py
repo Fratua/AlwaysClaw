@@ -291,44 +291,65 @@ class HypothesisEngine:
         "correlation_driven"
     ]
     
-    def __init__(self, llm_client=None, knowledge_base=None, observation_store=None):
+    def __init__(self, llm_client=None, knowledge_base=None, observation_store=None,
+                 simulation_mode: bool = False):
         self.llm = llm_client
         self.kb = knowledge_base
         self.observations = observation_store
         self.hypothesis_store: Dict[str, Hypothesis] = {}
         self.config = DEFAULT_CONFIG["hypothesis_generation"]
-    
+        self.simulation_mode = simulation_mode
+
     async def generate_hypotheses(
         self,
         context: Dict[str, Any]
     ) -> List[Hypothesis]:
         """
-        Generate testable hypotheses from multiple sources
+        Generate testable hypotheses from multiple sources.
+        When not in simulation_mode, attempts LLM-based generation first.
         """
-        logger.info("Generating hypotheses...")
-        
+        logger.info("Generating hypotheses (simulation_mode=%s)...", self.simulation_mode)
+
         # Gather input sources
         recent_observations = context.get("observations", [])
         knowledge_gaps = context.get("knowledge_gaps", [])
         detected_patterns = context.get("patterns", [])
         detected_anomalies = context.get("anomalies", [])
-        
-        # Generate from each strategy
-        all_hypotheses = []
-        
-        for strategy in self.GENERATION_STRATEGIES:
+
+        # Try LLM-based generation when not in simulation mode
+        if not self.simulation_mode and self.llm:
             try:
-                strategy_hypotheses = await self._generate_with_strategy(
-                    strategy,
-                    recent_observations,
-                    knowledge_gaps,
-                    detected_patterns,
-                    detected_anomalies,
-                    context
-                )
-                all_hypotheses.extend(strategy_hypotheses)
-            except (KeyError, ValueError, RuntimeError) as e:
-                logger.warning(f"Strategy {strategy} failed: {e}")
+                llm_hypotheses = await self._llm_generate_hypotheses(context)
+                if llm_hypotheses:
+                    logger.info("Using LLM-generated hypotheses (%d)", len(llm_hypotheses))
+                    all_hypotheses = llm_hypotheses
+                else:
+                    logger.info("LLM returned no hypotheses, falling back to templates")
+                    all_hypotheses = []
+            except (KeyError, ValueError, RuntimeError, TypeError) as e:
+                logger.warning(f"LLM hypothesis generation failed: {e}, falling back to templates")
+                all_hypotheses = []
+        else:
+            if not self.simulation_mode:
+                logger.info("No LLM client available, using template-based hypothesis generation")
+            all_hypotheses = []
+
+        # Fall back to template-based generation if LLM didn't produce results
+        if not all_hypotheses:
+            # Generate from each strategy
+            for strategy in self.GENERATION_STRATEGIES:
+                try:
+                    strategy_hypotheses = await self._generate_with_strategy(
+                        strategy,
+                        recent_observations,
+                        knowledge_gaps,
+                        detected_patterns,
+                        detected_anomalies,
+                        context
+                    )
+                    all_hypotheses.extend(strategy_hypotheses)
+                except (KeyError, ValueError, RuntimeError) as e:
+                    logger.warning(f"Strategy {strategy} failed: {e}")
         
         # Score and rank
         scored_hypotheses = []
@@ -369,6 +390,47 @@ class HypothesisEngine:
         else:
             return []
     
+    async def _llm_generate_hypotheses(
+        self,
+        context: Dict[str, Any]
+    ) -> List[Hypothesis]:
+        """Use LLM to generate hypotheses based on provided context."""
+        observations = context.get("observations", [])
+        knowledge_gaps = context.get("knowledge_gaps", [])
+        patterns = context.get("patterns", [])
+        anomalies = context.get("anomalies", [])
+
+        prompt = (
+            "Based on the following system observations, generate testable hypotheses.\n\n"
+            f"Observations: {json.dumps(observations[:10], default=str)}\n"
+            f"Knowledge Gaps: {json.dumps(knowledge_gaps[:5], default=str)}\n"
+            f"Patterns: {json.dumps(patterns[:5], default=str)}\n"
+            f"Anomalies: {json.dumps(anomalies[:5], default=str)}\n\n"
+            "Return a JSON array of objects with fields: "
+            "statement, independent_variables (list), dependent_variables (list), "
+            "expected_outcome, confidence (0-1), source_strategy."
+        )
+
+        response = await self.llm.generate(prompt, temperature=self.config.get("generation_temperature", 0.7))
+
+        hypotheses_data = json.loads(response)
+        hypotheses = []
+        for item in hypotheses_data:
+            hypothesis = Hypothesis(
+                id=str(uuid.uuid4()),
+                statement=item.get("statement", ""),
+                variables={
+                    "independent": item.get("independent_variables", []),
+                    "dependent": item.get("dependent_variables", [])
+                },
+                expected_outcome=item.get("expected_outcome", ""),
+                confidence=float(item.get("confidence", 0.6)),
+                source=item.get("source_strategy", "llm_generated")
+            )
+            hypotheses.append(hypothesis)
+
+        return hypotheses
+
     async def _observation_driven_generation(
         self,
         observations: List[Dict]
@@ -764,12 +826,14 @@ class ExperimentalDesignEngine:
 
 class DataCollectionEngine:
     """
-    Multi-modal data collection during experiments
+    Multi-modal data collection during experiments.
+    Supports real system metrics collection via psutil when simulation_mode=False.
     """
-    
-    def __init__(self):
+
+    def __init__(self, simulation_mode: bool = False):
         self.config = DEFAULT_CONFIG["data_collection"]
         self.collectors: Dict[str, Any] = {}
+        self.simulation_mode = simulation_mode
     
     async def setup_collection(
         self,
@@ -805,53 +869,132 @@ class DataCollectionEngine:
         setup: Dict[str, Any],
         duration: timedelta
     ) -> Dict[str, Any]:
-        """Execute data collection for experiment duration"""
+        """Execute data collection for experiment duration.
+        Uses real system metrics when simulation_mode=False."""
         start_time = datetime.utcnow()
         collected_data = {}
-        
-        logger.info(f"Starting data collection for {duration}")
-        
-        # Simulate data collection
+
+        if self.simulation_mode:
+            logger.info(f"Starting SIMULATED data collection for {duration}")
+        else:
+            logger.info(f"Starting REAL data collection for {duration}")
+
         for var_name, collector in setup["collectors"].items():
             data_points = []
-            
-            # Generate simulated data points
             num_points = int(duration.total_seconds() / collector["interval"])
-            
-            for i in range(min(num_points, 100)):  # Limit for simulation
-                point = DataPoint(
-                    timestamp=start_time + timedelta(seconds=i * collector["interval"]),
-                    value=np.random.normal(100, 15),  # Simulated measurement
-                    source=var_name
+
+            if self.simulation_mode:
+                # Generate simulated data points
+                for i in range(min(num_points, 100)):
+                    point = DataPoint(
+                        timestamp=start_time + timedelta(seconds=i * collector["interval"]),
+                        value=np.random.normal(100, 15),
+                        source=var_name
+                    )
+                    data_points.append(point)
+            else:
+                # Collect real system metrics
+                data_points = await self._collect_real_metrics(
+                    var_name, collector, num_points, start_time
                 )
-                data_points.append(point)
-            
-            collected_data[var_name] = {
-                "points": [
-                    {
-                        "timestamp": p.timestamp.isoformat(),
-                        "value": p.value,
-                        "source": p.source
+
+            if data_points:
+                values = [p.value for p in data_points]
+                collected_data[var_name] = {
+                    "points": [
+                        {
+                            "timestamp": p.timestamp.isoformat(),
+                            "value": p.value,
+                            "source": p.source
+                        }
+                        for p in data_points
+                    ],
+                    "count": len(data_points),
+                    "statistics": {
+                        "mean": float(np.mean(values)),
+                        "std": float(np.std(values)),
+                        "min": float(min(values)),
+                        "max": float(max(values))
                     }
-                    for p in data_points
-                ],
-                "count": len(data_points),
-                "statistics": {
-                    "mean": np.mean([p.value for p in data_points]),
-                    "std": np.std([p.value for p in data_points]),
-                    "min": min(p.value for p in data_points),
-                    "max": max(p.value for p in data_points)
                 }
-            }
-        
+
         logger.info(f"Data collection complete: {len(collected_data)} variables")
-        
+
         return {
             "data": collected_data,
             "start_time": start_time.isoformat(),
             "end_time": datetime.utcnow().isoformat(),
             "duration_seconds": duration.total_seconds()
         }
+
+    async def _collect_real_metrics(
+        self,
+        var_name: str,
+        collector: Dict,
+        num_points: int,
+        start_time: datetime
+    ) -> List[DataPoint]:
+        """Collect real system metrics using psutil and log parsing."""
+        data_points = []
+        try:
+            import psutil
+        except ImportError:
+            logger.warning("psutil unavailable, falling back to simulated data for %s", var_name)
+            for i in range(min(num_points, 100)):
+                point = DataPoint(
+                    timestamp=start_time + timedelta(seconds=i * collector["interval"]),
+                    value=np.random.normal(100, 15),
+                    source=var_name
+                )
+                data_points.append(point)
+            return data_points
+
+        for i in range(min(num_points, 100)):
+            ts = datetime.utcnow()
+            value = 0.0
+
+            if "cpu" in var_name.lower():
+                value = float(psutil.cpu_percent(interval=0.1))
+            elif "memory" in var_name.lower() or "mem" in var_name.lower():
+                value = float(psutil.virtual_memory().percent)
+            elif "disk" in var_name.lower():
+                value = float(psutil.disk_usage('/').percent)
+            elif "error" in var_name.lower() or "log" in var_name.lower():
+                value = float(self._count_recent_log_errors())
+            else:
+                # Generic: collect CPU as default metric
+                value = float(psutil.cpu_percent(interval=0.1))
+
+            data_points.append(DataPoint(
+                timestamp=ts,
+                value=value,
+                source=var_name,
+                metadata={"collection_method": "psutil"}
+            ))
+
+            if i < min(num_points, 100) - 1:
+                await asyncio.sleep(min(collector["interval"], 0.5))
+
+        return data_points
+
+    @staticmethod
+    def _count_recent_log_errors() -> int:
+        """Parse recent log files for ERROR/WARNING line counts."""
+        error_count = 0
+        log_dir = Path(".")
+        log_files = list(log_dir.glob("*.log"))[:5]
+        for log_file in log_files:
+            try:
+                with open(log_file, "r", errors="replace") as f:
+                    # Read last 200 lines
+                    lines = f.readlines()[-200:]
+                for line in lines:
+                    upper = line.upper()
+                    if "ERROR" in upper or "WARNING" in upper:
+                        error_count += 1
+            except (OSError, UnicodeDecodeError):
+                pass
+        return error_count
 
 
 # =============================================================================
@@ -1325,7 +1468,7 @@ class ExplorationLoop:
     Main Exploration Loop for systematic investigation and experimentation
     """
     
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, simulation_mode: bool = False):
         if config is None:
             try:
                 from config_loader import get_config
@@ -1335,11 +1478,12 @@ class ExplorationLoop:
                 config = {}
         self.config = {**DEFAULT_CONFIG, **config}
         self.state = "initialized"
-        
+        self.simulation_mode = simulation_mode
+
         # Initialize components
-        self.hypothesis_engine = HypothesisEngine()
+        self.hypothesis_engine = HypothesisEngine(simulation_mode=simulation_mode)
         self.design_engine = ExperimentalDesignEngine()
-        self.data_collector = DataCollectionEngine()
+        self.data_collector = DataCollectionEngine(simulation_mode=simulation_mode)
         self.analysis_engine = StatisticalAnalysisEngine()
         self.validation_system = ValidationSystem()
         self.knowledge_integration = KnowledgeIntegrationEngine()

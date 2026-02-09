@@ -5,6 +5,7 @@ OpenClaw Windows 10 AI Agent Framework
 This module provides the core implementation for the Soul Evolution System.
 """
 
+import logging
 import uuid
 import json
 import hashlib
@@ -15,6 +16,8 @@ from enum import Enum, auto
 from collections import defaultdict, deque
 import sqlite3
 import os
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CORE DATA MODELS
@@ -78,38 +81,133 @@ class PersonalityDimensions:
     extraversion: float = 0.5
     agreeableness: float = 0.5
     emotional_stability: float = 0.5
-    
+
     # AI-specific dimensions
     initiative: float = 0.5
     thoroughness: float = 0.5
     adaptability: float = 0.5
     autonomy_preference: float = 0.5
     communication_style: float = 0.5
-    
+
     # Constraints
     MIN_VALUE: float = field(default=0.1, repr=False)
     MAX_VALUE: float = field(default=0.9, repr=False)
     MAX_SINGLE_CHANGE: float = field(default=0.15, repr=False)
-    
+
+    # Experience tracking and trend analysis
+    experience_history: List[Dict] = field(default_factory=list, repr=False)
+    dimension_change_history: Dict[str, List[Dict]] = field(default_factory=lambda: defaultdict(list), repr=False)
+
+    def __post_init__(self):
+        self._openai_client = None
+        try:
+            from openai_client import OpenAIClient
+            self._openai_client = OpenAIClient.get_instance()
+        except (ImportError, EnvironmentError):
+            pass
+
+    def _llm_evaluate_experience(
+        self, dimension: str, current_value: float, experience_context: str
+    ) -> Optional[float]:
+        """
+        Use GPT-5.2 to evaluate how an experience should adjust a personality dimension.
+
+        Returns a suggested delta in the range [-0.1, 0.1], or None if LLM is unavailable.
+        """
+        if not self._openai_client:
+            return None
+
+        prompt = (
+            f"You are evaluating how an experience affects an AI personality dimension.\n\n"
+            f"Dimension: {dimension}\n"
+            f"Current value: {current_value:.4f} (scale 0.1 to 0.9)\n"
+            f"Experience: {experience_context[:500]}\n\n"
+            f"Given this personality dimension at current value {current_value:.4f}, "
+            f"and this experience, what adjustment (-0.1 to 0.1) would be appropriate "
+            f"and why?\n\n"
+            f"Reply with ONLY a JSON object: {{\"delta\": <float>, \"reasoning\": \"<brief>\"}}"
+        )
+
+        try:
+            import json as _json
+            result = self._openai_client.generate(prompt, max_tokens=200)
+            parsed = _json.loads(result.strip())
+            delta = float(parsed.get('delta', 0.0))
+            # Clamp to valid range
+            return max(-0.1, min(0.1, delta))
+        except (EnvironmentError, RuntimeError, ValueError, KeyError) as e:
+            return None
+
     def evolve_dimension(self, dimension: str, delta: float, reason: str = "") -> bool:
-        """Evolve a personality dimension with safety constraints"""
+        """Evolve a personality dimension with LLM evaluation, falling back to arithmetic."""
         if not hasattr(self, dimension):
             return False
-            
+
         current = getattr(self, dimension)
-        new_value = current + delta
-        
+
+        # Try LLM-based evaluation first
+        llm_delta = self._llm_evaluate_experience(dimension, current, reason)
+        if llm_delta is not None:
+            effective_delta = llm_delta
+        else:
+            effective_delta = delta
+
+        new_value = current + effective_delta
+
         # Apply constraints
         new_value = max(self.MIN_VALUE, min(self.MAX_VALUE, new_value))
-        
+
         # Limit single change magnitude
         if abs(new_value - current) > self.MAX_SINGLE_CHANGE:
-            direction = 1 if delta > 0 else -1
+            direction = 1 if effective_delta > 0 else -1
             new_value = current + (self.MAX_SINGLE_CHANGE * direction)
-        
+
         setattr(self, dimension, round(new_value, 4))
+
+        # Record experience in history
+        record = {
+            'timestamp': datetime.now().isoformat(),
+            'dimension': dimension,
+            'old_value': current,
+            'new_value': round(new_value, 4),
+            'delta': round(new_value - current, 4),
+            'reason': reason[:200],
+            'llm_used': llm_delta is not None,
+        }
+        self.experience_history.append(record)
+        self.dimension_change_history[dimension].append(record)
+
         return True
-    
+
+    def get_dimension_trend(self, dimension: str, window: int = 20) -> Dict[str, Any]:
+        """Analyze trend of a dimension over recent changes.
+
+        Returns direction ('increasing', 'decreasing', 'stable'), average delta,
+        and drift magnitude.
+        """
+        history = self.dimension_change_history.get(dimension, [])
+        recent = history[-window:] if history else []
+        if not recent:
+            return {'direction': 'stable', 'avg_delta': 0.0, 'drift': 0.0, 'samples': 0}
+
+        deltas = [r['delta'] for r in recent]
+        avg_delta = sum(deltas) / len(deltas)
+        drift = sum(deltas)  # cumulative drift over the window
+
+        if avg_delta > 0.005:
+            direction = 'increasing'
+        elif avg_delta < -0.005:
+            direction = 'decreasing'
+        else:
+            direction = 'stable'
+
+        return {
+            'direction': direction,
+            'avg_delta': round(avg_delta, 5),
+            'drift': round(drift, 4),
+            'samples': len(recent),
+        }
+
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary"""
         return {
@@ -124,7 +222,7 @@ class PersonalityDimensions:
             'autonomy_preference': self.autonomy_preference,
             'communication_style': self.communication_style
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, float]) -> 'PersonalityDimensions':
         """Create from dictionary"""

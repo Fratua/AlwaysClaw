@@ -259,7 +259,10 @@ class MemoryManager:
             db_path=self.config.db_path,
             embedding_dimension=self.config.embedding.dimension
         )
-        self.vector_store = VectorStore(vector_config).connect()
+        vs = VectorStore(vector_config)
+        result = vs.connect()
+        # connect() should return self, but handle it if it doesn't
+        self.vector_store = result if result is not None else vs
         
         # Initialize context manager
         self.context_manager = ContextWindowManager(
@@ -786,18 +789,49 @@ class MemoryManager:
         """Promote an entry to hotter tiers."""
         try:
             if from_tier in ("warm", "cold"):
-                # Promote to Redis
+                # Promote to Redis (hot tier)
                 if self._redis_cache and self._redis_cache.available:
                     importance = entry.get("importance", 0.5)
                     ttl = int(self._redis_cache.config.default_ttl_seconds * max(importance, 0.1) * 2)
                     await self._redis_cache.set(key, entry, ttl=ttl)
+                    _tier_logger.info("Promoted %s from %s -> hot (Redis, ttl=%ds)", key, from_tier, ttl)
 
             if from_tier == "cold":
-                # Promote to SQLite (warm) -- insert a lightweight record
-                # Full vector-indexed insert is skipped here to avoid
-                # requiring an embedding; the entry will be re-indexed on the
-                # next full sync if the source file exists.
-                pass
+                # Promote to SQLite (warm tier) by inserting into memory_entries
+                if self.vector_store and self.vector_store.db:
+                    content = entry.get("content", "")
+                    metadata = entry.get("metadata", {})
+                    now = datetime.now().isoformat()
+                    entry_id = entry.get("id", key)
+                    mem_type = metadata.get("type", "semantic")
+                    source_file = metadata.get("source_file", "")
+                    importance = entry.get("importance", 0.5)
+
+                    self.vector_store.db.execute("""
+                        INSERT OR IGNORE INTO memory_entries
+                        (id, type, content, source_file, line_start, line_end,
+                         created_at, updated_at, importance_score, access_count,
+                         last_accessed, chunk_index, total_chunks)
+                        VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, 1, ?, 0, 1)
+                    """, (
+                        entry_id, mem_type, content, source_file,
+                        now, now, importance, now,
+                    ))
+
+                    # Insert embedding into the vectors table if available
+                    embedding_data = entry.get("embedding")
+                    if embedding_data is not None:
+                        import numpy as np
+                        if isinstance(embedding_data, list):
+                            embedding_data = np.array(embedding_data, dtype=np.float32)
+                        blob = embedding_data.astype(np.float32).tobytes()
+                        self.vector_store.db.execute("""
+                            INSERT OR IGNORE INTO memory_vectors (memory_id, embedding)
+                            VALUES (?, ?)
+                        """, (entry_id, blob))
+
+                    self.vector_store.db.commit()
+                    _tier_logger.info("Promoted %s from cold -> warm (SQLite)", key)
         except Exception as exc:
             _tier_logger.warning("Tier promotion error for %s: %s", key, exc)
 

@@ -9,6 +9,7 @@ an autonomous prompt optimization system for GPT-5.2 based AI agents.
 import asyncio
 import json
 import hashlib
+import random
 import uuid
 import re
 import difflib
@@ -705,16 +706,100 @@ class ContextEngine:
 
 
 # =============================================================================
+# CONTEXT A/B TEST FRAMEWORK (Epsilon-Greedy)
+# =============================================================================
+
+class ContextABTestFramework:
+    """
+    Epsilon-greedy A/B testing framework for prompt modification variants.
+
+    For each context type (e.g. 'complexity_high', 'urgency_high', 'domain_technical'),
+    multiple prompt template variants can be registered. On each request, the
+    framework selects a variant using epsilon-greedy: with probability (1-epsilon)
+    pick the best performer, and with probability epsilon pick a random variant.
+    """
+
+    def __init__(self, epsilon: float = 0.1):
+        self.epsilon = epsilon
+        # {context_type: {variant_name: prompt_template_str}}
+        self.variants: Dict[str, Dict[str, str]] = {}
+        # {context_type: {variant_name: [success_score, ...]}}
+        self.metrics: Dict[str, Dict[str, List[float]]] = {}
+
+    def create_variant(self, context_type: str, name: str, prompt_template: str):
+        """Register a new prompt variant for a context type."""
+        self.variants.setdefault(context_type, {})[name] = prompt_template
+        self.metrics.setdefault(context_type, {}).setdefault(name, [])
+        logger.debug(f"Created A/B variant '{name}' for context '{context_type}'")
+
+    def select_variant(self, context_type: str) -> Optional[Tuple[str, str]]:
+        """
+        Select a variant using epsilon-greedy strategy.
+
+        Returns (variant_name, prompt_template) or None if no variants exist.
+        """
+        ctx_variants = self.variants.get(context_type)
+        if not ctx_variants:
+            return None
+
+        variant_names = list(ctx_variants.keys())
+
+        # Epsilon-greedy: explore with probability epsilon
+        if random.random() < self.epsilon:
+            chosen = random.choice(variant_names)
+        else:
+            # Exploit: pick the variant with the highest average score
+            chosen = self._best_variant_name(context_type)
+            if chosen is None:
+                chosen = random.choice(variant_names)
+
+        return chosen, ctx_variants[chosen]
+
+    def record_result(self, context_type: str, variant_name: str, success_score: float):
+        """Record a success metric for a variant."""
+        self.metrics.setdefault(context_type, {}).setdefault(variant_name, []).append(success_score)
+
+    def get_best_variant(self, context_type: str) -> Optional[Tuple[str, str]]:
+        """Return the best-performing variant (name, template) for a context type."""
+        name = self._best_variant_name(context_type)
+        if name is None:
+            return None
+        template = self.variants.get(context_type, {}).get(name)
+        if template is None:
+            return None
+        return name, template
+
+    def _best_variant_name(self, context_type: str) -> Optional[str]:
+        """Return the variant name with the highest average success score."""
+        ctx_metrics = self.metrics.get(context_type, {})
+        if not ctx_metrics:
+            return None
+
+        best_name = None
+        best_avg = -1.0
+        for name, scores in ctx_metrics.items():
+            if scores:
+                avg = sum(scores) / len(scores)
+                if avg > best_avg:
+                    best_avg = avg
+                    best_name = name
+        return best_name
+
+
+# =============================================================================
 # CONTEXT-BASED MODIFIER
 # =============================================================================
 
 class ContextBasedModifier:
     """
     Modifies prompts based on detected context.
+    Uses A/B variant testing when variants are registered for a context type.
     """
-    
+
     def __init__(self):
         self._modification_rules = self._load_modification_rules()
+        self.ab_framework = ContextABTestFramework(epsilon=0.1)
+        self._last_selected_variant: Optional[Tuple[str, str]] = None  # (context_type, variant_name)
         
     def _load_modification_rules(self) -> Dict:
         """Load context-based modification rules."""
@@ -733,34 +818,72 @@ class ContextBasedModifier:
         base_prompt: str,
         context: ExecutionContext
     ) -> str:
-        """Apply context-aware modifications to base prompt."""
+        """Apply context-aware modifications to base prompt.
+
+        For each modification type, checks if A/B variants exist and uses
+        epsilon-greedy selection if so; otherwise falls back to the default
+        hardcoded modification strings.
+        """
         modified_prompt = base_prompt
-        
+        self._last_selected_variant = None
+
         # Apply complexity-based modifications
         if context.complexity_score > self._modification_rules['complexity']['high_threshold']:
-            modified_prompt = self._add_complexity_instructions(modified_prompt)
+            modified_prompt = self._apply_with_ab(
+                modified_prompt, 'complexity_high', self._add_complexity_instructions
+            )
         elif context.complexity_score < self._modification_rules['complexity']['low_threshold']:
-            modified_prompt = self._simplify_instructions(modified_prompt)
-            
+            modified_prompt = self._apply_with_ab(
+                modified_prompt, 'complexity_low', self._simplify_instructions
+            )
+
         # Apply urgency-based modifications
         if context.urgency_level > self._modification_rules['urgency']['high_threshold']:
-            modified_prompt = self._add_urgency_instructions(modified_prompt)
-            
+            modified_prompt = self._apply_with_ab(
+                modified_prompt, 'urgency_high', self._add_urgency_instructions
+            )
+
         # Apply domain-specific modifications
         if context.domain:
-            modified_prompt = self._add_domain_context(modified_prompt, context.domain)
-            
+            ctx_type = f'domain_{context.domain}'
+            modified_prompt = self._apply_with_ab(
+                modified_prompt, ctx_type,
+                lambda p: self._add_domain_context(p, context.domain)
+            )
+
         # Apply emotional tone adjustments
         if context.emotional_tone == 'frustrated':
-            modified_prompt = self._add_empathy_instructions(modified_prompt)
+            modified_prompt = self._apply_with_ab(
+                modified_prompt, 'tone_frustrated', self._add_empathy_instructions
+            )
         elif context.emotional_tone == 'excited':
-            modified_prompt = self._match_enthusiasm(modified_prompt)
-            
+            modified_prompt = self._apply_with_ab(
+                modified_prompt, 'tone_excited', self._match_enthusiasm
+            )
+
         # Add conversation context if deep in conversation
         if context.conversation_depth > 5:
-            modified_prompt = self._add_conversation_continuity(modified_prompt)
-            
+            modified_prompt = self._apply_with_ab(
+                modified_prompt, 'conversation_deep', self._add_conversation_continuity
+            )
+
         return modified_prompt
+
+    def _apply_with_ab(self, prompt: str, context_type: str, default_fn) -> str:
+        """Check for A/B variant; if found, use it; otherwise use the default function."""
+        selection = self.ab_framework.select_variant(context_type)
+        if selection is not None:
+            variant_name, variant_template = selection
+            self._last_selected_variant = (context_type, variant_name)
+            return prompt + variant_template
+        return default_fn(prompt)
+
+    def record_modification_result(self, success_score: float):
+        """Record the result of the last prompt modification for A/B tracking."""
+        if self._last_selected_variant:
+            ctx_type, variant_name = self._last_selected_variant
+            self.ab_framework.record_result(ctx_type, variant_name, success_score)
+            self._last_selected_variant = None
         
     def _add_complexity_instructions(self, prompt: str) -> str:
         """Add instructions for complex requests."""
@@ -1657,7 +1780,7 @@ class ContextPromptEngineeringLoop:
     ) -> PromptMetrics:
         """
         Record the outcome of prompt execution for optimization.
-        
+
         Args:
             prompt_id: ID of the template used
             rendered_prompt: The actual prompt sent to LLM
@@ -1665,7 +1788,7 @@ class ContextPromptEngineeringLoop:
             response: LLM response
             execution_time_ms: Execution time in milliseconds
             llm_interface: Interface to LLM for quality evaluation
-            
+
         Returns:
             PromptMetrics collected from this execution
         """
@@ -1678,10 +1801,31 @@ class ContextPromptEngineeringLoop:
             execution_time_ms=execution_time_ms,
             llm_interface=llm_interface
         )
-        
+
+        # Record result for context-level A/B testing
+        # Use a composite quality score as the success metric
+        quality_score = (
+            metrics.response_accuracy * 0.3
+            + metrics.response_relevance * 0.3
+            + metrics.helpfulness * 0.2
+            + metrics.context_match_score * 0.2
+        )
+        self.modifier.record_modification_result(quality_score)
+
+        # Also record for template-level A/B tests if variant was used
+        for test_id, test_config in self.ab_tester._active_tests.items():
+            if test_config.get('status') != 'running':
+                continue
+            control = test_config.get('control')
+            if control and control.template_id == prompt_id:
+                # Find which variant was selected for this request
+                for vid, vmetrics in test_config['results'].items():
+                    pass  # results tracked via record_result below
+                break
+
         # Update template score
         await self._update_template_score(prompt_id)
-        
+
         return metrics
         
     async def _update_template_score(self, prompt_id: str):

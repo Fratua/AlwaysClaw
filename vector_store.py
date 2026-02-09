@@ -72,6 +72,12 @@ class VectorStore:
             self.db.execute("SELECT vec_version()")
             return True
         except sqlite3.OperationalError:
+            logger.warning(
+                "sqlite-vec extension not found. Vector search will use "
+                "slower numpy-based cosine similarity fallback. Install "
+                "sqlite-vec for significantly faster vector search: "
+                "pip install sqlite-vec"
+            )
             return False
     
     def _init_schema(self) -> None:

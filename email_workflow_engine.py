@@ -1795,8 +1795,28 @@ class EmailWorkflowEngine:
     """
     Main entry point for the Email Workflow and Automation Engine.
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
+        # Check required optional dependencies upfront
+        missing = []
+        try:
+            import jinja2 as _j  # noqa: F401
+        except ImportError:
+            missing.append('jinja2')
+        try:
+            import apscheduler  # noqa: F401
+        except ImportError:
+            missing.append('apscheduler')
+        try:
+            import plyer  # noqa: F401
+        except ImportError:
+            missing.append('plyer')
+        if missing:
+            raise ImportError(
+                f"EmailWorkflowEngine requires the following packages: {', '.join(missing)}. "
+                f"Install with: pip install {' '.join(missing)}"
+            )
+
         self.config = config or {}
         self.rule_engine = RuleEngine()
         self.template_engine = TemplateEngine()

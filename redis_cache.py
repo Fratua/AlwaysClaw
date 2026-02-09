@@ -35,6 +35,7 @@ class RedisCache:
         self.config = config
         self._pool = None
         self._available = False
+        self._connect_error: Optional[str] = None
 
     async def connect(self) -> None:
         """Connect to Redis and create connection pool."""
@@ -57,7 +58,11 @@ class RedisCache:
             logger.info("Redis cache connected at %s:%d", self.config.host, self.config.port)
         except Exception as exc:
             self._available = False
-            logger.warning("Redis cache unavailable: %s", exc)
+            self._connect_error = str(exc)
+            logger.warning(
+                "Redis unavailable - memory system running on SQLite only. "
+                "Error: %s", exc
+            )
 
     async def disconnect(self) -> None:
         """Close the Redis connection pool."""
@@ -224,15 +229,19 @@ class RedisCache:
         except Exception as exc:
             logger.warning("Redis clear_prefix error: %s", exc)
 
-    async def health_check(self) -> bool:
-        """Ping Redis and return True if healthy."""
+    async def health_check(self) -> Dict[str, any]:
+        """Check Redis connectivity and return health status dict."""
         if not self._available:
-            return False
+            return {
+                'available': False,
+                'error': self._connect_error or 'Not connected'
+            }
         try:
             client = self._client()
             try:
-                return await client.ping()
+                await client.ping()
+                return {'available': True, 'error': None}
             finally:
                 await client.aclose()
-        except Exception:
-            return False
+        except Exception as exc:
+            return {'available': False, 'error': str(exc)}

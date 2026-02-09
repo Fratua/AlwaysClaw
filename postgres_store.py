@@ -37,6 +37,7 @@ class PostgresStore:
         self.config = config
         self._pool = None
         self._available = False
+        self._connect_error: Optional[str] = None
 
     async def connect(self) -> None:
         """Connect to PostgreSQL and create the archive table."""
@@ -75,7 +76,11 @@ class PostgresStore:
             )
         except Exception as exc:
             self._available = False
-            logger.warning("PostgreSQL cold store unavailable: %s", exc)
+            self._connect_error = str(exc)
+            logger.warning(
+                "PostgreSQL unavailable - memory system running on SQLite only. "
+                "Error: %s", exc
+            )
 
     async def disconnect(self) -> None:
         """Close the connection pool."""
@@ -264,13 +269,16 @@ class PostgresStore:
             logger.warning("PostgreSQL delete_old error: %s", exc)
             return 0
 
-    async def health_check(self) -> bool:
-        """Execute SELECT 1 to verify connectivity."""
+    async def health_check(self) -> Dict[str, any]:
+        """Execute SELECT 1 to verify connectivity, returning health status dict."""
         if not self._available:
-            return False
+            return {
+                'available': False,
+                'error': self._connect_error or 'Not connected'
+            }
         try:
             async with self._pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
-            return True
-        except Exception:
-            return False
+            return {'available': True, 'error': None}
+        except Exception as exc:
+            return {'available': False, 'error': str(exc)}

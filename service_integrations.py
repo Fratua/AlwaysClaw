@@ -22,6 +22,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class ServiceNotInitializedError(RuntimeError):
+    """Raised when a service method is called but the service failed to initialize."""
+
+    def __init__(self, service_name: str, original_error: Optional[str] = None):
+        msg = f"Service '{service_name}' is not initialized"
+        if original_error:
+            msg += f" (init error: {original_error})"
+        super().__init__(msg)
+        self.service_name = service_name
+        self.original_error = original_error
+
+
 # =============================================================================
 # DATA CLASSES
 # =============================================================================
@@ -370,13 +382,7 @@ class TwilioIntegration:
         
         try:
             logger.info(f"Making call to: {to_number}")
-            
-            # Build TwiML
-            twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="{voice}" language="{language}">{message}</Say>
-</Response>"""
-            
+
             call = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.client.make_call(to_number, message)
             )
@@ -903,33 +909,93 @@ class ServiceIntegrationManager:
     Manages all service integrations.
     Provides unified interface for external service operations.
     """
-    
+
     def __init__(self):
         self.gmail = GmailIntegration()
         self.twilio = TwilioIntegration()
         self.browser = BrowserControlIntegration()
         self.system = WindowsSystemIntegration()
-        
+
         self.services = {
             'gmail': self.gmail,
             'twilio': self.twilio,
             'browser': self.browser,
             'system': self.system
         }
-        
+
+        # Per-service initialization tracking
+        self._service_status: Dict[str, dict] = {}
+        for name in self.services:
+            self._service_status[name] = {
+                'initialized': False,
+                'error': None,
+                'timestamp': None
+            }
+
     async def initialize_all(self) -> Dict[str, bool]:
-        """Initialize all service integrations"""
+        """Initialize all service integrations, tracking status per service."""
         results = {}
-        
+
         for name, service in self.services.items():
             try:
-                results[name] = await service.initialize()
+                success = await service.initialize()
+                results[name] = success
+                self._service_status[name] = {
+                    'initialized': success,
+                    'error': None if success else 'initialize() returned False',
+                    'timestamp': datetime.now()
+                }
+                if not success:
+                    logger.warning(f"Service '{name}' initialize() returned False")
             except (OSError, ImportError, RuntimeError, ValueError) as e:
                 logger.error(f"Failed to initialize {name}: {e}")
                 results[name] = False
-        
+                self._service_status[name] = {
+                    'initialized': False,
+                    'error': str(e),
+                    'timestamp': datetime.now()
+                }
+
         return results
-    
+
+    def is_service_ready(self, service_name: str) -> bool:
+        """Check whether a service is initialized and ready."""
+        status = self._service_status.get(service_name)
+        if not status:
+            return False
+        return status['initialized']
+
+    def _require_service(self, service_name: str) -> None:
+        """Raise ServiceNotInitializedError if service is not ready."""
+        if not self.is_service_ready(service_name):
+            status = self._service_status.get(service_name, {})
+            raise ServiceNotInitializedError(
+                service_name,
+                original_error=status.get('error')
+            )
+
+    # --- Guarded convenience methods ---
+
+    async def send_email(self, **kwargs) -> 'EmailResult':
+        """Send email via Gmail, raising if not initialized."""
+        self._require_service('gmail')
+        return await self.gmail.send_email(**kwargs)
+
+    async def check_new_emails(self, **kwargs) -> list:
+        """Check new emails via Gmail, raising if not initialized."""
+        self._require_service('gmail')
+        return await self.gmail.check_new_emails(**kwargs)
+
+    async def send_sms(self, **kwargs) -> 'SMSResult':
+        """Send SMS via Twilio, raising if not initialized."""
+        self._require_service('twilio')
+        return await self.twilio.send_sms(**kwargs)
+
+    async def make_call(self, **kwargs) -> 'CallResult':
+        """Make voice call via Twilio, raising if not initialized."""
+        self._require_service('twilio')
+        return await self.twilio.make_call(**kwargs)
+
     async def execute(
         self,
         service: str,
@@ -938,35 +1004,46 @@ class ServiceIntegrationManager:
     ) -> Any:
         """
         Execute action on specified service.
-        
+
         Args:
             service: Service name
             action: Action to execute
             **kwargs: Action parameters
-            
+
         Returns:
             Action result
         """
         svc = self.services.get(service)
         if not svc:
             raise ValueError(f"Unknown service: {service}")
-        
+
+        self._require_service(service)
+
         method = getattr(svc, action, None)
         if not method:
             raise ValueError(f"Unknown action: {action} for service {service}")
-        
+
         return await method(**kwargs)
-    
+
     def get_service_status(self) -> Dict[str, Dict]:
         """Get status of all services"""
         status = {}
-        
+
         for name, service in self.services.items():
+            svc_status = self._service_status.get(name, {})
             status[name] = {
-                'initialized': getattr(service, 'authenticated', False) or 
-                              getattr(service, 'initialized', False) or
-                              getattr(service, 'browser', None) is not None,
+                'initialized': svc_status.get('initialized', False),
+                'error': svc_status.get('error'),
+                'timestamp': svc_status.get('timestamp').isoformat() if svc_status.get('timestamp') else None,
                 'type': type(service).__name__
             }
-        
+
         return status
+
+    def get_health(self) -> Dict[str, Any]:
+        """Get health status of all services."""
+        all_ok = all(s.get('initialized', False) for s in self._service_status.values())
+        return {
+            'healthy': all_ok,
+            'services': self.get_service_status()
+        }

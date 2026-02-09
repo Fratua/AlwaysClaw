@@ -31,7 +31,8 @@ class TestRedisCache:
         result = await cache.get("test_key")
         assert result is None
         assert await cache.exists("test_key") is False
-        assert await cache.health_check() is False
+        health = await cache.health_check()
+        assert health['available'] is False
 
     @pytest.mark.asyncio
     async def test_connect_graceful_failure(self):
@@ -59,7 +60,8 @@ class TestPostgresStore:
         store = PostgresStore(config)
         result = await store.retrieve("test_id")
         assert result is None
-        assert await store.health_check() is False
+        health = await store.health_check()
+        assert health['available'] is False
 
 
 class TestMemoryManagerTiering:

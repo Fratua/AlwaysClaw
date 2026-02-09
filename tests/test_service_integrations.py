@@ -121,6 +121,8 @@ class TestServiceIntegrationManager:
     async def test_execute_unknown_action(self):
         from service_integrations import ServiceIntegrationManager
         manager = ServiceIntegrationManager()
+        # Mark gmail as initialized so we can test the unknown action path
+        manager._service_status['gmail'] = {'initialized': True, 'error': None}
         # Gmail is a valid service but 'nonexistent_action' is not
         with pytest.raises(ValueError, match="Unknown action"):
             await manager.execute("gmail", "nonexistent_action")

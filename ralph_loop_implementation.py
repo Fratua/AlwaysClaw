@@ -8,7 +8,6 @@ This module provides the core implementation of the Advanced Ralph Loop architec
 
 import asyncio
 import heapq
-import pickle
 import sqlite3
 import psutil
 import uuid
@@ -739,41 +738,109 @@ class RalphPriorityQueue:
 # =============================================================================
 
 class ResourceAllocator:
-    """Manages resource allocation"""
-    
+    """Manages resource allocation with real system metrics via psutil."""
+
     def __init__(self):
         self.total_cpu = psutil.cpu_count()
         self.total_memory = psutil.virtual_memory().total
         self.allocations: Dict[str, ResourceGrant] = {}
-        
+        # Historical resource usage per task_type for better estimation
+        self._resource_history: Dict[str, Dict[str, List[float]]] = defaultdict(
+            lambda: {'cpu': [], 'memory': [], 'io': []}
+        )
+        self._history_max = 50  # Keep last N measurements per task type
+        # Snapshot IO counters at init for delta calculations
+        try:
+            self._last_io_counters = psutil.disk_io_counters()
+        except (AttributeError, RuntimeError):
+            self._last_io_counters = None
+
     def _get_available_resources(self) -> Resources:
-        """Get currently available resources"""
-        cpu_percent = psutil.cpu_percent(interval=0.1)
-        mem = psutil.virtual_memory()
-        
+        """Get currently available resources using psutil."""
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+        except (RuntimeError, OSError):
+            cpu_percent = 50.0  # Fallback
+
+        try:
+            mem = psutil.virtual_memory()
+            available_mb = int(mem.available / (1024 * 1024))
+        except (RuntimeError, OSError):
+            available_mb = 1024  # Fallback 1GB
+
+        try:
+            io = psutil.disk_io_counters()
+            if io and self._last_io_counters:
+                io_ops = (io.read_count + io.write_count) - (
+                    self._last_io_counters.read_count + self._last_io_counters.write_count
+                )
+                self._last_io_counters = io
+                io_bandwidth = max(1000 - io_ops, 100)
+            else:
+                io_bandwidth = 1000
+        except (AttributeError, RuntimeError, OSError):
+            io_bandwidth = 1000
+
         return Resources(
             cpu=self.total_cpu * (1 - cpu_percent / 100),
-            memory=int(mem.available / (1024 * 1024)),  # MB
-            io_bandwidth=1000  # Simplified
+            memory=available_mb,
+            io_bandwidth=io_bandwidth
         )
-    
+
+    def record_task_usage(self, task: Task, cpu: float, memory: int, io: int) -> None:
+        """Record actual resource usage for a completed task to improve future estimates."""
+        history = self._resource_history[task.task_type]
+        for key, val in [('cpu', cpu), ('memory', memory), ('io', io)]:
+            history[key].append(float(val))
+            if len(history[key]) > self._history_max:
+                history[key] = history[key][-self._history_max:]
+
     def _estimate_cpu(self, task: Task) -> float:
-        """Estimate CPU requirement for task"""
+        """Estimate CPU requirement using explicit value, historical average, or psutil."""
         if task.cpu_estimate:
             return task.cpu_estimate
-        return 0.1  # Default 10% of one core
-    
+        # Use historical average for this task type
+        hist = self._resource_history[task.task_type]['cpu']
+        if hist:
+            return sum(hist) / len(hist)
+        # Fallback: use current per-process CPU as a baseline
+        try:
+            proc = psutil.Process()
+            pct = proc.cpu_percent(interval=0.05)
+            return max(pct / 100.0, 0.1)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, RuntimeError, OSError):
+            return 0.1
+
     def _estimate_memory(self, task: Task) -> int:
-        """Estimate memory requirement for task"""
+        """Estimate memory requirement using explicit value, historical average, or psutil."""
         if task.memory_estimate:
             return task.memory_estimate
-        return 128  # Default 128MB
-    
+        hist = self._resource_history[task.task_type]['memory']
+        if hist:
+            return int(sum(hist) / len(hist))
+        # Fallback: use current process RSS as a baseline
+        try:
+            proc = psutil.Process()
+            rss_mb = proc.memory_info().rss / (1024 * 1024)
+            return max(int(rss_mb * 0.1), 32)  # ~10% of current RSS, min 32MB
+        except (psutil.NoSuchProcess, psutil.AccessDenied, RuntimeError, OSError):
+            return 128
+
     def _estimate_io(self, task: Task) -> int:
-        """Estimate I/O requirement for task"""
+        """Estimate I/O requirement using explicit value, historical average, or psutil."""
         if task.io_estimate:
             return task.io_estimate
-        return 10  # Default
+        hist = self._resource_history[task.task_type]['io']
+        if hist:
+            return int(sum(hist) / len(hist))
+        # Fallback: use disk IO counters to gauge current load
+        try:
+            io = psutil.disk_io_counters()
+            if io:
+                return max(int((io.read_count + io.write_count) / 1000), 10)
+        except (AttributeError, RuntimeError, OSError):
+            pass
+        return 10
     
     def _can_allocate(self, available: Resources, cpu: float, 
                       mem: int, io: int) -> bool:
@@ -918,45 +985,90 @@ class JobOrchestrator:
 # =============================================================================
 
 class PreemptionManager:
-    """Manages task preemption"""
-    
+    """Manages task preemption with state save/restore."""
+
     def __init__(self):
         self.preempted_tasks: Dict[str, PreemptedTask] = {}
-        
-    async def preempt(self, task: Task, reason: PreemptionReason) -> bool:
-        """Preempt a running task"""
+
+    def _capture_task_state(self, task: Task) -> bytes:
+        """Capture serialisable task state as JSON bytes."""
+        state = {
+            'task_id': task.id,
+            'task_type': task.task_type,
+            'priority': task.priority,
+            'layer': task.layer,
+            'data': None,
+            'preemption_count': task.preemption_count,
+            'started_at': task.started_at.isoformat() if task.started_at else None,
+            'created_at': task.created_at.isoformat() if task.created_at else None,
+        }
+        # Attempt to capture task.data (skip if not JSON-serialisable)
         try:
+            json.dumps(task.data)
+            state['data'] = task.data
+        except (TypeError, ValueError):
+            state['data'] = repr(task.data) if task.data is not None else None
+        return json.dumps(state).encode('utf-8')
+
+    def _restore_task_state(self, task: Task, checkpoint_data: bytes) -> None:
+        """Restore serialised state back onto a task."""
+        if not checkpoint_data:
+            return
+        try:
+            state = json.loads(checkpoint_data.decode('utf-8'))
+            if state.get('data') is not None:
+                task.data = state['data']
+        except (json.JSONDecodeError, UnicodeDecodeError, KeyError) as e:
+            logger.warning(f"Could not restore task state for {task.id}: {e}")
+
+    async def preempt(self, task: Task, reason: PreemptionReason) -> bool:
+        """Preempt a running task, saving its state."""
+        try:
+            checkpoint_data = self._capture_task_state(task)
+
             preempted = PreemptedTask(
                 task=task,
-                checkpoint=Checkpoint(task_id=task.id, task_type=task.task_type),
+                checkpoint=Checkpoint(
+                    task_id=task.id,
+                    task_type=task.task_type,
+                    checkpoint_data=checkpoint_data,
+                ),
                 preempted_at=datetime.now(),
                 reason=reason,
                 original_priority=task.priority
             )
-            
+
             self.preempted_tasks[task.id] = preempted
             task.preemption_count += 1
-            
+
+            logger.info(
+                f"Task {task.id} preempted (reason={reason.name}, "
+                f"preemptions={task.preemption_count})"
+            )
             return True
         except (RuntimeError, KeyError) as e:
             logger.error(f"Preemption failed: {e}")
             return False
-    
+
     async def resume(self, task_id: str) -> Optional[Task]:
-        """Resume a preempted task"""
+        """Resume a preempted task, restoring its state."""
         if task_id not in self.preempted_tasks:
             return None
-        
+
         preempted = self.preempted_tasks[task_id]
         task = preempted.task
-        
+
+        # Restore saved state
+        self._restore_task_state(task, preempted.checkpoint.checkpoint_data)
+
         # Boost priority based on wait time
         wait_seconds = (datetime.now() - preempted.preempted_at).total_seconds()
         boost = min(int(wait_seconds / 10), 20)
         task.priority = max(0, preempted.original_priority - boost)
-        
+
         del self.preempted_tasks[task_id]
-        
+        logger.info(f"Task {task_id} resumed with priority {task.priority}")
+
         return task
 
 
@@ -1003,12 +1115,68 @@ class PersistentQueueStorage:
         
         self.connection.commit()
     
+    def _task_to_json(self, task: Task) -> str:
+        """Serialise a Task to JSON, skipping non-serialisable fields like handlers."""
+        data = {
+            'id': task.id,
+            'task_type': task.task_type,
+            'priority': task.priority,
+            'layer': task.layer,
+            'created_at': task.created_at.isoformat() if task.created_at else None,
+            'started_at': task.started_at.isoformat() if task.started_at else None,
+            'preemption_count': task.preemption_count,
+            'is_io_bound': task.is_io_bound,
+            'is_cpu_intensive': task.is_cpu_intensive,
+            'requires_network': task.requires_network,
+            'allowed_paths': task.allowed_paths,
+            'deadline': task.deadline.isoformat() if task.deadline else None,
+            'estimated_duration': task.estimated_duration.total_seconds() if task.estimated_duration else None,
+            'cpu_estimate': task.cpu_estimate,
+            'memory_estimate': task.memory_estimate,
+            'io_estimate': task.io_estimate,
+        }
+        # Attempt to include task.data; skip if not JSON-serialisable
+        try:
+            json.dumps(task.data)
+            data['data'] = task.data
+        except (TypeError, ValueError):
+            data['data'] = None
+            data['_data_repr'] = repr(task.data) if task.data is not None else None
+        # Store handler reference (cannot serialise callables)
+        if task.handler:
+            data['_handler_ref'] = f"{task.handler.__module__}.{task.handler.__qualname__}" if hasattr(task.handler, '__qualname__') else str(task.handler)
+        return json.dumps(data)
+
+    def _task_from_json(self, raw: str) -> Task:
+        """Deserialise a Task from JSON."""
+        d = json.loads(raw)
+        return Task(
+            id=d.get('id', str(uuid.uuid4())),
+            task_type=d.get('task_type', ''),
+            handler=None,  # Handlers cannot be restored from JSON
+            priority=d.get('priority', PriorityLevel.P64_AGENT_LOOP),
+            layer=d.get('layer', 3),
+            deadline=datetime.fromisoformat(d['deadline']) if d.get('deadline') else None,
+            estimated_duration=timedelta(seconds=d['estimated_duration']) if d.get('estimated_duration') else timedelta(seconds=1),
+            cpu_estimate=d.get('cpu_estimate'),
+            memory_estimate=d.get('memory_estimate'),
+            io_estimate=d.get('io_estimate'),
+            data=d.get('data'),
+            created_at=datetime.fromisoformat(d['created_at']) if d.get('created_at') else datetime.now(),
+            started_at=datetime.fromisoformat(d['started_at']) if d.get('started_at') else None,
+            preemption_count=d.get('preemption_count', 0),
+            is_io_bound=d.get('is_io_bound', False),
+            is_cpu_intensive=d.get('is_cpu_intensive', False),
+            requires_network=d.get('requires_network', False),
+            allowed_paths=d.get('allowed_paths', []),
+        )
+
     async def save_task(self, ptask: PrioritizedTask):
-        """Save task to storage"""
+        """Save task to storage using JSON serialisation."""
         cursor = self.connection.cursor()
         cursor.execute('''
-            INSERT OR REPLACE INTO queue_tasks 
-            (task_id, layer, priority, sequence, created_at, task_data, 
+            INSERT OR REPLACE INTO queue_tasks
+            (task_id, layer, priority, sequence, created_at, task_data,
              deadline, estimated_duration, preemption_count, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
@@ -1017,26 +1185,30 @@ class PersistentQueueStorage:
             ptask.priority,
             ptask.sequence,
             ptask.created_at.isoformat(),
-            pickle.dumps(ptask.task),
+            self._task_to_json(ptask.task),
             ptask.deadline.isoformat() if ptask.deadline else None,
             ptask.estimated_duration.total_seconds() if ptask.estimated_duration else None,
             ptask.preemption_count,
             'pending'
         ))
         self.connection.commit()
-    
+
     async def load_all_tasks(self) -> List[PrioritizedTask]:
-        """Load all pending tasks"""
+        """Load all pending tasks using JSON deserialisation."""
         cursor = self.connection.cursor()
         cursor.execute('''
-            SELECT * FROM queue_tasks 
+            SELECT * FROM queue_tasks
             WHERE status = 'pending'
             ORDER BY layer, priority, sequence
         ''')
-        
+
         tasks = []
         for row in cursor.fetchall():
-            task = pickle.loads(row[5])
+            try:
+                task = self._task_from_json(row[5])
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                logger.warning(f"Skipping corrupted task row: {e}")
+                continue
             ptask = PrioritizedTask(
                 priority=row[2],
                 sequence=row[3],
@@ -1047,7 +1219,7 @@ class PersistentQueueStorage:
                 preemption_count=row[8]
             )
             tasks.append(ptask)
-        
+
         return tasks
     
     async def mark_completed(self, task_id: str):

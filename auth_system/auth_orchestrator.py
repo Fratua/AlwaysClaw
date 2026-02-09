@@ -108,17 +108,29 @@ class AuthenticationOrchestrator:
         )
     
     def _init_session_manager(self) -> None:
-        """Initialize session manager."""
+        """Initialize session manager. Retries once on failure, then raises."""
         try:
             self.session_manager = SessionManager(
                 session_timeout=getattr(self.config, 'session_timeout', 3600)
             )
         except (TypeError, AttributeError) as e:
-            self.session_manager = {
-                'sessions': {},
-                'timeout': getattr(self.config, 'session_timeout', 3600)
-            }
-            logger.warning(f"Using dict-based session manager fallback: {e}")
+            logger.critical(
+                f"SessionManager initialization failed: {e}. Attempting re-initialization..."
+            )
+            # One retry attempt
+            try:
+                self.session_manager = SessionManager(
+                    session_timeout=getattr(self.config, 'session_timeout', 3600)
+                )
+                logger.info("SessionManager re-initialization succeeded on retry")
+            except (TypeError, AttributeError) as retry_err:
+                logger.critical(
+                    f"SessionManager re-initialization also failed: {retry_err}. "
+                    "Cannot proceed without a functional session manager."
+                )
+                raise RuntimeError(
+                    f"SessionManager initialization failed after retry: {retry_err}"
+                ) from retry_err
     
     def _init_credential_vault(self) -> None:
         """Initialize credential vault."""

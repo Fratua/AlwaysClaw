@@ -15,7 +15,10 @@ from typing import Dict, List, Optional, Deque, Any, Tuple
 from collections import deque
 from datetime import datetime
 from enum import Enum
+import logging
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -91,6 +94,84 @@ class FeatureEncoder:
 
         return encoded
 
+    def train(self, states: List[State], learning_rate: float = 0.01) -> Dict[str, float]:
+        """
+        Train the feature encoder using a PCA-like update.
+        Adjusts the projection matrix so its columns align with the
+        principal components of the observed state data.
+        """
+        if len(states) < 2:
+            return {'loss': 0.0, 'updated': False}
+
+        # Build data matrix from raw features
+        raw_vectors = []
+        for s in states:
+            raw = np.array(s.features, dtype=np.float64).flatten()
+            raw_vectors.append(raw)
+
+        data = np.array(raw_vectors)  # (N, input_dim)
+        input_dim = data.shape[1]
+
+        # Ensure projection is initialised for this input_dim
+        if not hasattr(self, '_proj_w') or self._proj_w.shape[0] != input_dim:
+            rng = np.random.RandomState(seed=42)
+            self._proj_w = rng.randn(input_dim, self.feature_dim) * np.sqrt(2.0 / input_dim)
+            self._proj_b = rng.randn(self.feature_dim) * 0.01
+
+        # Centre the data
+        mean = data.mean(axis=0)
+        centred = data - mean
+
+        # Compute covariance and its top-k eigenvectors (PCA components)
+        cov = centred.T @ centred / max(len(centred) - 1, 1)  # (input_dim, input_dim)
+        k = min(self.feature_dim, input_dim, len(states))
+        try:
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+        except np.linalg.LinAlgError:
+            logger.warning("Eigendecomposition failed in feature encoder training")
+            return {'loss': 0.0, 'updated': False}
+
+        # Take the top-k eigenvectors (eigh returns ascending order)
+        top_indices = np.argsort(eigenvalues)[::-1][:k]
+        pca_components = eigenvectors[:, top_indices]  # (input_dim, k)
+
+        # Interpolate current projection towards PCA components
+        target_w = np.zeros_like(self._proj_w)
+        target_w[:, :k] = pca_components * np.sqrt(2.0 / input_dim)
+
+        # Reconstruction loss before update
+        projected = centred @ self._proj_w
+        reconstructed = projected @ self._proj_w.T
+        loss_before = float(np.mean((centred - reconstructed) ** 2))
+
+        # Gradient step: move projection towards PCA basis
+        self._proj_w += learning_rate * (target_w - self._proj_w)
+
+        # Update bias towards data mean projection
+        target_b = -mean @ self._proj_w
+        self._proj_b += learning_rate * (target_b - self._proj_b)
+
+        # Reconstruction loss after update
+        projected_after = centred @ self._proj_w
+        reconstructed_after = projected_after @ self._proj_w.T
+        loss_after = float(np.mean((centred - reconstructed_after) ** 2))
+
+        logger.debug(
+            "FeatureEncoder train: loss %.4f -> %.4f (N=%d)",
+            loss_before, loss_after, len(states)
+        )
+
+        return {
+            'loss_before': loss_before,
+            'loss_after': loss_after,
+            'loss': loss_after,
+            'updated': True,
+            'n_samples': len(states),
+            'explained_variance_ratio': float(
+                eigenvalues[top_indices].sum() / max(eigenvalues.sum(), 1e-12)
+            ),
+        }
+
 
 class ForwardDynamicsModel:
     """
@@ -123,18 +204,106 @@ class ForwardDynamicsModel:
 
         return prediction
     
+    def train(self, state_action_pairs: List[Tuple[np.ndarray, Action, np.ndarray]],
+              learning_rate: float = 0.001, epochs: int = 5) -> Dict[str, float]:
+        """
+        Train the forward dynamics model using gradient descent on
+        state-action -> next-state prediction pairs.
+
+        Args:
+            state_action_pairs: list of (state_features, action, next_state_features)
+            learning_rate: step size for weight updates
+            epochs: number of passes over the data
+        Returns:
+            dict with training statistics
+        """
+        if len(state_action_pairs) < 2:
+            return {'loss': 0.0, 'updated': False}
+
+        # Ensure weights are initialised for the right input size
+        sample_input = np.concatenate([
+            state_action_pairs[0][0],
+            self._encode_action(state_action_pairs[0][1])
+        ])
+        input_size = len(sample_input)
+        hidden_size = 16
+
+        if not hasattr(self, '_w1') or self._w1.shape[0] != input_size:
+            self._w1 = np.random.randn(input_size, hidden_size) * 0.1
+            self._b1 = np.zeros(hidden_size)
+            self._w2 = np.random.randn(hidden_size, self.feature_dim) * 0.1
+            self._b2 = np.zeros(self.feature_dim)
+
+        total_loss_start = 0.0
+        total_loss_end = 0.0
+
+        for epoch in range(epochs):
+            epoch_loss = 0.0
+            # Shuffle data each epoch
+            indices = np.random.permutation(len(state_action_pairs))
+
+            for idx in indices:
+                state_feat, action, next_feat_target = state_action_pairs[idx]
+                action_enc = self._encode_action(action)
+                x = np.concatenate([state_feat, action_enc])
+
+                # --- Forward pass ---
+                z1 = x @ self._w1 + self._b1              # (hidden_size,)
+                h = np.tanh(z1)                             # (hidden_size,)
+                prediction = h @ self._w2 + self._b2       # (feature_dim,)
+
+                # --- Loss: 0.5 * MSE ---
+                error = prediction - next_feat_target       # (feature_dim,)
+                loss = 0.5 * np.mean(error ** 2)
+                epoch_loss += loss
+
+                # --- Backward pass ---
+                d_pred = error / self.feature_dim           # (feature_dim,)
+                d_w2 = np.outer(h, d_pred)                  # (hidden, feature_dim)
+                d_b2 = d_pred                               # (feature_dim,)
+                d_h = d_pred @ self._w2.T                   # (hidden_size,)
+                d_z1 = d_h * (1 - h ** 2)                   # tanh derivative
+                d_w1 = np.outer(x, d_z1)                    # (input, hidden)
+                d_b1 = d_z1                                 # (hidden_size,)
+
+                # --- Gradient step ---
+                self._w2 -= learning_rate * d_w2
+                self._b2 -= learning_rate * d_b2
+                self._w1 -= learning_rate * d_w1
+                self._b1 -= learning_rate * d_b1
+
+            avg_loss = epoch_loss / len(state_action_pairs)
+            if epoch == 0:
+                total_loss_start = avg_loss
+            if epoch == epochs - 1:
+                total_loss_end = avg_loss
+
+        logger.debug(
+            "ForwardDynamicsModel train: loss %.6f -> %.6f (%d epochs, %d samples)",
+            total_loss_start, total_loss_end, epochs, len(state_action_pairs)
+        )
+
+        return {
+            'loss_start': float(total_loss_start),
+            'loss_end': float(total_loss_end),
+            'loss': float(total_loss_end),
+            'updated': True,
+            'epochs': epochs,
+            'n_samples': len(state_action_pairs),
+        }
+
     def _encode_action(self, action: Action) -> np.ndarray:
         """Encode action into feature vector."""
         # Simple hash-based encoding
         action_hash = hash(action.action_type) % self.feature_dim
         encoding = np.zeros(self.feature_dim)
         encoding[action_hash] = 1.0
-        
+
         # Add parameter influence
         for key, value in action.parameters.items():
             param_hash = hash(f"{key}:{value}") % self.feature_dim
             encoding[param_hash] = 0.5
-        
+
         return encoding
 
 
@@ -171,13 +340,21 @@ class IntrinsicCuriosityModule:
     as an intrinsic reward signal.
     """
     
+    MIN_TRAINING_SAMPLES = 100
+    MIN_TRAINING_ITERATIONS = 3
+
     def __init__(self, feature_dim: int = 64):
         self.feature_dim = feature_dim
         self.forward_model = ForwardDynamicsModel(feature_dim)
         self.inverse_model = InverseDynamicsModel()
         self.feature_encoder = FeatureEncoder(feature_dim)
         self.prediction_history: Deque[Dict] = deque(maxlen=500)
-        
+
+        # Training buffer: stores (state, action, next_state) transitions
+        self.training_buffer: Deque[Tuple[State, Action, State]] = deque(maxlen=5000)
+        self.training_iterations: int = 0
+        self.training_log: List[Dict[str, Any]] = []
+
         # Statistics for normalization
         self.error_mean = 0.5
         self.error_std = 0.2
@@ -218,7 +395,10 @@ class IntrinsicCuriosityModule:
             'prediction_error': float(prediction_error),
             'timestamp': datetime.now()
         })
-        
+
+        # Collect transition for training buffer
+        self.training_buffer.append((state, action, next_state))
+
         # Scale and return intrinsic reward
         return self._scale_reward(prediction_error)
     
@@ -269,8 +449,106 @@ class IntrinsicCuriosityModule:
         # Novelty is inverse of average similarity
         avg_similarity = np.mean(similarities)
         novelty = 1.0 - avg_similarity
-        
+
         return float(novelty)
+
+    @property
+    def is_trained(self) -> bool:
+        """Returns True only after minimum training iterations have been completed."""
+        return self.training_iterations >= self.MIN_TRAINING_ITERATIONS
+
+    def train(self, min_samples: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Train both the feature encoder and forward dynamics model using
+        the collected training buffer.
+
+        Training only proceeds when the buffer contains at least
+        ``min_samples`` transitions (default: MIN_TRAINING_SAMPLES).
+
+        Returns:
+            dict with training results from both sub-models and overall stats.
+        """
+        min_samples = min_samples or self.MIN_TRAINING_SAMPLES
+        buffer_size = len(self.training_buffer)
+
+        if buffer_size < min_samples:
+            logger.debug(
+                "Training skipped: buffer has %d samples, need %d",
+                buffer_size, min_samples,
+            )
+            return {
+                'trained': False,
+                'reason': f'insufficient data ({buffer_size}/{min_samples})',
+                'buffer_size': buffer_size,
+            }
+
+        transitions = list(self.training_buffer)
+
+        # --- 1. Train feature encoder (PCA-like update) ---
+        all_states = []
+        for state, _action, next_state in transitions:
+            all_states.append(state)
+            all_states.append(next_state)
+
+        encoder_result = self.feature_encoder.train(all_states)
+
+        # --- 2. Prepare encoded pairs for forward model ---
+        state_action_pairs: List[Tuple[np.ndarray, Action, np.ndarray]] = []
+        for state, action, next_state in transitions:
+            state_feat = self.feature_encoder.encode(state)
+            next_feat = self.feature_encoder.encode(next_state)
+            state_action_pairs.append((state_feat, action, next_feat))
+
+        forward_result = self.forward_model.train(state_action_pairs)
+
+        # --- 3. Update bookkeeping ---
+        self.training_iterations += 1
+
+        # Compute curiosity score statistics over recent predictions
+        curiosity_stats = self.get_curiosity_stats()
+
+        training_entry = {
+            'iteration': self.training_iterations,
+            'timestamp': datetime.now().isoformat(),
+            'buffer_size': buffer_size,
+            'encoder': encoder_result,
+            'forward_model': forward_result,
+            'curiosity_stats': curiosity_stats,
+        }
+        self.training_log.append(training_entry)
+
+        logger.info(
+            "ICM training iteration %d complete: encoder_loss=%.4f, "
+            "forward_loss=%.4f, buffer=%d, curiosity_mean=%.4f",
+            self.training_iterations,
+            encoder_result.get('loss', 0.0),
+            forward_result.get('loss', 0.0),
+            buffer_size,
+            curiosity_stats.get('mean', 0.0),
+        )
+
+        return {
+            'trained': True,
+            'iteration': self.training_iterations,
+            'is_trained': self.is_trained,
+            'encoder': encoder_result,
+            'forward_model': forward_result,
+            'curiosity_stats': curiosity_stats,
+        }
+
+    def get_curiosity_stats(self) -> Dict[str, float]:
+        """Compute statistics over recent curiosity (prediction error) scores."""
+        if not self.prediction_history:
+            return {'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0, 'count': 0}
+
+        errors = [p['prediction_error'] for p in self.prediction_history]
+        return {
+            'mean': float(np.mean(errors)),
+            'std': float(np.std(errors)),
+            'min': float(np.min(errors)),
+            'max': float(np.max(errors)),
+            'count': len(errors),
+        }
 
 
 class ExplorationStrategy(ABC):
@@ -472,31 +750,40 @@ def get_exploration_manager(feature_dim: int = 64) -> ExplorationStrategyManager
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+
     # Example usage
     icm = IntrinsicCuriosityModule()
-    
-    state = State(
-        id="state_1",
-        features=np.random.randn(100)
-    )
-    
-    action = Action(
-        id="action_1",
-        action_type="explore",
-        parameters={'direction': 'north'}
-    )
-    
-    next_state = State(
-        id="state_2",
-        features=np.random.randn(100)
-    )
-    
-    reward = icm.calculate_intrinsic_reward(state, action, next_state)
-    print(f"Intrinsic reward: {reward:.4f}")
-    
+    print(f"is_trained (before): {icm.is_trained}")
+
+    # Collect transitions into the training buffer
+    action_types = ['explore', 'analyze', 'create', 'query', 'execute']
+    for i in range(120):
+        state = State(id=f"s_{i}", features=np.random.randn(100))
+        action = Action(
+            id=f"a_{i}",
+            action_type=action_types[i % len(action_types)],
+            parameters={'step': i},
+        )
+        next_state = State(id=f"s_{i+1}", features=np.random.randn(100))
+        reward = icm.calculate_intrinsic_reward(state, action, next_state)
+
+    print(f"Buffer size: {len(icm.training_buffer)}")
+
+    # Train until is_trained becomes True
+    for _ in range(icm.MIN_TRAINING_ITERATIONS):
+        result = icm.train()
+        print(f"Train iteration {result.get('iteration', '?')}: "
+              f"encoder_loss={result.get('encoder', {}).get('loss', 0):.4f}, "
+              f"forward_loss={result.get('forward_model', {}).get('loss', 0):.6f}")
+
+    print(f"is_trained (after): {icm.is_trained}")
+    stats = icm.get_curiosity_stats()
+    print(f"Curiosity stats: mean={stats['mean']:.4f}, std={stats['std']:.4f}")
+
     # Test exploration manager
     manager = ExplorationStrategyManager(icm)
-    
+
     context = ExplorationContext(
         environment_novelty=0.8,
         knowledge_coverage=0.3,
@@ -506,7 +793,7 @@ if __name__ == "__main__":
             Action(id="a3", action_type="create")
         ]
     )
-    
+
     selected = manager.select_exploration_action(context)
     if selected:
         print(f"Selected action: {selected.action_type}")

@@ -17,6 +17,9 @@ from typing import Dict, List, Optional, Any, Callable, Tuple
 from enum import Enum, auto
 from collections import deque
 import sqlite3
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -384,23 +387,115 @@ class StateTransitionManager:
 # ============================================================================
 
 class DialogueManager:
-    """Main dialogue management coordinator"""
-    
-    def __init__(self, state_machine: DialogueStateMachine):
+    """Main dialogue management coordinator with LLM-powered NLU"""
+
+    INTENT_TYPES = [
+        'command', 'question', 'confirmation', 'denial',
+        'greeting', 'farewell', 'clarification', 'correction',
+        'informational', 'emotional', 'unknown'
+    ]
+
+    def __init__(self, state_machine: DialogueStateMachine, llm_client=None):
         self.state_machine = state_machine
         self.transition_manager = StateTransitionManager()
         self.current_state: Optional[DialogueState] = None
-        
+        self.llm_client = llm_client
+
     async def transition_to(self, state: DialogueState, target_state: str, context: Dict = None) -> DialogueState:
         context = context or {}
         return await self.transition_manager.execute_transition(state, target_state, context)
-        
+
     def get_current_state(self) -> Optional[DialogueState]:
         return self.current_state
-        
+
     def is_valid_transition(self, from_state: str, to_state: str) -> bool:
         is_valid, _ = self.transition_manager.validate_transition(from_state, to_state, {})
         return is_valid
+
+    async def _classify_intent(self, utterance: str) -> Dict[str, Any]:
+        """Classify user intent using GPT. Falls back to rule-based on failure."""
+        if self.llm_client:
+            try:
+                prompt = (
+                    f"Classify the following user utterance into one of these intents: "
+                    f"{', '.join(self.INTENT_TYPES)}.\n\n"
+                    f"Utterance: \"{utterance}\"\n\n"
+                    f"Return JSON with fields: intent, confidence (0-1), entities (list)."
+                )
+                response = await self.llm_client.generate(prompt, temperature=0.2, max_tokens=150)
+                import json as _json
+                result = _json.loads(response)
+                if 'intent' in result:
+                    logger.info("LLM intent classification: %s (%.2f)",
+                                result['intent'], result.get('confidence', 0.0))
+                    return {
+                        'intent': result['intent'],
+                        'confidence': float(result.get('confidence', 0.7)),
+                        'entities': result.get('entities', []),
+                        'source': 'llm'
+                    }
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning("LLM intent classification failed: %s", e)
+
+        # Rule-based fallback
+        return self._rule_based_classify_intent(utterance)
+
+    def _rule_based_classify_intent(self, utterance: str) -> Dict[str, Any]:
+        """Simple rule-based intent classification fallback."""
+        lower = utterance.lower().strip()
+        if any(w in lower for w in ['hello', 'hi', 'hey', 'good morning']):
+            return {'intent': 'greeting', 'confidence': 0.85, 'entities': [], 'source': 'rules'}
+        if any(w in lower for w in ['bye', 'goodbye', 'see you']):
+            return {'intent': 'farewell', 'confidence': 0.85, 'entities': [], 'source': 'rules'}
+        if any(w in lower for w in ['yes', 'yeah', 'correct', 'right', 'sure']):
+            return {'intent': 'confirmation', 'confidence': 0.8, 'entities': [], 'source': 'rules'}
+        if any(w in lower for w in ['no', 'nope', 'wrong', 'not']):
+            return {'intent': 'denial', 'confidence': 0.8, 'entities': [], 'source': 'rules'}
+        if lower.endswith('?') or any(w in lower for w in ['what', 'how', 'why', 'when', 'where', 'who']):
+            return {'intent': 'question', 'confidence': 0.7, 'entities': [], 'source': 'rules'}
+        if any(w in lower for w in ['open', 'run', 'start', 'execute', 'create', 'send']):
+            return {'intent': 'command', 'confidence': 0.7, 'entities': [], 'source': 'rules'}
+        return {'intent': 'unknown', 'confidence': 0.3, 'entities': [], 'source': 'rules'}
+
+    async def _generate_response(self, utterance: str, intent: Dict[str, Any],
+                                  context: Optional[Dict] = None) -> str:
+        """Generate a contextual response using LLM. Falls back to templates."""
+        if self.llm_client:
+            try:
+                context_str = ""
+                if context:
+                    context_str = f"\nConversation Context: {json.dumps(context, default=str)[:500]}"
+
+                prompt = (
+                    f"You are a helpful AI assistant in a natural conversation.\n"
+                    f"User said: \"{utterance}\"\n"
+                    f"Detected intent: {intent.get('intent', 'unknown')}{context_str}\n\n"
+                    f"Respond naturally and concisely."
+                )
+                response = await self.llm_client.generate(prompt, temperature=0.7, max_tokens=300)
+                if response and response.strip():
+                    logger.info("LLM response generated for intent '%s'", intent.get('intent'))
+                    return response.strip()
+            except (ValueError, TypeError, RuntimeError) as e:
+                logger.warning("LLM response generation failed: %s", e)
+
+        # Template-based fallback
+        return self._template_response(intent)
+
+    @staticmethod
+    def _template_response(intent: Dict[str, Any]) -> str:
+        """Generate a template-based response as fallback."""
+        templates = {
+            'greeting': "Hello! How can I help you today?",
+            'farewell': "Goodbye! Have a great day.",
+            'confirmation': "Got it, proceeding.",
+            'denial': "Understood. What would you like instead?",
+            'question': "That's a good question. Let me look into that for you.",
+            'command': "I'll take care of that right away.",
+            'clarification': "Could you tell me more about what you mean?",
+            'correction': "I apologize for the misunderstanding. Please go ahead.",
+        }
+        return templates.get(intent.get('intent', ''), "I understand. How can I help with that?")
 
 
 # ============================================================================
@@ -1510,7 +1605,7 @@ class ConversationalAISystem:
 
         # Dialogue management
         self.state_machine = DialogueStateMachine()
-        self.dialogue_manager = DialogueManager(self.state_machine)
+        self.dialogue_manager = DialogueManager(self.state_machine, llm_client=self.llm)
         self.turn_manager = TurnTakingManager()
 
         # Context and intent
@@ -1556,43 +1651,58 @@ class ConversationalAISystem:
         self.is_running = True
         
     async def process_user_input(self, user_input: str) -> str:
-        """Process user input and generate response"""
-        
+        """Process user input and generate response.
+        Uses LLM for intent classification and response generation when available,
+        falling back to rule-based/template approaches."""
+
         if not self.current_state:
             raise RuntimeError("Conversation not started")
-            
+
         # Update state
         self.current_state.user_input_buffer = user_input
         self.current_state = await self.dialogue_manager.transition_to(
             self.current_state, 'PROCESSING'
         )
-        
+
         # Load context
         context = await self.context_manager.load_context(
             self.current_state.user_id,
             self.current_state.session_id
         )
-        
-        # Recognize intent
+
+        # Step 1: Classify intent (LLM-first, rule-based fallback)
+        classified_intent = await self.dialogue_manager._classify_intent(user_input)
+
+        # Step 2: Also run traditional intent recognition for enrichment
         intent = await self.intent_engine.recognize_intent(
             user_input,
             context,
             self.current_state
         )
-        
-        self.current_state.current_intent = {
-            'category': intent.category.value,
-            'primary_intent': intent.primary_intent,
-            'confidence': intent.confidence
-        }
-        
+
+        # Merge: prefer LLM classification if higher confidence
+        if classified_intent.get('confidence', 0) > intent.confidence:
+            self.current_state.current_intent = {
+                'category': classified_intent.get('intent', 'unknown'),
+                'primary_intent': classified_intent.get('intent', 'unknown'),
+                'confidence': classified_intent.get('confidence', 0.5),
+                'source': classified_intent.get('source', 'unknown')
+            }
+        else:
+            self.current_state.current_intent = {
+                'category': intent.category.value,
+                'primary_intent': intent.primary_intent,
+                'confidence': intent.confidence,
+                'source': 'intent_engine'
+            }
+
         # Check for repair
         repair_trigger = await self.repair_manager.detect_need_for_repair(
             user_input,
             intent,
             self.current_state
         )
-        
+
         if repair_trigger:
             repair_response = await self.repair_manager.initiate_repair(
                 repair_trigger,
@@ -1601,10 +1711,15 @@ class ConversationalAISystem:
                 self.current_state
             )
             return repair_response
-            
-        # Generate response
-        response = await self._generate_response(intent, context, self.current_state)
-        
+
+        # Step 3: Generate response (LLM-first, template fallback)
+        context_dict = context.to_dict() if hasattr(context, 'to_dict') else {}
+        response = await self.dialogue_manager._generate_response(
+            user_input,
+            self.current_state.current_intent,
+            context=context_dict
+        )
+
         # Update context
         await self.context_manager.update_context(
             context,
@@ -1612,42 +1727,16 @@ class ConversationalAISystem:
             response,
             intent=self.current_state.current_intent
         )
-        
+
         # Update state
         self.current_state = await self.dialogue_manager.transition_to(
             self.current_state, 'SPEAKING'
         )
         self.current_state.agent_response_buffer = response
         self.current_state.turn_number += 1
-        
+
         return response
         
-    async def _generate_response(
-        self,
-        intent: Intent,
-        context: ConversationContext,
-        dialogue_state: DialogueState
-    ) -> str:
-        """Generate response using LLM or fallback"""
-        
-        if self.llm:
-            context_str = self.context_manager.get_context_for_llm(context)
-            
-            prompt = f"""You are a helpful AI assistant engaged in a natural voice conversation.
-
-Conversation Context:
-{context_str}
-
-User Intent: {intent.primary_intent}
-User Message: {dialogue_state.user_input_buffer}
-
-Respond naturally and conversationally. Keep responses concise but informative."""
-
-            return await self.llm.generate(prompt, temperature=0.7, max_tokens=300)
-        else:
-            # Fallback response
-            return f"I understood you want to {intent.primary_intent}. How can I help with that?"
-            
     def get_state(self) -> Optional[DialogueState]:
         """Get current dialogue state"""
         return self.current_state
