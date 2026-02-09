@@ -329,7 +329,7 @@ class MemoryManager:
             
             print(f"Indexed {len(chunks)} chunks from {file_path.name}")
             
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"Failed to index {file_path}: {e}")
     
     # Public API

@@ -86,7 +86,7 @@ class FeedbackCollectionSystem:
         for handler in handlers:
             try:
                 handler(feedback)
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 print(f"Error in feedback handler: {e}")
                 
         self._update_profile_with_feedback(feedback)

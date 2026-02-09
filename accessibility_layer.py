@@ -199,7 +199,7 @@ class ScreenReaderIntegration:
             
             return True
             
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             logger.error(f"Failed to initialize screen reader: {e}")
             return False
     
@@ -216,7 +216,7 @@ class ScreenReaderIntegration:
             # Placeholder - check Windows registry for default
             return ScreenReaderType.SYSTEM
             
-        except Exception as e:
+        except (OSError, ImportError) as e:
             logger.error(f"Error detecting screen reader: {e}")
             return ScreenReaderType.NONE
     
@@ -234,7 +234,7 @@ class ScreenReaderIntegration:
             
             return False
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to connect to screen reader: {e}")
             return False
     
@@ -246,7 +246,7 @@ class ScreenReaderIntegration:
             # self.reader_handle = nvda_client.initialize()
             logger.info("Connected to NVDA")
             return True
-        except Exception as e:
+        except (OSError, ImportError, AttributeError) as e:
             logger.error(f"NVDA connection failed: {e}")
             return False
     
@@ -258,7 +258,7 @@ class ScreenReaderIntegration:
             # self.reader_handle = jaws_client.initialize()
             logger.info("Connected to JAWS")
             return True
-        except Exception as e:
+        except (OSError, ImportError, AttributeError) as e:
             logger.error(f"JAWS connection failed: {e}")
             return False
     
@@ -269,7 +269,7 @@ class ScreenReaderIntegration:
             # Use UI Automation to interact with Narrator
             logger.info("Connected to Narrator")
             return True
-        except Exception as e:
+        except (OSError, ImportError, AttributeError) as e:
             logger.error(f"Narrator connection failed: {e}")
             return False
     
@@ -280,7 +280,7 @@ class ScreenReaderIntegration:
             # Use Windows UI Automation API
             logger.info("Connected to system accessibility")
             return True
-        except Exception as e:
+        except (OSError, ImportError, AttributeError) as e:
             logger.error(f"System accessibility connection failed: {e}")
             return False
     
@@ -328,7 +328,9 @@ class ScreenReaderIntegration:
                 elif self.active_reader == ScreenReaderType.SYSTEM:
                     await self._announce_system(announcement)
                 
-            except Exception as e:
+            except asyncio.CancelledError:
+                raise
+            except (OSError, AttributeError) as e:
                 logger.error(f"Error processing announcement: {e}")
     
     async def _announce_nvda(self, announcement: Dict) -> None:
@@ -338,7 +340,7 @@ class ScreenReaderIntegration:
             # import speech
             # speech.speakMessage(announcement['message'])
             logger.debug(f"NVDA: {announcement['message']}")
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             logger.error(f"NVDA announcement failed: {e}")
     
     async def _announce_jaws(self, announcement: Dict) -> None:
@@ -347,7 +349,7 @@ class ScreenReaderIntegration:
             # In production:
             # Use JAWS COM API
             logger.debug(f"JAWS: {announcement['message']}")
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             logger.error(f"JAWS announcement failed: {e}")
     
     async def _announce_narrator(self, announcement: Dict) -> None:
@@ -356,7 +358,7 @@ class ScreenReaderIntegration:
             # In production:
             # Use Windows UI Automation
             logger.debug(f"Narrator: {announcement['message']}")
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             logger.error(f"Narrator announcement failed: {e}")
     
     async def _announce_system(self, announcement: Dict) -> None:
@@ -365,7 +367,7 @@ class ScreenReaderIntegration:
             # In production:
             # Use Windows Text-to-Speech
             logger.debug(f"System: {announcement['message']}")
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             logger.error(f"System announcement failed: {e}")
     
     def _format_for_screen_reader(self, message: str) -> str:
@@ -453,13 +455,13 @@ class ScreenReaderIntegration:
                     import win32com.client
                     jaws = win32com.client.Dispatch("FreedomSci.JawsApi")
                     jaws.StopSpeech()
-                except (ImportError, Exception):
+                except (ImportError, OSError, RuntimeError):
                     logger.debug("JAWS COM API not available - silence is a no-op")
             elif self.active_reader == ScreenReaderType.NARRATOR:
                 logger.debug("Narrator silence not directly controllable via API")
             else:
                 logger.debug(f"No silence implementation for reader: {self.active_reader}")
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             logger.error(f"Failed to silence screen reader: {e}")
 
 
@@ -998,7 +1000,7 @@ class AccessibilityManager:
             logger.info("Accessibility manager initialized")
             return True
             
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             logger.error(f"Failed to initialize accessibility: {e}")
             return False
     
@@ -1045,7 +1047,7 @@ class AccessibilityManager:
         for callback in self.announcement_callbacks:
             try:
                 callback(message, priority)
-            except Exception as e:
+            except (ValueError, RuntimeError, OSError) as e:
                 logger.error(f"Announcement callback error: {e}")
     
     def register_announcement_callback(self, callback: Callable) -> None:

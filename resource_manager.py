@@ -244,8 +244,8 @@ class MemoryManager:
         for callback in self._callbacks:
             try:
                 callback(level, stats)
-            except Exception as e:
-                print(f"Callback error: {e}")
+            except (RuntimeError, ValueError, TypeError) as e:
+                logger.warning(f"Callback error: {e}")
 
 # ============================================================================
 # CPU SCHEDULING
@@ -334,7 +334,7 @@ class CPUScheduler:
             self._stats['tasks_executed'] += 1
             return result
             
-        except Exception as e:
+        except (OSError, RuntimeError, asyncio.TimeoutError, ValueError) as e:
             self._stats['tasks_failed'] += 1
             raise
     
@@ -544,7 +544,7 @@ class L1Cache:
         with self._lock:
             try:
                 size = len(pickle.dumps(value))
-            except Exception as e:
+            except (TypeError, pickle.PicklingError, OverflowError) as e:
                 logger.debug(f"Could not determine serialized size, using default: {e}")
                 size = 1024
             
@@ -733,7 +733,7 @@ class ResourceMonitor:
             for callback in self._callbacks:
                 try:
                     callback(alert)
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     logger.warning(f"Alert callback failed: {e}")
     
     def _collect_metrics(self) -> Dict[str, float]:
@@ -761,8 +761,8 @@ class ResourceMonitor:
                 )
                 
                 await asyncio.sleep(self.config.monitor_interval)
-            except Exception as e:
-                print(f"Monitoring error: {e}")
+            except (OSError, RuntimeError) as e:
+                logger.error(f"Monitoring error: {e}")
                 await asyncio.sleep(30)
     
     def get_stats(self) -> Dict:

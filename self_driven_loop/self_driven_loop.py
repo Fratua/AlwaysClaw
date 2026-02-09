@@ -178,7 +178,7 @@ class SelfDrivenLoop:
                 await self._loop_iteration()
                 await asyncio.sleep(self.config.loop_interval_seconds)
             
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                 logger.error(f"Error in loop iteration: {e}")
                 self.state.errors.append(str(e))
                 await asyncio.sleep(self.config.loop_interval_seconds)

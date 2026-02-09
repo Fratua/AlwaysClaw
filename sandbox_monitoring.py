@@ -387,7 +387,7 @@ class BehavioralAnalyzer:
             try:
                 if behavior.detection_callback(event):
                     self._trigger_alert(behavior, event)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Error in behavior detection {behavior.name}: {e}")
     
     def _periodic_analysis(self):
@@ -526,7 +526,7 @@ class BehavioralAnalyzer:
         for handler in self._alert_handlers:
             try:
                 handler(alert)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Alert handler error: {e}")
         
         # Take action based on severity

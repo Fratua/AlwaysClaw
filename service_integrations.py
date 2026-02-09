@@ -133,7 +133,7 @@ class GmailIntegration:
             logger.info("Gmail integration initialized successfully")
             return True
             
-        except Exception as e:
+        except (OSError, ImportError, ValueError) as e:
             logger.error(f"Failed to initialize Gmail: {e}")
             return False
     
@@ -201,7 +201,7 @@ class GmailIntegration:
                 timestamp=datetime.now()
             )
             
-        except Exception as e:
+        except (OSError, ConnectionError, ValueError) as e:
             logger.error(f"Failed to send email: {e}")
             return EmailResult(success=False, error=str(e))
     
@@ -253,7 +253,7 @@ class GmailIntegration:
             
             return emails
             
-        except Exception as e:
+        except (OSError, ConnectionError, ValueError) as e:
             logger.error(f"Failed to check emails: {e}")
             return []
     
@@ -285,7 +285,7 @@ class GmailIntegration:
                 received_at=datetime.now()
             )
             
-        except Exception as e:
+        except (OSError, ConnectionError, ValueError) as e:
             logger.error(f"Failed to get email: {e}")
             return None
     
@@ -306,7 +306,7 @@ class GmailIntegration:
             
             return True
             
-        except Exception as e:
+        except (OSError, ConnectionError, ValueError) as e:
             logger.error(f"Failed to mark as read: {e}")
             return False
     
@@ -326,7 +326,7 @@ class GmailIntegration:
             
             return True
             
-        except Exception as e:
+        except (OSError, ConnectionError, ValueError) as e:
             logger.error(f"Failed to delete email: {e}")
             return False
 
@@ -369,7 +369,7 @@ class TwilioIntegration:
             logger.info("Twilio integration initialized successfully")
             return True
             
-        except Exception as e:
+        except (OSError, ImportError, ValueError) as e:
             logger.error(f"Failed to initialize Twilio: {e}")
             return False
     
@@ -428,7 +428,7 @@ class TwilioIntegration:
                 status=call.status
             )
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Failed to make call: {e}")
             return CallResult(success=False, error=str(e))
     
@@ -477,7 +477,7 @@ class TwilioIntegration:
                 status=sms.status
             )
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Failed to send SMS: {e}")
             return SMSResult(success=False, error=str(e))
     
@@ -529,7 +529,7 @@ class TwilioIntegration:
                 status=sms.status
             )
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Failed to send MMS: {e}")
             return SMSResult(success=False, error=str(e))
     
@@ -555,7 +555,7 @@ class TwilioIntegration:
                 'price': '0.50'
             }
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Failed to get call status: {e}")
             return {'error': str(e)}
 
@@ -594,7 +594,7 @@ class BrowserControlIntegration:
             logger.info("Browser control initialized successfully")
             return True
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to initialize browser: {e}")
             return False
     
@@ -639,7 +639,7 @@ class BrowserControlIntegration:
                 title="Loaded Page"
             )
             
-        except Exception as e:
+        except (OSError, RuntimeError, TimeoutError, ValueError) as e:
             logger.error(f"Failed to navigate: {e}")
             return BrowserResult(success=False, error=str(e))
     
@@ -682,7 +682,7 @@ class BrowserControlIntegration:
             # Placeholder
             return BrowserResult(success=True)
             
-        except Exception as e:
+        except (OSError, RuntimeError, TimeoutError, ValueError) as e:
             logger.error(f"Failed to execute action: {e}")
             return BrowserResult(success=False, error=str(e))
     
@@ -725,10 +725,10 @@ class BrowserControlIntegration:
             # Placeholder - return empty bytes
             return b''
             
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.error(f"Failed to take screenshot: {e}")
             return None
-    
+
     async def extract_data(
         self,
         selector: str,
@@ -765,7 +765,7 @@ class BrowserControlIntegration:
             # Placeholder
             return ["extracted_data_1", "extracted_data_2"]
             
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.error(f"Failed to extract data: {e}")
             return []
     
@@ -779,7 +779,7 @@ class BrowserControlIntegration:
             
             logger.info("Browser closed")
             
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.error(f"Error closing browser: {e}")
 
 
@@ -811,7 +811,7 @@ class WindowsSystemIntegration:
             logger.info("Windows system integration initialized")
             return True
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to initialize system integration: {e}")
             return False
     
@@ -852,7 +852,7 @@ class WindowsSystemIntegration:
                 exit_code=0
             )
             
-        except Exception as e:
+        except (OSError, RuntimeError, TimeoutError, PermissionError) as e:
             logger.error(f"Command execution failed: {e}")
             return SystemResult(
                 success=False,
@@ -887,7 +887,7 @@ class WindowsSystemIntegration:
                 output=f"Launched: {app_path}"
             )
             
-        except Exception as e:
+        except (OSError, PermissionError, FileNotFoundError) as e:
             logger.error(f"Failed to launch application: {e}")
             return SystemResult(success=False, error=str(e))
     
@@ -909,7 +909,7 @@ class WindowsSystemIntegration:
             
             return info
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to get system info: {e}")
             return {'error': str(e)}
     
@@ -929,7 +929,7 @@ class WindowsSystemIntegration:
                 {'pid': 5678, 'name': 'notepad.exe', 'status': 'running'}
             ]
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to get processes: {e}")
             return []
     
@@ -945,7 +945,7 @@ class WindowsSystemIntegration:
             
             return True
             
-        except Exception as e:
+        except (OSError, PermissionError, ProcessLookupError) as e:
             logger.error(f"Failed to kill process: {e}")
             return False
     
@@ -964,10 +964,10 @@ class WindowsSystemIntegration:
             # Placeholder
             return b''
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to take screenshot: {e}")
             return None
-    
+
     async def set_volume(self, level: float) -> bool:
         """Set system volume (0.0 - 1.0)"""
         try:
@@ -984,7 +984,7 @@ class WindowsSystemIntegration:
             
             return True
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to set volume: {e}")
             return False
     
@@ -999,7 +999,7 @@ class WindowsSystemIntegration:
             
             return {'hwnd': 12345, 'title': 'Active Window'}
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Failed to get active window: {e}")
             return {}
 
@@ -1034,7 +1034,7 @@ class ServiceIntegrationManager:
         for name, service in self.services.items():
             try:
                 results[name] = await service.initialize()
-            except Exception as e:
+            except (OSError, ImportError, RuntimeError, ValueError) as e:
                 logger.error(f"Failed to initialize {name}: {e}")
                 results[name] = False
         
@@ -1080,49 +1080,3 @@ class ServiceIntegrationManager:
             }
         
         return status
-
-
-# =============================================================================
-# EXAMPLE USAGE
-# =============================================================================
-
-async def main():
-    """Example usage of service integrations"""
-    
-    # Initialize service manager
-    manager = ServiceIntegrationManager()
-    
-    # Initialize all services
-    init_results = await manager.initialize_all()
-    print(f"Initialization results: {init_results}")
-    
-    # Gmail example
-    email_result = await manager.gmail.send_email(
-        to="recipient@example.com",
-        subject="Test Email",
-        body="This is a test email from the AI agent."
-    )
-    print(f"Email result: {email_result}")
-    
-    # Twilio example
-    sms_result = await manager.twilio.send_sms(
-        to_number="+1234567890",
-        message="Hello from the AI agent!"
-    )
-    print(f"SMS result: {sms_result}")
-    
-    # Browser example
-    nav_result = await manager.browser.navigate("https://example.com")
-    print(f"Navigation result: {nav_result}")
-    
-    # System example
-    sys_result = await manager.system.execute_command("echo Hello World")
-    print(f"System result: {sys_result}")
-    
-    # Get service status
-    status = manager.get_service_status()
-    print(f"Service status: {status}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

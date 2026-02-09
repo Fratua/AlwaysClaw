@@ -365,7 +365,7 @@ class PerformanceTracker:
         try:
             evaluation = await llm_interface.generate(evaluation_prompt)
             return json.loads(evaluation)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Quality evaluation failed: {e}")
             return {
                 'accuracy': 0.5,

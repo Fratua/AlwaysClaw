@@ -413,7 +413,7 @@ class AutomatedResponseActions:
                 action_id=action_id,
                 output=result
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Action {action_id} failed: {e}")
             return ActionResult(
                 success=False,
@@ -547,7 +547,8 @@ class AutomatedResponseActions:
         services = ["gmail", "twilio"]
         if except_alerts:
             # Keep alert channels open
-            pass
+            services = [s for s in services if s not in ("alert_webhook", "pagerduty")]
+            logger.info("Keeping alert channels open while disabling other comms")
         
         return {"external_comms": "disabled", "except_alerts": except_alerts}
     
@@ -852,7 +853,7 @@ class EvidenceCollectionSystem:
                 evidence_list.append(evidence)
                 self._add_to_chain_of_custody(evidence, "COLLECTED")
                 
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logger.error(f"Failed to collect logs from {source}: {e}")
         
         return evidence_list
@@ -1134,7 +1135,7 @@ class NotificationSystem:
                 try:
                     self.channels[channel](incident, message)
                     results[channel] = True
-                except Exception as e:
+                except (OSError, KeyError, ValueError) as e:
                     logger.error(f"Failed to send {channel} notification: {e}")
                     results[channel] = False
         

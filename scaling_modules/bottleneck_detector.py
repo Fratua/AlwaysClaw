@@ -461,7 +461,7 @@ class BottleneckDetector:
             
             logger.info(f"Remediation result: {result}")
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             logger.error(f"Remediation failed: {e}")
             bottleneck.remediation_result = f"failed: {str(e)}"
     
@@ -480,7 +480,7 @@ class BottleneckDetector:
                 # Update active bottlenecks
                 self.update_active_bottlenecks(detected)
                 
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Error in detection loop: {e}")
             
             # Wait for next iteration

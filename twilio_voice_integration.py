@@ -141,7 +141,7 @@ class TwilioMediaStream:
                 
                 except json.JSONDecodeError:
                     logger.error("Invalid JSON received from Twilio")
-                except Exception as e:
+                except (OSError, ValueError, KeyError) as e:
                     logger.error(f"Error processing message: {e}")
         
         except websockets.exceptions.ConnectionClosed:
@@ -175,9 +175,9 @@ class TwilioMediaStream:
             
             except asyncio.TimeoutError:
                 continue
-            except Exception as e:
+            except (OSError, RuntimeError) as e:
                 logger.error(f"Error sending audio: {e}")
-    
+
     async def _safe_callback(self, callback, *args):
         """Safely execute a callback"""
         try:
@@ -185,7 +185,7 @@ class TwilioMediaStream:
                 await callback(*args)
             else:
                 callback(*args)
-        except Exception as e:
+        except (ValueError, RuntimeError, OSError) as e:
             logger.error(f"Callback error: {e}")
     
     def _decode_mulaw(self, payload: str) -> np.ndarray:
@@ -290,10 +290,10 @@ class TwilioVoiceManager:
             logger.info(f"Outbound call initiated: {call.sid} to {to_number}")
             return call.sid
         
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Error making call: {e}")
             return None
-    
+
     def send_sms(self, to: str, body: str, from_number: Optional[str] = None) -> Dict[str, Any]:
         """Send an SMS message."""
         try:
@@ -303,7 +303,7 @@ class TwilioVoiceManager:
                 to=to
             )
             return {"sent": True, "sid": message.sid, "status": message.status}
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logging.error(f"Failed to send SMS: {e}")
             return {"sent": False, "error": str(e)}
 
@@ -312,7 +312,7 @@ class TwilioVoiceManager:
         try:
             call = self.client.calls(call_sid).update(status="completed")
             logger.info(f"Call hung up: {call_sid}")
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Error hanging up call: {e}")
     
     async def start_media_stream_server(self, host: str = "0.0.0.0", port: int = 8766):
@@ -410,9 +410,9 @@ class TwilioVoiceManager:
                 await callback(*args)
             else:
                 callback(*args)
-        except Exception as e:
+        except (ValueError, RuntimeError, OSError) as e:
             logger.error(f"Callback error: {e}")
-    
+
     async def send_audio_to_call(self, call_sid: str, audio_data: np.ndarray):
         """Send audio to a specific call"""
         if call_sid in self.media_streams:
@@ -471,7 +471,7 @@ class TwilioConferenceBridge:
                 """
             )
             logger.info(f"Call {call_sid} added to conference {conference_id}")
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Error adding call to conference: {e}")
     
     async def remove_from_conference(self, conference_id: str, call_sid: str):

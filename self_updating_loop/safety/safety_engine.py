@@ -190,8 +190,8 @@ class BackupManager:
             logger.info(f"Backup created: {backup_id} ({total_size} bytes)")
             return record
             
-        except Exception as e:
-            logger.error(f"Backup creation failed: {e}")
+        except (OSError, zipfile.BadZipFile) as e:
+            logger.error(f"Backup creation failed: {e}", exc_info=True)
             # Clean up partial backup
             if archive_path.exists():
                 archive_path.unlink()
@@ -249,8 +249,8 @@ class BackupManager:
             logger.info(f"Backup restored: {backup_id}")
             return True
             
-        except Exception as e:
-            logger.error(f"Backup restore failed: {e}")
+        except (OSError, zipfile.BadZipFile, shutil.Error) as e:
+            logger.error(f"Backup restore failed: {e}", exc_info=True)
             return False
     
     def verify_backup(self, backup_id: str) -> bool:
@@ -266,7 +266,8 @@ class BackupManager:
         try:
             current_checksum = self._calculate_checksum(archive_path)
             return current_checksum == record.checksum
-        except Exception:
+        except OSError:
+            logger.warning(f"Backup verification failed for: {backup_id}", exc_info=True)
             return False
     
     def _generate_backup_id(self) -> str:
@@ -390,7 +391,7 @@ class AtomicUpdateExecutor:
             logger.info(f"Atomic update executed: {len(operations)} operations")
             return True
             
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, shutil.Error) as e:
             logger.exception(f"Atomic update failed: {e}")
             await self._rollback_operations(executed, backups[:len(executed)])
             return False
@@ -412,7 +413,7 @@ class AtomicUpdateExecutor:
             if not target.parent.exists():
                 try:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                except Exception as e:
+                except OSError as e:
                     logger.error(f"Cannot create target directory: {e}")
                     return False
             
@@ -479,8 +480,8 @@ class AtomicUpdateExecutor:
             
             return True
             
-        except Exception as e:
-            logger.error(f"Operation execution failed: {e}")
+        except (OSError, json.JSONDecodeError, KeyError, shutil.Error) as e:
+            logger.error(f"Operation execution failed: {e}", exc_info=True)
             return False
     
     def _verify_operation(self, operation: UpdateOperation) -> bool:
@@ -518,8 +519,8 @@ class AtomicUpdateExecutor:
                     target = Path(op.target_path)
                     if target.exists():
                         shutil.rmtree(target)
-            except Exception as e:
-                logger.error(f"Rollback failed for operation: {e}")
+            except (OSError, shutil.Error) as e:
+                logger.error(f"Rollback failed for operation: {e}", exc_info=True)
 
 
 class SafetyEngine:
@@ -620,7 +621,7 @@ class SafetyEngine:
                 rollback_id=backup.backup_id if backup else None,
             )
             
-        except Exception as e:
+        except (OSError, ValueError, KeyError, AttributeError) as e:
             logger.exception(f"Update application failed: {e}")
             return UpdateResult(
                 success=False,
@@ -656,8 +657,8 @@ class SafetyEngine:
                 return False
             
             return True
-        except Exception as e:
-            logger.error(f"Disk space check failed: {e}")
+        except OSError as e:
+            logger.error(f"Disk space check failed: {e}", exc_info=True)
             return False
     
     def _check_memory(self) -> bool:
@@ -676,8 +677,8 @@ class SafetyEngine:
         except ImportError:
             # psutil not available, skip check
             return True
-        except Exception as e:
-            logger.error(f"Memory check failed: {e}")
+        except OSError as e:
+            logger.error(f"Memory check failed: {e}", exc_info=True)
             return False
     
     def _check_permissions(self) -> bool:
@@ -693,8 +694,8 @@ class SafetyEngine:
                     return False
             
             return True
-        except Exception as e:
-            logger.error(f"Permission check failed: {e}")
+        except OSError as e:
+            logger.error(f"Permission check failed: {e}", exc_info=True)
             return False
     
     def _stage_update(self, update: Any, backup: Optional[BackupRecord]) -> str:

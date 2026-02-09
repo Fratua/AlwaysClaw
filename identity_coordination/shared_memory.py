@@ -342,7 +342,7 @@ class SharedMemoryManager:
             for callback in self.subscribers[subscription_key]:
                 try:
                     await callback(layer, key, entry)
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     print(f"Subscriber notification error: {e}")
                     
     def subscribe(self, layer: str, key: str, callback):
@@ -468,7 +468,7 @@ class ContextPropagator:
                 await self._send_context_to_agent(target, context, context_key)
                 propagation_result["targets"].append(target)
                 propagation_result["propagated_keys"].append(context_key)
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 propagation_result["failed_targets"].append({
                     "agent": target,
                     "error": str(e)

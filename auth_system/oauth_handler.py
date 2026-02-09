@@ -3,6 +3,7 @@ OAuth 2.0 Flow Automation System
 For Windows 10 OpenClaw AI Agent Framework
 """
 
+import os
 import json
 import base64
 import hashlib
@@ -118,11 +119,11 @@ class OAuthError(Exception):
 
 class CallbackServer:
     """Simple HTTP server to receive OAuth callbacks."""
-    
-    def __init__(self, host: str = "localhost", port: int = 8080):
-        self.host = host
+
+    def __init__(self, host: str = None, port: int = 8080):
+        self.host = host or os.environ.get('OAUTH_CALLBACK_HOST', 'localhost')
         self.port = port
-        self.redirect_uri = f"http://{host}:{port}/callback"
+        self.redirect_uri = f"http://{self.host}:{port}/callback"
         self._server = None
         self._response_data: Optional[Dict[str, Any]] = None
         self._response_event = asyncio.Event()
@@ -196,8 +197,11 @@ class AuthorizationCodeFlow:
     def __init__(
         self,
         provider: OAuthProviderConfig,
-        redirect_uri: str = "http://localhost:8080/callback"
+        redirect_uri: str = None
     ):
+        if redirect_uri is None:
+            callback_host = os.environ.get('OAUTH_CALLBACK_HOST', 'localhost')
+            redirect_uri = f"http://{callback_host}:8080/callback"
         self.provider = provider
         self.redirect_uri = redirect_uri
         self.code_verifier: Optional[str] = None
@@ -520,22 +524,22 @@ class TokenRefreshManager:
             for observer in self.token_observers:
                 try:
                     observer(token_id, new_tokens)
-                except Exception as e:
-                    logger.error(f"Token observer error: {e}")
-            
+                except (TypeError, ValueError, AttributeError, KeyError) as e:
+                    logger.error(f"Token observer error: {e}", exc_info=True)
+
             # Re-schedule next refresh
             await self.register_token(token_id, new_tokens, provider)
-            
+
             logger.info(f"Successfully refreshed token {token_id}")
-            
+
         except OAuthError as e:
             logger.error(f"Token refresh failed for {token_id}: {e}")
             # Notify of refresh failure
             for observer in self.token_observers:
                 try:
                     observer(token_id, None)
-                except Exception:
-                    pass
+                except (TypeError, ValueError, AttributeError, KeyError) as e:
+                    logger.warning(f"Token observer error during failure notification: {e}")
     
     async def _perform_refresh(
         self,
@@ -623,7 +627,7 @@ class TokenRefreshManager:
                         await self.unregister_token(token_id)
                     
                     return success
-        except Exception as e:
+        except (aiohttp.ClientError, OSError, ValueError) as e:
             logger.error(f"Token revocation failed: {e}")
             return False
 
@@ -849,7 +853,7 @@ class OAuthHandler:
                 if submit_button:
                     await submit_button.click()
             
-        except Exception as e:
+        except (OSError, ValueError, TimeoutError) as e:
             logger.warning(f"Automated login handling failed: {e}")
     
     async def refresh_token(

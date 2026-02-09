@@ -285,7 +285,7 @@ class TaskSchedulerService:
             self._connected = True
             logger.info("Connected to Task Scheduler service")
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to connect to Task Scheduler: {e}")
             return False
     
@@ -320,7 +320,7 @@ class TaskSchedulerService:
             parent = self.get_folder(parent_path)
             parent.DeleteFolder(folder_name, 0)
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to delete folder {path}: {e}")
             return False
     
@@ -509,7 +509,7 @@ class TaskBuilder:
         
         try:
             folder = self.scheduler.get_folder(folder_path)
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.debug(f"Folder '{folder_path}' not found, creating: {e}")
             # Create folder if it doesn't exist
             parts = folder_path.strip("\\").split("\\")
@@ -518,7 +518,7 @@ class TaskBuilder:
                 try:
                     parent = self.scheduler.get_folder(current_path)
                     parent.CreateFolder(part, None)
-                except Exception as e:
+                except (pywintypes.com_error, OSError) as e:
                     logger.debug(f"Folder creation skipped (may already exist) at '{current_path}{part}': {e}")
                 current_path = current_path + part + "\\"
             folder = self.scheduler.get_folder(folder_path)
@@ -583,7 +583,7 @@ class TaskMonitor:
                 author=definition.RegistrationInfo.Author,
                 description=definition.RegistrationInfo.Description
             )
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to get task info for {task_path}: {e}")
             return None
     
@@ -601,7 +601,7 @@ class TaskMonitor:
                     'CurrentAction': task.CurrentAction,
                     'EnginePID': task.EnginePID
                 })
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to get running tasks: {e}")
         
         return running_tasks
@@ -624,7 +624,7 @@ class TaskMonitor:
             task.Run(arguments)
             logger.info(f"Started task: {task_path}")
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to start task {task_path}: {e}")
             return False
     
@@ -641,7 +641,7 @@ class TaskMonitor:
             task.Stop(0)
             logger.info(f"Stopped task: {task_path}")
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to stop task {task_path}: {e}")
             return False
     
@@ -668,7 +668,7 @@ class TaskMonitor:
             )
             logger.info(f"Enabled task: {task_path}")
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to enable task {task_path}: {e}")
             return False
     
@@ -695,7 +695,7 @@ class TaskMonitor:
             )
             logger.info(f"Disabled task: {task_path}")
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to disable task {task_path}: {e}")
             return False
     
@@ -710,7 +710,7 @@ class TaskMonitor:
             folder.DeleteTask(task_name, 0)
             logger.info(f"Deleted task: {task_path}")
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to delete task {task_path}: {e}")
             return False
 
@@ -963,7 +963,7 @@ class AgentHeartbeat:
             try:
                 with open(self.state_file, 'r') as f:
                     return json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning(f"Failed to load state: {e}")
         
         return {
@@ -1051,7 +1051,7 @@ class AgentHeartbeat:
                 results[freq_name] = True
                 logger.info(f"Created heartbeat task: {task_name}")
                 
-            except Exception as e:
+            except (pywintypes.com_error, OSError) as e:
                 logger.error(f"Failed to create {freq_name} heartbeat: {e}")
                 results[freq_name] = False
         
@@ -1143,7 +1143,7 @@ exit 0
             self._save_state()
             logger.info("Manual heartbeat triggered")
             return True
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error(f"Manual heartbeat failed: {e}")
             return False
     
@@ -1204,7 +1204,7 @@ class TaskFolderManager:
             try:
                 root.CreateFolder("OpenClaw", None)
                 logger.info("Created folder: \\OpenClaw")
-            except Exception as e:
+            except (pywintypes.com_error, OSError) as e:
                 logger.info(f"Folder already exists or error: \\OpenClaw ({e})")
             
             # Create subfolders
@@ -1214,12 +1214,12 @@ class TaskFolderManager:
                     openclaw = self.scheduler.get_folder(self.ROOT_FOLDER)
                     openclaw.CreateFolder(folder_name, None)
                     logger.info(f"Created folder: {folder_path}")
-                except Exception as e:
+                except (pywintypes.com_error, OSError) as e:
                     logger.info(f"Folder already exists or error: {folder_path}")
             
             self._folders_created = True
             return True
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.error(f"Failed to create folder structure: {e}")
             return False
     
@@ -1238,7 +1238,8 @@ class TaskFolderManager:
                 folder = self.scheduler.get_folder(folder_path)
                 folder_tasks = folder.GetTasks(0)
                 tasks[folder_name] = [task.Name for task in folder_tasks]
-            except Exception as e:
+            except (pywintypes.com_error, OSError) as e:
+                logger.debug(f"Could not list tasks in {folder_name}: {e}")
                 tasks[folder_name] = []
         
         return tasks
@@ -1335,7 +1336,7 @@ class OpenClawInstaller:
                 builder.register(folder_path="\\OpenClaw\\AgentLoops")
                 logger.info(f"Created agent loop: {name}")
                 
-            except Exception as e:
+            except (pywintypes.com_error, OSError) as e:
                 logger.error(f"Failed to create loop {name}: {e}")
     
     def _save_config(self):
@@ -1372,7 +1373,7 @@ class OpenClawInstaller:
             root = self.scheduler.get_folder("\\")
             root.DeleteFolder("OpenClaw", 0)
             logger.info("Removed OpenClaw folder and all tasks")
-        except Exception as e:
+        except (pywintypes.com_error, OSError) as e:
             logger.warning(f"Error removing folder: {e}")
         
         # Remove configuration

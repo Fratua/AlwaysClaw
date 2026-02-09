@@ -984,7 +984,7 @@ def with_retry(max_retries: int = 3, backoff_factor: float = 2.0):
             while retries < max_retries:
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError) as e:
                     retries += 1
                     if retries >= max_retries:
                         raise

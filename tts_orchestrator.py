@@ -112,7 +112,7 @@ class TTSOrchestrator:
                 from azure_tts_adapter import AzureTTSAdapter
                 self._adapters[TTSEngine.AZURE] = AzureTTSAdapter()
                 print("[TTS] Azure adapter initialized")
-        except Exception as e:
+        except (ImportError, OSError) as e:
             print(f"[TTS] Azure TTS not available: {e}")
 
         # ElevenLabs
@@ -121,7 +121,7 @@ class TTSOrchestrator:
                 from elevenlabs_tts_adapter import ElevenLabsTTSAdapter
                 self._adapters[TTSEngine.ELEVENLABS] = ElevenLabsTTSAdapter()
                 print("[TTS] ElevenLabs adapter initialized")
-        except Exception as e:
+        except (ImportError, OSError) as e:
             print(f"[TTS] ElevenLabs TTS not available: {e}")
 
         # OpenAI
@@ -130,7 +130,7 @@ class TTSOrchestrator:
                 from openai_tts_adapter import OpenAITTSAdapter
                 self._adapters[TTSEngine.OPENAI] = OpenAITTSAdapter()
                 print("[TTS] OpenAI adapter initialized")
-        except Exception as e:
+        except (ImportError, OSError) as e:
             print(f"[TTS] OpenAI TTS not available: {e}")
 
         # SAPI (always available on Windows)
@@ -138,7 +138,7 @@ class TTSOrchestrator:
             from sapi_tts_adapter import SAPITTSAdapter
             self._adapters[TTSEngine.SAPI] = SAPITTSAdapter()
             print("[TTS] SAPI adapter initialized")
-        except Exception as e:
+        except (ImportError, OSError) as e:
             print(f"[TTS] SAPI TTS not available: {e}")
 
     def _start_worker(self):
@@ -158,7 +158,7 @@ class TTSOrchestrator:
                     callback(response)
             except queue.Empty:
                 continue
-            except Exception as e:
+            except (RuntimeError, OSError) as e:
                 print(f"[TTS] Queue processing error: {e}")
 
     def _execute_request(self, request: TTSRequest) -> TTSResponse:
@@ -201,7 +201,7 @@ class TTSOrchestrator:
 
             self._stats['requests_success'] += 1
 
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             self._stats['requests_failed'] += 1
             response = TTSResponse(
                 success=False,

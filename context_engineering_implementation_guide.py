@@ -632,7 +632,7 @@ class SemanticCompressionEngine:
                         do_sample=False
                     )[0]['summary_text']
                     summaries.append(summary)
-                except Exception:
+                except (OSError, json.JSONDecodeError, KeyError, ValueError):
                     # Fallback to truncation if summarization fails
                     summaries.append(chunk.text[:500] + "...")
         
@@ -724,7 +724,7 @@ class HierarchicalRelevanceScorer:
             query_emb = self.encoder.encode(query)
             similarity = cosine_similarity([msg_emb], [query_emb])[0][0]
             return (similarity + 1) / 2  # Normalize to 0-1
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             return self._keyword_similarity(message.content, query)
     
     def _keyword_similarity(self, text1: str, text2: str) -> float:

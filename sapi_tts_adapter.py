@@ -76,7 +76,7 @@ class SAPITTSAdapter:
                     self._speaker.Voice = voices.Item(i)
                     return True
             return False
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             print(f"SAPI set_voice error: {e}")
             return False
 
@@ -95,7 +95,7 @@ class SAPITTSAdapter:
             flags = 1 if async_mode else 0  # SVSFlagsAsync = 1
             self._speaker.Speak(text, flags)
             return True
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             print(f"SAPI speak error: {e}")
             return False
 
@@ -105,7 +105,7 @@ class SAPITTSAdapter:
             flags = 1 if async_mode else 0
             self._speaker.Speak(ssml, flags)
             return True
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             print(f"SAPI speak_ssml error: {e}")
             return False
 

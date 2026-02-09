@@ -298,8 +298,8 @@ class SelfUpdatingLoop:
             for handler in self._state_handlers.get(new_state, []):
                 try:
                     handler(old_state, new_state)
-                except Exception as e:
-                    logger.error(f"State handler error: {e}")
+                except (TypeError, ValueError, AttributeError) as e:
+                    logger.error(f"State handler error: {e}", exc_info=True)
     
     def on_state_change(self, state: UpdateLoopState, handler: Callable):
         """Register a handler for state changes"""
@@ -327,7 +327,7 @@ class SelfUpdatingLoop:
                 await asyncio.sleep(self.config["check_interval"])
         except asyncio.CancelledError:
             logger.info("Self-updating loop cancelled")
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError, KeyError) as e:
             logger.exception("Error in self-updating loop")
             self.set_state(UpdateLoopState.ERROR)
             raise
@@ -364,7 +364,7 @@ class SelfUpdatingLoop:
                 
                 await self._process_update(update)
                 
-        except Exception as e:
+        except (OSError, ValueError, KeyError, AttributeError, TypeError) as e:
             logger.exception("Error in update iteration")
             self.set_state(UpdateLoopState.ERROR)
     
@@ -384,8 +384,8 @@ class SelfUpdatingLoop:
                     description=f"Detected {len(updates)} updates",
                     details={"count": len(updates), "sources": list(set(u.source.value for u in updates))},
                 )
-        except Exception as e:
-            logger.error(f"Update detection failed: {e}")
+        except (OSError, ValueError, KeyError, AttributeError, ConnectionError) as e:
+            logger.error(f"Update detection failed: {e}", exc_info=True)
             self.audit_logger.log_event(
                 event_type="DETECTION_FAILED",
                 actor_type="system",
@@ -434,7 +434,7 @@ class SelfUpdatingLoop:
                 if self.config["auto_rollback_on_failure"] and result.rollback_available:
                     await self._rollback_update(result.rollback_id)
             
-        except Exception as e:
+        except (OSError, ValueError, KeyError, AttributeError, TypeError) as e:
             logger.exception(f"Error processing update {update.event_id}")
             self.set_state(UpdateLoopState.ERROR)
         finally:

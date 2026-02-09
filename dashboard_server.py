@@ -829,7 +829,7 @@ class DashboardAPI:
                 
         except WebSocketDisconnect:
             self.connected_clients.remove(websocket)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             print(f"WebSocket error: {e}")
             if websocket in self.connected_clients:
                 self.connected_clients.remove(websocket)
@@ -845,7 +845,7 @@ class DashboardAPI:
         for client in self.connected_clients:
             try:
                 await client.send_json(data)
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.warning(f"Dashboard error: {e}")
                 disconnected.append(client)
         
@@ -898,7 +898,8 @@ def main():
         'refresh_interval': 5
     })
     
-    print("Dashboard starting on http://localhost:8000")
+    dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:8000')
+    print(f"Dashboard starting on {dashboard_url}")
     dashboard.run()
 
 

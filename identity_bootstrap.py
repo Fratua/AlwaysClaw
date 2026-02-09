@@ -254,7 +254,7 @@ class IdentityBootstrap:
             try:
                 with open(state_file, 'r') as f:
                     return json.load(f)
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logger.warning(f"Failed to restore state: {e}")
         
         return None
@@ -342,13 +342,15 @@ class IdentityBootstrap:
         
         # Merge values if present
         if 'values' in soul:
-            # Could extend identity with value hierarchy
-            pass
-        
+            identity.metadata = getattr(identity, 'metadata', {}) or {}
+            identity.metadata['soul_values'] = soul['values']
+            logger.debug(f"Merged {len(soul['values'])} soul values into identity")
+
         # Merge boundaries if present
         if 'boundaries' in soul:
-            # Could extend identity with boundaries
-            pass
+            identity.metadata = getattr(identity, 'metadata', {}) or {}
+            identity.metadata['soul_boundaries'] = soul['boundaries']
+            logger.debug(f"Merged {len(soul['boundaries'])} soul boundaries into identity")
         
         return identity
 

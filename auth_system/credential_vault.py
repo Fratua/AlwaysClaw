@@ -235,7 +235,7 @@ class WindowsCredentialVault:
         
         try:
             self._win32cred.CredWrite(credential, 0)
-            
+
             # Update cache
             self._cache[target_name] = Credentials(
                 service_name=service_name,
@@ -243,11 +243,11 @@ class WindowsCredentialVault:
                 password=password,
                 attributes=attributes or {}
             )
-            
+
             logger.debug(f"Stored credentials for {service_name}/{username}")
             return True
-            
-        except Exception as e:
+
+        except OSError as e:
             logger.error(f"Failed to store credentials: {e}")
             return False
     
@@ -310,7 +310,7 @@ class WindowsCredentialVault:
                 
                 return creds
                 
-            except Exception as e:
+            except (OSError, KeyError, ValueError) as e:
                 logger.debug(f"Credentials not found: {e}")
                 return None
         else:
@@ -346,14 +346,14 @@ class WindowsCredentialVault:
         
         try:
             self._win32cred.CredDelete(target_name, self.CRED_TYPE_GENERIC, 0)
-            
+
             # Remove from cache
             self._cache.pop(target_name, None)
-            
+
             logger.debug(f"Deleted credentials for {service_name}/{username}")
             return True
-            
-        except Exception as e:
+
+        except OSError as e:
             logger.error(f"Failed to delete credentials: {e}")
             return False
     
@@ -377,7 +377,7 @@ class WindowsCredentialVault:
                 if parsed:
                     services.add(parsed['service_name'])
         
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to enumerate credentials: {e}")
         
         return list(services)
@@ -401,7 +401,7 @@ class WindowsCredentialVault:
                 if parsed and parsed['cred_type'] == 'password':
                     usernames.append(parsed['username'])
         
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to list credentials: {e}")
         
         return usernames
@@ -458,7 +458,7 @@ class WindowsCredentialVault:
             self._win32cred.CredWrite(credential, 0)
             self._mfa_cache[target_name] = mfa_creds
             return True
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to store MFA credentials: {e}")
             return False
     
@@ -507,7 +507,7 @@ class WindowsCredentialVault:
                 self._mfa_cache[target_name] = mfa_creds
                 return mfa_creds
                 
-            except Exception as e:
+            except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
                 logger.warning(f"MFA credential lookup failed: {e}")
                 continue
 
@@ -582,7 +582,7 @@ class EncryptedFileVault:
                 DATA_BLOB = ctypes.Structure
                 # Simplified - in production use proper DPAPI
                 return key  # Placeholder
-            except Exception as e:
+            except (ImportError, OSError, ValueError) as e:
                 logger.warning(f"DPAPI encryption failed, falling back: {e}")
 
         # Fallback: use simple obfuscation
@@ -593,7 +593,7 @@ class EncryptedFileVault:
         """Decrypt master key."""
         try:
             return base64.urlsafe_b64decode(encrypted)
-        except (ValueError, Exception) as e:
+        except (ValueError, TypeError, OSError) as e:
             logger.error(f"Decryption failed for credential: {e}")
             raise
     
@@ -648,10 +648,10 @@ class EncryptedFileVault:
             
             return True
             
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to store credentials: {e}")
             return False
-    
+
     async def get_credentials(
         self,
         service_name: str,
@@ -683,7 +683,7 @@ class EncryptedFileVault:
                 
                 return creds
                 
-            except Exception as e:
+            except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
                 logger.error(f"Failed to load credentials: {e}")
                 return None
         else:
@@ -723,10 +723,10 @@ class EncryptedFileVault:
             
             return True
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to delete credentials: {e}")
             return False
-    
+
     # MFA Credentials
     async def store_mfa_credentials(
         self,
@@ -761,10 +761,10 @@ class EncryptedFileVault:
             
             return True
             
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to store MFA credentials: {e}")
             return False
-    
+
     async def get_mfa_credentials(
         self,
         service_name: str,
@@ -805,7 +805,7 @@ class EncryptedFileVault:
                 self._mfa_cache[cache_key] = mfa_creds
                 return mfa_creds
                 
-            except Exception as e:
+            except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
                 logger.warning(f"MFA credential lookup failed: {e}")
                 continue
 
@@ -840,7 +840,7 @@ def create_credential_vault(
     if prefer_windows and platform.system() == 'Windows':
         try:
             return WindowsCredentialVault(namespace)
-        except Exception as e:
+        except (RuntimeError, ImportError, OSError) as e:
             logger.warning(f"Failed to create Windows vault: {e}")
     
     # Fall back to encrypted file vault

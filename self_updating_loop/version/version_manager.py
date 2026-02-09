@@ -206,8 +206,8 @@ class GitIntegration:
         if self._repo is None:
             try:
                 self._repo = pygit2.Repository(self.repo_path)
-            except Exception as e:
-                logger.error(f"Failed to open Git repository: {e}")
+            except (OSError, KeyError) as e:
+                logger.error(f"Failed to open Git repository: {e}", exc_info=True)
         
         return self._repo
     
@@ -219,7 +219,8 @@ class GitIntegration:
         
         try:
             return repo.head.target.hex
-        except Exception:
+        except (OSError, KeyError) as e:
+            logger.warning(f"Failed to get current commit: {e}")
             return None
     
     def get_commit_message(self, commit_hash: str) -> Optional[str]:
@@ -231,7 +232,8 @@ class GitIntegration:
         try:
             commit = repo.revparse_single(commit_hash)
             return commit.message
-        except Exception:
+        except (KeyError, ValueError) as e:
+            logger.warning(f"Failed to get commit message for {commit_hash}: {e}")
             return None
     
     def get_commits_since(self, since_commit: str) -> List[Dict[str, Any]]:
@@ -252,8 +254,8 @@ class GitIntegration:
                     "author": str(commit.author),
                     "timestamp": commit.commit_time,
                 })
-        except Exception as e:
-            logger.error(f"Failed to get commits: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logger.error(f"Failed to get commits: {e}", exc_info=True)
         
         return commits
     
@@ -274,8 +276,8 @@ class GitIntegration:
             )
             logger.info(f"Git tag created: {tag_name}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to create tag: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logger.error(f"Failed to create tag: {e}", exc_info=True)
             return False
     
     def push_to_remote(self, ref: str = "refs/heads/main") -> bool:
@@ -289,8 +291,8 @@ class GitIntegration:
             remote.push([ref])
             logger.info(f"Pushed to remote: {ref}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to push to remote: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logger.error(f"Failed to push to remote: {e}", exc_info=True)
             return False
 
 
@@ -323,8 +325,8 @@ class SemanticVersionManager:
                         self._current_version = Version.parse(version_str)
                 else:
                     self._current_version = Version(0, 0, 0)
-            except Exception as e:
-                logger.error(f"Failed to parse version: {e}")
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+                logger.error(f"Failed to parse version: {e}", exc_info=True)
                 self._current_version = Version(0, 0, 0)
         
         return self._current_version
@@ -571,8 +573,8 @@ class VersionManager:
                         )
                         for r in data
                     ]
-            except Exception as e:
-                logger.error(f"Failed to load version history: {e}")
+            except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.error(f"Failed to load version history: {e}", exc_info=True)
     
     def _save_version_history(self):
         """Save version history to file"""

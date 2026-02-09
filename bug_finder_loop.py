@@ -1155,7 +1155,7 @@ class AlertManager:
         for handler in self.alert_handlers:
             try:
                 await handler(alert)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Alert handler error: {e}")
         
         # Update history
@@ -1265,7 +1265,7 @@ class AdvancedBugFinderLoop:
                 
                 await asyncio.sleep(sleep_time)
                 
-            except Exception as e:
+            except (OSError, RuntimeError, PermissionError) as e:
                 logger.error(f"Error in detection cycle: {e}")
                 await asyncio.sleep(5)
                 
@@ -1277,7 +1277,7 @@ class AdvancedBugFinderLoop:
         # 1. Collect data
         try:
             raw_data = await data_source()
-        except Exception as e:
+        except (OSError, RuntimeError, PermissionError) as e:
             logger.error(f"Data collection error: {e}")
             return
         

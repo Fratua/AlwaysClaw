@@ -5,6 +5,7 @@ Manages rollback operations to restore system to previous state.
 
 import shutil
 import logging
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -107,8 +108,8 @@ class GitResetStrategy(RollbackStrategy):
         if self._repo is None:
             try:
                 self._repo = pygit2.Repository(self.repo_path)
-            except Exception as e:
-                logger.error(f"Failed to open Git repository: {e}")
+            except (OSError, KeyError) as e:
+                logger.error(f"Failed to open Git repository: {e}", exc_info=True)
         
         return self._repo
     
@@ -126,7 +127,7 @@ class GitResetStrategy(RollbackStrategy):
             try:
                 repo.revparse_single(target.target_value)
                 return True
-            except Exception:
+            except (KeyError, ValueError):
                 return False
         
         return False
@@ -174,8 +175,8 @@ class GitResetStrategy(RollbackStrategy):
                 message=f"Successfully reset to {target.target_value}",
             )
             
-        except Exception as e:
-            logger.error(f"Git reset failed: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logger.error(f"Git reset failed: {e}", exc_info=True)
             return RollbackResult(
                 success=False,
                 rollback_id=rollback_id,
@@ -290,8 +291,8 @@ class BackupRestoreStrategy(RollbackStrategy):
                 affected_files=affected_files,
             )
             
-        except Exception as e:
-            logger.error(f"Backup restore failed: {e}")
+        except (OSError, zipfile.BadZipFile, shutil.Error) as e:
+            logger.error(f"Backup restore failed: {e}", exc_info=True)
             return RollbackResult(
                 success=False,
                 rollback_id=rollback_id,
@@ -327,8 +328,8 @@ class BackupRestoreStrategy(RollbackStrategy):
                 # Test archive integrity
                 bad_file = zf.testzip()
                 return bad_file is None
-        except Exception as e:
-            logger.error(f"Backup verification failed: {e}")
+        except (OSError, zipfile.BadZipFile) as e:
+            logger.error(f"Backup verification failed: {e}", exc_info=True)
             return False
     
     def _generate_rollback_id(self) -> str:
@@ -355,8 +356,8 @@ class IncrementalUndoStrategy(RollbackStrategy):
             try:
                 with open(self.operations_log_path) as f:
                     self._operations_log = json.load(f)
-            except Exception as e:
-                logger.error(f"Failed to load operations log: {e}")
+            except (OSError, json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Failed to load operations log: {e}", exc_info=True)
     
     def _save_operations_log(self):
         """Save operations log to file"""
@@ -436,8 +437,8 @@ class IncrementalUndoStrategy(RollbackStrategy):
                 affected_files=affected_files,
             )
             
-        except Exception as e:
-            logger.error(f"Incremental undo failed: {e}")
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, shutil.Error) as e:
+            logger.error(f"Incremental undo failed: {e}", exc_info=True)
             return RollbackResult(
                 success=False,
                 rollback_id=rollback_id,
@@ -514,8 +515,8 @@ class IncrementalUndoStrategy(RollbackStrategy):
             
             return False
             
-        except Exception as e:
-            logger.error(f"Failed to execute inverse operation: {e}")
+        except (OSError, json.JSONDecodeError, KeyError, shutil.Error) as e:
+            logger.error(f"Failed to execute inverse operation: {e}", exc_info=True)
             return False
     
     def _generate_rollback_id(self) -> str:
@@ -679,8 +680,8 @@ class RollbackManager:
                 with open(checkpoint_file) as f:
                     data = json.load(f)
                     self._checkpoints = [Checkpoint(**cp) for cp in data]
-            except Exception as e:
-                logger.error(f"Failed to load checkpoints: {e}")
+            except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+                logger.error(f"Failed to load checkpoints: {e}", exc_info=True)
     
     def _save_checkpoints(self):
         """Save checkpoints to file"""
@@ -773,8 +774,8 @@ class RollbackManager:
             try:
                 repo = pygit2.Repository(".")
                 git_commit = repo.head.target.hex
-            except Exception:
-                pass
+            except (OSError, KeyError) as e:
+                logger.warning(f"Failed to get git commit for checkpoint: {e}", exc_info=True)
         
         # Capture state snapshot
         state_snapshot = self._capture_state_snapshot()

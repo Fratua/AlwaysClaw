@@ -455,7 +455,7 @@ class ExpressionEvaluator:
         
         try:
             return eval(eval_str, {"__builtins__": {}}, eval_context)
-        except Exception as e:
+        except (SyntaxError, NameError, TypeError, ValueError) as e:
             logger.warning(f"Expression evaluation failed: {e}")
             return None
 
@@ -909,7 +909,7 @@ class TaskExecutor(ABC):
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute a task."""
-        pass
+        ...
 
 
 class LLMTaskExecutor(TaskExecutor):
@@ -981,7 +981,7 @@ class ShellTaskExecutor(TaskExecutor):
             }
         except subprocess.TimeoutExpired:
             raise TaskExecutionError(f"Shell command timed out: {command}")
-        except Exception as e:
+        except OSError as e:
             raise TaskExecutionError(f"Shell command failed: {e}")
 
 
@@ -1016,7 +1016,7 @@ class PythonTaskExecutor(TaskExecutor):
                              if not k.startswith('_') and k not in 
                              ['context', 'inputs', 'variables', 'tasks']}
             }
-        except Exception as e:
+        except (SyntaxError, NameError, TypeError, ValueError) as e:
             raise TaskExecutionError(f"Python execution failed: {e}")
 
 
@@ -1058,7 +1058,7 @@ class HTTPTaskExecutor(TaskExecutor):
                         'data': await response.json() if response.content_type == 'application/json' 
                                 else await response.text()
                     }
-        except Exception as e:
+        except aiohttp.ClientError as e:
             raise TaskExecutionError(f"HTTP request failed: {e}")
     
     def _resolve_template(self, template: str, evaluator: ExpressionEvaluator) -> str:
@@ -1283,7 +1283,7 @@ class E2EWorkflowEngine:
                 execution_duration_ms=duration
             )
             
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.exception(f"Workflow execution failed: {e}")
             
             state.status = WorkflowStatus.FAILED
@@ -1356,7 +1356,7 @@ class E2EWorkflowEngine:
                     logger.info(f"Task {task_id} completed successfully")
                     return True
                     
-                except Exception as e:
+                except (OSError, RuntimeError, PermissionError) as e:
                     last_error = e
                     task_state.retry_count = attempt + 1
                     
@@ -1374,7 +1374,7 @@ class E2EWorkflowEngine:
             logger.error(f"Task {task_id} failed after {retry_policy.max_attempts} attempts")
             return False
             
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.exception(f"Task execution error: {e}")
             task_state.status = TaskStatus.FAILED
             task_state.error_message = str(e)
@@ -1461,7 +1461,7 @@ class E2EWorkflowEngine:
                         executor = TaskExecutorRegistry.get_executor(comp_task_def.type)
                         await executor.execute(comp_task_def, context)
                         logger.info(f"Compensation for task {task_id} executed")
-                    except Exception as e:
+                    except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                         logger.error(f"Compensation for task {task_id} failed: {e}")
     
     async def _create_checkpoint(self, workflow_id: str) -> None:

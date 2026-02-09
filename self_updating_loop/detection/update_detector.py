@@ -202,7 +202,8 @@ class FileSystemMonitor:
         try:
             with open(path, 'rb') as f:
                 return hashlib.md5(f.read()).hexdigest()
-        except Exception:
+        except OSError as e:
+            logger.warning(f"Failed to hash file {path}: {e}")
             return ""
     
     def get_changes(self) -> List[Dict[str, Any]]:
@@ -242,8 +243,8 @@ class GitRepositoryMonitor:
         if self._repo is None:
             try:
                 self._repo = pygit2.Repository(self.repo_path)
-            except Exception as e:
-                logger.error(f"Failed to open Git repository: {e}")
+            except (OSError, KeyError) as e:
+                logger.error(f"Failed to open Git repository: {e}", exc_info=True)
         
         return self._repo
     
@@ -280,8 +281,8 @@ class GitRepositoryMonitor:
             
             self.last_checked_commit = current_commit
             
-        except Exception as e:
-            logger.error(f"Git check failed: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logger.error(f"Git check failed: {e}", exc_info=True)
         
         return updates
     
@@ -296,8 +297,8 @@ class GitRepositoryMonitor:
                 if commit.hex == since_commit:
                     break
                 commits.append(commit)
-        except Exception as e:
-            logger.error(f"Failed to get commits: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logger.error(f"Failed to get commits: {e}", exc_info=True)
         
         return commits
     
@@ -350,8 +351,8 @@ class GitRepositoryMonitor:
                     # Check if this is a new tag
                     # In real implementation, track seen tags
                     pass
-        except Exception as e:
-            logger.error(f"Failed to check tags: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logger.error(f"Failed to check tags: {e}", exc_info=True)
         
         return updates
     
@@ -363,8 +364,8 @@ class GitRepositoryMonitor:
                 with open(version_file) as f:
                     data = json.load(f)
                     return data.get("version", "0.0.0")
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.warning(f"Failed to read version file: {e}")
         return "0.0.0"
     
     def _get_target_version(self, commit: pygit2.Commit) -> str:
@@ -422,8 +423,8 @@ class RemoteRegistryClient:
                     else:
                         logger.warning(f"Remote check failed: {response.status}")
                         
-        except Exception as e:
-            logger.error(f"Remote registry check failed: {e}")
+        except (aiohttp.ClientError, OSError, TimeoutError) as e:
+            logger.error(f"Remote registry check failed: {e}", exc_info=True)
         
         return updates
     
@@ -447,8 +448,8 @@ class RemoteRegistryClient:
                 remote_url=data.get("download_url"),
                 metadata=data.get("metadata", {}),
             )
-        except Exception as e:
-            logger.error(f"Failed to parse remote update: {e}")
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Failed to parse remote update: {e}", exc_info=True)
             return None
 
 

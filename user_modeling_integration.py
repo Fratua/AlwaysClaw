@@ -190,7 +190,7 @@ class ProactivePersonalizationEngine:
             try:
                 self.suggestion_handlers[suggestion_type](suggestion)
                 return True
-            except Exception as e:
+            except (OSError, RuntimeError, PermissionError) as e:
                 print(f"Error executing suggestion: {e}")
                 return False
                 

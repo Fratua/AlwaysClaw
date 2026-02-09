@@ -773,7 +773,7 @@ class SynchronizedOutputOrchestrator:
             try:
                 await task
                 results[modality] = {'status': 'success'}
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.error(f"Error rendering {modality}: {e}")
                 results[modality] = {'status': 'error', 'error': str(e)}
         
@@ -1217,7 +1217,7 @@ class AgentLoop:
             await self.handler(session)
             self.last_run = datetime.now()
             self.run_count += 1
-        except Exception as e:
+        except (OSError, RuntimeError, PermissionError) as e:
             logger.error(f"Error in agent loop {self.loop_id}: {e}")
 
 

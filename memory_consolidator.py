@@ -241,7 +241,7 @@ class MemoryConsolidator:
                 # Archive the log
                 await self._archive_log(log_file)
                 
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 report.errors.append(f"{log_file.name}: {str(e)}")
         
         # Clean up old archives

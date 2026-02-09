@@ -62,7 +62,7 @@ class Condition:
         try:
             # WARNING: In production, use a safe evaluation method
             return eval(self.expression, {"__builtins__": {}}, context)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.warning(f"Condition evaluation failed for expression '{self.expression}': {e}")
             return False
 

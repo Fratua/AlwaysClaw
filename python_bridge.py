@@ -87,7 +87,7 @@ class PythonBridge:
                 from openai_client import OpenAIClient
                 self.llm_client = OpenAIClient.get_instance()
                 logger.info(f"OpenAI GPT-5.2 client initialized (model={self.llm_client.model})")
-            except Exception as e:
+            except (ImportError, RuntimeError, OSError, ValueError) as e:
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 raise
 
@@ -101,7 +101,19 @@ class PythonBridge:
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
 
-        self.db_connection = sqlite3.connect(db_path)
+        if db_dir and not os.access(db_dir, os.W_OK):
+            raise PermissionError(
+                f"Memory DB directory is not writable: {db_dir}\n"
+                f"Ensure the process has write permissions, or set MEMORY_DB_PATH to a writable location."
+            )
+
+        try:
+            self.db_connection = sqlite3.connect(db_path)
+        except sqlite3.OperationalError as e:
+            raise sqlite3.OperationalError(
+                f"Cannot open memory database at {db_path}: {e}\n"
+                f"Check file permissions and disk space."
+            ) from e
         self.db_connection.row_factory = sqlite3.Row
 
         # Apply schema
@@ -126,7 +138,7 @@ class PythonBridge:
                 filtered_sql = '\n'.join(filtered)
                 self.db_connection.executescript(filtered_sql)
                 logger.info(f"Memory DB initialized at {db_path}")
-            except Exception as e:
+            except (sqlite3.Error, OSError) as e:
                 logger.error(f"Failed to apply memory schema: {e}")
         else:
             logger.warning(f"Memory schema not found at {schema_path}")
@@ -247,7 +259,7 @@ class PythonBridge:
                 )
             self.db_connection.commit()
             return {"results": results, "count": len(results)}
-        except Exception as e:
+        except (sqlite3.Error, ValueError) as e:
             logger.error(f"Memory search error: {e}")
             return {"results": [], "count": 0, "error": str(e)}
 
@@ -267,7 +279,7 @@ class PythonBridge:
         try:
             shutil.copy2(db_path, backup_path)
             return {"backed_up": True, "path": backup_path}
-        except Exception as e:
+        except OSError as e:
             return {"backed_up": False, "error": str(e)}
 
     def _handle_memory_sync(self, **params):
@@ -367,7 +379,7 @@ class PythonBridge:
             return {"unread": unread_count}
         except ImportError:
             return {"unread": 0, "error": "Gmail client not available"}
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
             return {"unread": 0, "error": str(e)}
 
     def _handle_gmail_process_batch(self, **params):
@@ -396,7 +408,7 @@ class PythonBridge:
             )
         except ImportError:
             return {"called": False, "error": "Twilio client not available"}
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
             return {"called": False, "error": str(e)}
 
     def _handle_twilio_sms(self, **params):
@@ -414,7 +426,7 @@ class PythonBridge:
             )
         except ImportError:
             return {"sent": False, "error": "Twilio client not available"}
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
             return {"sent": False, "error": str(e)}
 
     # ── TTS handlers ─────────────────────────────────────────────
@@ -462,7 +474,7 @@ class PythonBridge:
                 return {"text": "", "error": f"Speech recognition failed: {result.reason}"}
         except ImportError:
             return {"text": "", "error": "Azure Speech SDK not installed (pip install azure-cognitiveservices-speech)"}
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             return {"text": "", "error": str(e)}
 
     # ── Auth handlers ────────────────────────────────────────────
@@ -486,10 +498,8 @@ class PythonBridge:
         except ImportError:
             pass
 
-        # Fallback: at least verify token is non-empty and looks valid
-        if len(token) < 10:
-            return {"valid": False, "error": "Token too short"}
-        return {"valid": True, "note": "Basic validation only (no JWT secret configured)"}
+        # No JWT_SECRET configured and no JWT library available - cannot validate
+        return {"valid": False, "error": "JWT_SECRET not configured; cannot validate tokens"}
 
     # ── Loop handler registration (called from loop_adapters.py) ─
 
@@ -500,15 +510,17 @@ class PythonBridge:
             loop_handlers = get_loop_handlers(self.llm_client)
             self.handlers.update(loop_handlers)
             logger.info(f"Registered {len(loop_handlers)} loop handlers")
-        except Exception as e:
+        except (ImportError, RuntimeError) as e:
             logger.error(f"Failed to register loop handlers: {e}")
 
     # ── Main event loop ──────────────────────────────────────────
 
     def _check_env_vars(self):
-        """Check required env vars at startup and log what's missing."""
-        env_features = {
+        """Check required and optional env vars at startup and log what's missing."""
+        required_vars = {
             'OPENAI_API_KEY': 'LLM completions (llm.complete, llm.generate, cognitive loops)',
+        }
+        optional_vars = {
             'MEMORY_DB_PATH': 'Memory persistence (default: ./data/memory.db)',
             'GMAIL_CREDENTIALS_PATH': 'Gmail integration (gmail.send, gmail.read, gmail.search)',
             'TWILIO_ACCOUNT_SID': 'Twilio voice/SMS (twilio.call, twilio.sms)',
@@ -517,14 +529,17 @@ class PythonBridge:
             'AZURE_SPEECH_REGION': 'Speech-to-text',
             'JWT_SECRET': 'JWT token validation (auth.validate)',
         }
-        missing = []
-        for var, feature in env_features.items():
+        for var, feature in required_vars.items():
             if not os.environ.get(var):
-                missing.append(f"  {var}: {feature}")
-        if missing:
+                logger.error(f"REQUIRED env var missing: {var} ({feature})")
+        missing_optional = []
+        for var, feature in optional_vars.items():
+            if not os.environ.get(var):
+                missing_optional.append(f"  {var}: {feature}")
+        if missing_optional:
             logger.warning(
-                "Missing environment variables (features will be disabled):\n"
-                + "\n".join(missing)
+                "Optional environment variables not set (features will be disabled):\n"
+                + "\n".join(missing_optional)
             )
 
     def run(self):
@@ -537,12 +552,12 @@ class PythonBridge:
         # Initialize shared resources
         try:
             self._initialize_llm()
-        except Exception as e:
+        except (ImportError, RuntimeError, OSError, ValueError) as e:
             logger.warning(f"OpenAI client init deferred: {e}")
 
         try:
             self._initialize_memory_db()
-        except Exception as e:
+        except (sqlite3.Error, OSError) as e:
             logger.warning(f"Memory DB init deferred: {e}")
 
         # Register loop handlers
@@ -590,7 +605,7 @@ class PythonBridge:
                     "id": req_id,
                     "result": result,
                 })
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, KeyError, TypeError, ImportError) as e:
                 logger.error(f"Handler error for {method}: {e}\n{traceback.format_exc()}")
                 self._send_error(req_id, -32000, str(e))
 
@@ -600,7 +615,7 @@ class PythonBridge:
             line = json.dumps(response, default=str)
             sys.stdout.write(line + '\n')
             sys.stdout.flush()
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to send response: {e}")
 
     def _send_error(self, req_id: Optional[Any], code: int, message: str):

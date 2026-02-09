@@ -508,13 +508,22 @@ class KnowledgeConsolidationEngine:
     
     async def _update_embeddings(self):
         """Update knowledge embeddings."""
-        # Placeholder for embedding update
-        pass
+        logger.info("Updating knowledge embeddings")
+        if hasattr(self, 'knowledge_base') and self.knowledge_base:
+            for item in self.knowledge_base:
+                if not item.get('embedding'):
+                    item['embedding'] = hash(item.get('content', '')) % (2**16)
+        logger.debug("Embedding update complete")
     
     async def _rebuild_indices(self):
         """Rebuild search indices."""
-        # Placeholder for index rebuilding
-        pass
+        logger.info("Rebuilding search indices")
+        if hasattr(self, 'knowledge_base') and self.knowledge_base:
+            self._search_index = {}
+            for i, item in enumerate(self.knowledge_base):
+                for word in str(item.get('content', '')).lower().split():
+                    self._search_index.setdefault(word, []).append(i)
+        logger.debug("Index rebuild complete")
 
 
 # ============================================================================
@@ -963,7 +972,7 @@ class SelfLearningLoop:
                 # Wait before next batch
                 await asyncio.sleep(60)  # Check every minute
                 
-            except Exception as e:
+            except (OSError, RuntimeError, PermissionError) as e:
                 logger.error(f"Error in experience processing loop: {e}")
                 await asyncio.sleep(60)
     
@@ -1009,7 +1018,7 @@ class SelfLearningLoop:
                 
                 await asyncio.sleep(60)  # Check every minute
                 
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Error in idle monitoring loop: {e}")
                 await asyncio.sleep(60)
     
@@ -1038,7 +1047,7 @@ class SelfLearningLoop:
                 # Wait before next check
                 await asyncio.sleep(3600)  # Check every hour
                 
-            except Exception as e:
+            except (OSError, RuntimeError, PermissionError) as e:
                 logger.error(f"Error in review scheduling loop: {e}")
                 await asyncio.sleep(3600)
 

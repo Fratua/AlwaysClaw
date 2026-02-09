@@ -679,7 +679,7 @@ class HierarchicalGoalManager:
             
             return subgoals
             
-        except Exception as e:
+        except (KeyError, ValueError, TypeError) as e:
             logger.error(f"LLM decomposition failed: {e}")
             return self._rule_based_decomposition(goal, target_level)
     
@@ -875,7 +875,7 @@ class DynamicReplanningEngine:
                         
             except asyncio.TimeoutError:
                 continue
-            except Exception as e:
+            except (KeyError, ValueError, RuntimeError) as e:
                 logger.error(f"Error in replanning monitor: {e}")
     
     def _should_replan(self, trigger: TriggerEvent, 
@@ -942,7 +942,7 @@ class DynamicReplanningEngine:
             
             return new_plan
             
-        except Exception as e:
+        except (KeyError, ValueError, RuntimeError) as e:
             logger.error(f"Replanning failed: {e}")
             return None
         finally:
@@ -1887,7 +1887,7 @@ class AdvancedPlanningLoop:
                         'result': result
                     })
                     
-                except Exception as e:
+                except (OSError, RuntimeError, PermissionError) as e:
                     logger.error(f"Goal {goal_id} failed: {e}")
                     
                     # Update state on failure
@@ -1933,7 +1933,7 @@ class AdvancedPlanningLoop:
             else:
                 state.status = ExecutionStatus.FAILED
             
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error(f"Execution failed: {e}")
             state.status = ExecutionStatus.FAILED
         
@@ -2010,7 +2010,7 @@ class AdvancedPlanningLoop:
                     await callback(event_type, data)
                 else:
                     callback(event_type, data)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Event callback error: {e}")
 
 

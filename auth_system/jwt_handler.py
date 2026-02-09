@@ -245,7 +245,7 @@ class JWTValidator:
                 signature="",
                 raw_token=token
             )
-        except Exception as e:
+        except (jwt.DecodeError, jwt.InvalidTokenError, ValueError, KeyError) as e:
             raise JWTError(f"Failed to decode token: {e}")
 
 

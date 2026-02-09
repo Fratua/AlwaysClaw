@@ -555,7 +555,7 @@ class StepExecutor:
             error = f"Step timed out after {step.timeout_seconds}s"
             return await self._handle_step_failure(step, context, error)
             
-        except Exception as e:
+        except (OSError, RuntimeError, PermissionError) as e:
             error = f"{type(e).__name__}: {str(e)}"
             return await self._handle_step_failure(step, context, error)
     
@@ -579,7 +579,7 @@ class StepExecutor:
                     timeout=timeout
                 )
                 
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 last_error = e
                 
                 if attempt >= max_attempts:
@@ -865,7 +865,7 @@ class E2ELoop:
             
             await self.state_manager.save_instance(instance)
             
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             instance.status = WorkflowStatus.FAILED
             instance.last_error = str(e)
             await self.state_manager.save_instance(instance)

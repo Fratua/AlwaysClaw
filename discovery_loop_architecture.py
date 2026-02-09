@@ -8,6 +8,7 @@ for autonomous exploration and mapping.
 
 import asyncio
 import json
+import logging
 import sqlite3
 import statistics
 from collections import Counter, deque
@@ -20,6 +21,8 @@ import random
 import numpy as np
 import networkx as nx
 from sentence_transformers import SentenceTransformer
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # DATA MODELS
@@ -842,7 +845,7 @@ class DiscoveryLoop:
                 # Sleep before next iteration
                 await asyncio.sleep(self.config.get("loop_interval", 300))
                 
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                 print(f"Discovery loop error: {e}")
                 await asyncio.sleep(60)
     
@@ -859,8 +862,11 @@ class DiscoveryLoop:
     
     async def _exploit(self):
         """Execute exploitation (review existing knowledge)"""
-        # In real implementation, would review and consolidate existing knowledge
-        pass
+        logger.info("Exploiting existing knowledge")
+        stats = await self.mapper.get_stats()
+        if stats.total_nodes > 0:
+            recent = await self.logger.get_recent_count(hours=24)
+            logger.info(f"Reviewed {stats.total_nodes} nodes, {recent} recent discoveries")
     
     async def get_status(self) -> DiscoveryStatus:
         """Get current status"""

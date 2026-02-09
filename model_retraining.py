@@ -890,7 +890,7 @@ class ModelRetrainingPipeline:
                 message=f'Successfully retrained using {strategy} strategy'
             )
             
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError) as e:
             logger.error(f"Retraining failed: {e}")
             return RetrainingResult(
                 triggered=True,

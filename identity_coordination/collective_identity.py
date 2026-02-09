@@ -284,7 +284,7 @@ class IdentityCohesionMonitor:
                     "average": sum(cohesion_scores.values()) / len(cohesion_scores) if cohesion_scores else 0
                 })
                 
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 print(f"Cohesion monitoring error: {e}")
                 
             await asyncio.sleep(self.check_interval)

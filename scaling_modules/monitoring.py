@@ -208,7 +208,7 @@ class MetricsCollector:
         for collector in self.custom_collectors:
             try:
                 collector(self)
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Custom collector error: {e}")
 
 
@@ -456,7 +456,7 @@ class AlertManager:
             if handler:
                 try:
                     handler(alert)
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     logger.error(f"Notification error for {channel.value}: {e}")
         
         alert.notification_sent = True
@@ -548,7 +548,7 @@ class AlertManager:
         while not self._stop_event.is_set():
             try:
                 self.check_rules()
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                 logger.error(f"Error in alert loop: {e}")
             
             self._stop_event.wait(10)  # Check every 10 seconds

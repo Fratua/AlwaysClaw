@@ -102,7 +102,7 @@ class UserAdaptationEngine:
                 
             return success
             
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"Error applying adaptation: {e}")
             return False
             
@@ -437,7 +437,7 @@ class PrivacyManager:
                 
             return True
             
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"Error deleting user data: {e}")
             return False
 

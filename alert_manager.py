@@ -118,8 +118,8 @@ class EmailNotifier(BaseNotifier):
         self.smtp_server = config.get('smtp_server', 'smtp.gmail.com')
         self.smtp_port = config.get('smtp_port', 587)
         self.use_tls = config.get('use_tls', True)
-        self.username = config.get('username')
-        self.password = config.get('password')
+        self.username = os.environ.get('SMTP_USERNAME') or config.get('username')
+        self.password = os.environ.get('SMTP_PASSWORD') or config.get('password')
         self.recipients = config.get('recipients', [])
         self.sender_name = config.get('sender_name', 'OpenClaw Monitor')
         self.templates_dir = config.get('templates_dir', './templates')
@@ -149,8 +149,8 @@ class EmailNotifier(BaseNotifier):
             alert.channels_sent.append('email')
             return True
             
-        except Exception as e:
-            print(f"Email notification failed: {e}")
+        except (smtplib.SMTPException, ConnectionError, TimeoutError) as e:
+            logger.error(f"Email notification failed: {e}")
             return False
     
     def _send_smtp(self, msg: MIMEMultipart):
@@ -266,7 +266,7 @@ class EmailNotifier(BaseNotifier):
             </div>
             
             <div style="text-align: center;">
-                <a href="http://localhost:8000/alerts/{alert.id}" class="btn">View in Dashboard</a>
+                <a href="{os.environ.get('DASHBOARD_URL', 'http://localhost:8000/alerts/')}{alert.id}" class="btn">View in Dashboard</a>
             </div>
         </div>
         
@@ -307,26 +307,31 @@ class TwilioSMSNotifier(BaseNotifier):
     
     def __init__(self, config: Dict):
         super().__init__(config)
-        self.account_sid = config.get('account_sid')
-        self.auth_token = config.get('auth_token')
+        self.account_sid = os.environ.get('TWILIO_ACCOUNT_SID') or config.get('account_sid')
+        self.auth_token = os.environ.get('TWILIO_AUTH_TOKEN') or config.get('auth_token')
         self.from_number = config.get('from_number')
         self.to_numbers = config.get('to_numbers', [])
         self.max_length = config.get('max_length', 1600)
         self.include_link = config.get('include_link', True)
-    
+        self.dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:8000/alerts/')
+
     async def send(self, alert: Alert) -> bool:
         """Send SMS notification"""
         if not self.enabled or not self.to_numbers:
             return False
-        
+
         try:
             from twilio.rest import Client
-            
+        except ImportError:
+            logger.error("Twilio package not installed (pip install twilio)")
+            return False
+
+        try:
             client = Client(self.account_sid, self.auth_token)
-            
+
             # Build message
             message = self._build_message(alert)
-            
+
             # Send to all recipients
             for number in self.to_numbers:
                 await asyncio.to_thread(
@@ -335,14 +340,14 @@ class TwilioSMSNotifier(BaseNotifier):
                     from_=self.from_number,
                     to=number
                 )
-            
+
             alert.channels_sent.append('sms')
             return True
-            
-        except Exception as e:
-            print(f"SMS notification failed: {e}")
+
+        except (ConnectionError, TimeoutError) as e:
+            logger.error(f"SMS notification failed: {e}")
             return False
-    
+
     def _build_message(self, alert: Alert) -> str:
         """Build SMS message"""
         emoji_map = {
@@ -352,19 +357,19 @@ class TwilioSMSNotifier(BaseNotifier):
             SeverityLevel.LOW: 'ℹ️',
             SeverityLevel.INFO: '📝'
         }
-        
+
         emoji = emoji_map.get(alert.severity, '🔔')
-        
+
         message = f"""{emoji} [{alert.severity.name}] {alert.site_name}
 
 {alert.description[:100]}{'...' if len(alert.description) > 100 else ''}
 
 Category: {alert.category}
 Time: {alert.detected_at.strftime('%H:%M')}"""
-        
+
         if self.include_link:
-            message += f"\n\nView: http://localhost:8000/alerts/{alert.id}"
-        
+            message += f"\n\nView: {self.dashboard_url}{alert.id}"
+
         return message[:self.max_length]
 
 
@@ -373,8 +378,8 @@ class TwilioVoiceNotifier(BaseNotifier):
     
     def __init__(self, config: Dict):
         super().__init__(config)
-        self.account_sid = config.get('account_sid')
-        self.auth_token = config.get('auth_token')
+        self.account_sid = os.environ.get('TWILIO_ACCOUNT_SID') or config.get('account_sid')
+        self.auth_token = os.environ.get('TWILIO_AUTH_TOKEN') or config.get('auth_token')
         self.from_number = config.get('from_number')
         self.to_numbers = config.get('to_numbers', [])
         self.voice = config.get('voice', 'Polly.Joanna')
@@ -393,12 +398,16 @@ class TwilioVoiceNotifier(BaseNotifier):
         
         try:
             from twilio.rest import Client
-            
+        except ImportError:
+            logger.error("Twilio package not installed (pip install twilio)")
+            return False
+
+        try:
             client = Client(self.account_sid, self.auth_token)
-            
+
             # Build TwiML
             twiml = self._build_twiml(alert)
-            
+
             # Make calls
             for number in self.to_numbers:
                 await asyncio.to_thread(
@@ -407,12 +416,12 @@ class TwilioVoiceNotifier(BaseNotifier):
                     to=number,
                     from_=self.from_number
                 )
-            
+
             alert.channels_sent.append('voice')
             return True
-            
-        except Exception as e:
-            print(f"Voice notification failed: {e}")
+
+        except (ConnectionError, TimeoutError) as e:
+            logger.error(f"Voice notification failed: {e}")
             return False
     
     def _build_twiml(self, alert: Alert) -> str:
@@ -461,8 +470,8 @@ class TTSNotifier(BaseNotifier):
             alert.channels_sent.append('tts')
             return True
             
-        except Exception as e:
-            print(f"TTS notification failed: {e}")
+        except (ImportError, OSError, RuntimeError) as e:
+            logger.error(f"TTS notification failed: {e}")
             return False
     
     def _build_message(self, alert: Alert) -> str:
@@ -489,7 +498,7 @@ class TTSNotifier(BaseNotifier):
             engine.say(message)
             engine.runAndWait()
         except ImportError:
-            print(f"[TTS] {message}")
+            logger.warning(f"[TTS] pyttsx3 not available, cannot speak: {message[:80]}")
 
 
 class WebhookNotifier(BaseNotifier):
@@ -525,11 +534,11 @@ class WebhookNotifier(BaseNotifier):
                         alert.channels_sent.append('webhook')
                         return True
                     else:
-                        print(f"Webhook returned status {response.status}")
+                        logger.warning(f"Webhook returned status {response.status}")
                         return False
-                        
-        except Exception as e:
-            print(f"Webhook notification failed: {e}")
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.error(f"Webhook notification failed: {e}")
             return False
 
 
@@ -715,7 +724,7 @@ class AlertManager:
             if channel_name in self.channels:
                 success = await self.channels[channel_name].send(alert)
                 if not success:
-                    print(f"Failed to send alert through {channel_name}")
+                    logger.warning(f"Failed to send alert through {channel_name}")
         
         alert.status = "sent"
         self.alert_history.append(alert)
@@ -763,71 +772,3 @@ class AlertManager:
             'by_site': by_site,
             'throttled_count': sum(1 for a in self.alert_history if a.status == 'throttled')
         }
-
-
-# Example usage
-async def main():
-    """Example usage of the alert manager"""
-    config = {
-        'channels': ['email', 'tts'],
-        'email': {
-            'enabled': True,
-            'smtp_server': 'smtp.gmail.com',
-            'smtp_port': 587,
-            'username': 'your-email@gmail.com',
-            'password': 'your-app-password',
-            'recipients': ['alert@example.com'],
-            'sender_name': 'OpenClaw Monitor'
-        },
-        'tts': {
-            'enabled': True,
-            'voice_id': 'default',
-            'speak_on_severity': ['CRITICAL', 'HIGH']
-        },
-        'throttling': {
-            'cooldown_periods': {
-                'CRITICAL': 0,
-                'HIGH': 300,
-                'MEDIUM': 900,
-                'LOW': 3600,
-                'INFO': 86400
-            },
-            'rate_limits': {
-                'per_site_per_hour': 10,
-                'per_site_per_day': 50
-            }
-        }
-    }
-    
-    # Create alert manager
-    manager = AlertManager(config)
-    
-    # Simulate a change
-    change_data = {
-        'site_id': 'abc123',
-        'site_name': 'Example Site',
-        'site_url': 'https://example.com',
-        'change_type': 'DOM',
-        'category': 'price',
-        'description': 'Price changed from $100 to $90',
-        'diff_data': {
-            'dom_changes': [
-                {'type': 'TEXT_CHANGED', 'element': {'tag': 'span', 'class': 'price'}}
-            ]
-        }
-    }
-    
-    # Process the change
-    alert = await manager.process_change(change_data)
-    
-    if alert:
-        print(f"Alert created: {alert.id}")
-        print(f"Severity: {alert.severity.name}")
-        print(f"Channels sent: {alert.channels_sent}")
-    
-    # Print statistics
-    print(f"\nStatistics: {manager.get_statistics()}")
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

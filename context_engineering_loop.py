@@ -457,7 +457,8 @@ class CompressionStrategy(ABC):
         elements: List[ContextElement],
         target_tokens: int
     ) -> CompressionResult:
-        pass
+        """Compress context elements to fit target token budget."""
+        ...
 
 
 class ExtractionStrategy(CompressionStrategy):
@@ -623,7 +624,7 @@ class CompressionOrchestrator:
                 result = await strategy.compress(elements, target_tokens)
                 if result.compressed_tokens <= target_tokens:
                     return result
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.warning(f"Compression strategy failed: {e}")
                 continue
         
@@ -844,7 +845,7 @@ class ContextMonitor:
                 snapshot = await self.capture_snapshot()
                 await self.analyze_snapshot(snapshot)
                 await asyncio.sleep(self.config.monitoring_interval)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Monitoring error: {e}")
                 await asyncio.sleep(self.config.monitoring_interval)
     

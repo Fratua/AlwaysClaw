@@ -123,6 +123,7 @@ class Supervisor:
         self.time_window = time_window
         self.children: Dict[str, ChildSpec] = {}
         self.child_pids: Dict[str, int] = {}
+        self.child_tasks: Dict[str, asyncio.Task] = {}
         self.restart_history: Dict[str, List[float]] = {}
         self.running = False
         
@@ -140,33 +141,44 @@ class Supervisor:
     async def stop(self):
         """Stop all children."""
         self.running = False
-        for child_id in list(self.child_pids.keys()):
+        for child_id in list(self.child_tasks.keys()) + list(self.child_pids.keys()):
             await self._terminate_child(child_id)
             
     async def _start_child(self, spec: ChildSpec):
-        """Start a single child. Override in subclasses."""
-        raise NotImplementedError
-        
-    async def _terminate_child(self, child_id: str):
-        """Terminate a child process."""
-        if child_id not in self.child_pids:
-            return
-            
-        pid = self.child_pids[child_id]
+        """Start a single child as an asyncio task."""
         try:
-            process = psutil.Process(pid)
-            process.terminate()
-            
-            # Wait for graceful termination
+            task = asyncio.create_task(
+                spec.start_func(*spec.start_args, **spec.start_kwargs)
+            )
+            self.child_tasks[spec.id] = task
+            logger.info(f"Started child {spec.id}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error(f"Failed to start child {spec.id}: {e}")
+
+    async def _terminate_child(self, child_id: str):
+        """Terminate a child (asyncio task or OS process)."""
+        # Handle asyncio tasks
+        if child_id in self.child_tasks:
+            task = self.child_tasks.pop(child_id)
+            task.cancel()
             try:
-                process.wait(timeout=5)
-            except psutil.TimeoutExpired:
-                process.kill()
-                
-        except psutil.NoSuchProcess:
-            pass
-        finally:
-            del self.child_pids[child_id]
+                await task
+            except (asyncio.CancelledError, RuntimeError, OSError):
+                pass
+            return
+
+        # Handle real OS PIDs (from subprocess spawners)
+        if child_id in self.child_pids:
+            pid = self.child_pids.pop(child_id)
+            try:
+                process = psutil.Process(pid)
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    process.kill()
+            except psutil.NoSuchProcess:
+                pass
             
     def _exceeded_max_restarts(self, child_id: str) -> bool:
         """Check if max restart intensity exceeded."""
@@ -186,19 +198,6 @@ class OneForOneSupervisor(Supervisor):
     Restarts only the failed child process.
     """
     
-    async def _start_child(self, spec: ChildSpec):
-        """Start a child process."""
-        try:
-            # For demonstration, using asyncio task
-            # In production, this would spawn actual processes
-            task = asyncio.create_task(
-                spec.start_func(*spec.start_args, **spec.start_kwargs)
-            )
-            self.child_pids[spec.id] = id(task)
-            logger.info(f"Started child {spec.id}")
-        except Exception as e:
-            logger.error(f"Failed to start child {spec.id}: {e}")
-            
     async def handle_child_exit(self, child_id: str, exit_code: int):
         """Handle child process exit."""
         if not self.running:
@@ -282,9 +281,9 @@ class OneForAllSupervisor(Supervisor):
                     f"Restarting all children.")
         
         # Terminate all children
-        for cid in list(self.child_pids.keys()):
+        for cid in list(self.child_tasks.keys()) + list(self.child_pids.keys()):
             await self._terminate_child(cid)
-            
+
         # Restart all children in order
         for spec in self.children.values():
             await self._start_child(spec)
@@ -386,16 +385,16 @@ class PreforkWorkerPool(WorkerPool):
                         'status': 'success',
                         'result': result
                     })
-                except Exception as e:
+                except (RuntimeError, OSError, ValueError, TypeError) as e:
                     result_queue.put({
                         'id': task_id,
                         'status': 'error',
                         'error': str(e)
                     })
-                    
+
                 task_count += 1
-                
-            except Exception:
+
+            except (RuntimeError, OSError, ValueError):
                 continue
                 
     def submit(self, task: Callable, *args, **kwargs) -> str:
@@ -550,7 +549,7 @@ class ProcessSpawner:
         # Run the actual target
         try:
             target(*(args or ()), **(kwargs or {}))
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.exception(f"Process failed: {e}")
             raise
             
@@ -563,7 +562,7 @@ class ProcessSpawner:
             handle = win32api.GetCurrentProcess()
             priority_class = self.PRIORITY_CLASSES.get(priority, 32)
             win32process.SetPriorityClass(handle, priority_class)
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.warning(f"Failed to set priority: {e}")
 
 
@@ -608,7 +607,7 @@ class HeartbeatEmitter:
             try:
                 heartbeat = self._collect_metrics()
                 await self._send_heartbeat(heartbeat)
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Heartbeat error: {e}")
                 
             await asyncio.sleep(self.interval)
@@ -714,7 +713,7 @@ class HeartbeatMonitor:
         for callback in self._callbacks:
             try:
                 await callback(process_id, reason)
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError) as e:
                 logger.error(f"Failure callback error: {e}")
                 
     def on_failure(self, callback: Callable):
@@ -776,12 +775,12 @@ class GracefulShutdown:
                     )
                 except asyncio.TimeoutError:
                     logger.warning(f"Timeout stopping {component['name']}")
-                except Exception as e:
+                except (OSError, RuntimeError) as e:
                     logger.error(f"Error stopping {component['name']}: {e}")
                     
             logger.info("Graceful shutdown complete")
             
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.exception(f"Shutdown error: {e}")
         finally:
             asyncio.get_event_loop().call_later(5, lambda: os._exit(0))
@@ -853,6 +852,53 @@ class JobObjectManager:
 
 
 # =============================================================================
+# RESTART MANAGER
+# =============================================================================
+
+class RestartManager:
+    """Manages restart logic with exponential backoff and history tracking."""
+
+    def __init__(self, base_delay: float = 1.0, max_delay: float = 60.0,
+                 max_restarts: int = 10, window_seconds: float = 300.0):
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.max_restarts = max_restarts
+        self.window_seconds = window_seconds
+        self.restart_history: Dict[str, List[float]] = {}
+
+    def record_restart(self, child_id: str) -> None:
+        """Record a restart event for a child."""
+        now = time.time()
+        if child_id not in self.restart_history:
+            self.restart_history[child_id] = []
+        self.restart_history[child_id].append(now)
+
+    def _prune_history(self, child_id: str) -> List[float]:
+        """Remove restart records older than the window."""
+        now = time.time()
+        history = self.restart_history.get(child_id, [])
+        history = [t for t in history if now - t < self.window_seconds]
+        self.restart_history[child_id] = history
+        return history
+
+    def can_restart(self, child_id: str) -> bool:
+        """Return True if the child has not exceeded max restarts within the window."""
+        history = self._prune_history(child_id)
+        return len(history) < self.max_restarts
+
+    def get_backoff_delay(self, child_id: str) -> float:
+        """Calculate exponential backoff delay based on recent restart count."""
+        history = self._prune_history(child_id)
+        attempt = len(history)
+        delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+        return delay
+
+    def reset(self, child_id: str) -> None:
+        """Reset restart history for a child."""
+        self.restart_history.pop(child_id, None)
+
+
+# =============================================================================
 # SYSTEM SUPERVISOR (Main Entry Point)
 # =============================================================================
 
@@ -900,7 +946,7 @@ class SystemSupervisor:
                         return True
                     return False
                 win32api.SetConsoleCtrlHandler(console_handler, True)
-            except Exception as e:
+            except (OSError, ImportError) as e:
                 logger.warning(f"Failed to set console ctrl handler: {e}")
                 
         signal.signal(signal.SIGINT, self._signal_handler)

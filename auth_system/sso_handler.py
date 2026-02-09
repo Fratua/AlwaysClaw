@@ -8,6 +8,7 @@ Supports:
 - OAuth 2.0 based SSO
 """
 
+import os
 import jwt
 import json
 import base64
@@ -42,17 +43,22 @@ class SAMLProviderConfig:
     slo_url: Optional[str] = None  # Single Logout URL
     x509_cert: str = ""  # IdP signing certificate
     metadata_url: Optional[str] = None
-    
+
     # SP Configuration
     sp_entity_id: str = "openclaw-agent"
-    sp_acs_url: str = "http://localhost:8080/saml/acs"
+    sp_acs_url: Optional[str] = None
     sp_sls_url: Optional[str] = None
-    
+
     # Security settings
     want_assertions_signed: bool = True
     want_response_signed: bool = True
     signature_algorithm: str = "rsa-sha256"
     digest_algorithm: str = "sha256"
+
+    def __post_init__(self):
+        if self.sp_acs_url is None:
+            callback_host = os.environ.get('OAUTH_CALLBACK_HOST', 'localhost')
+            self.sp_acs_url = f"http://{callback_host}:8080/saml/acs"
 
 
 @dataclass
@@ -65,18 +71,23 @@ class OIDCProviderConfig:
     userinfo_endpoint: Optional[str] = None
     jwks_uri: Optional[str] = None
     end_session_endpoint: Optional[str] = None
-    
+
     # Client configuration
     client_id: str = ""
     client_secret: Optional[str] = None
-    redirect_uri: str = "http://localhost:8080/callback"
-    
+    redirect_uri: Optional[str] = None
+
     # Scopes
     scopes_supported: List[str] = field(default_factory=list)
     default_scopes: List[str] = field(default_factory=lambda: ["openid", "profile", "email"])
-    
+
     # Security
     pkce_enabled: bool = True
+
+    def __post_init__(self):
+        if self.redirect_uri is None:
+            callback_host = os.environ.get('OAUTH_CALLBACK_HOST', 'localhost')
+            self.redirect_uri = f"http://{callback_host}:8080/callback"
 
 
 @dataclass
@@ -285,7 +296,7 @@ class SAMLHandler:
                         "SAML signature verification unavailable: "
                         "install signxml (pip install signxml) for production use"
                     )
-                except Exception as sig_err:
+                except (ValueError, TypeError, KeyError, AttributeError) as sig_err:
                     logger.error(f"SAML signature verification failed: {sig_err}")
                     return SAMLAuthenticationResult(
                         success=False,
@@ -326,7 +337,7 @@ class SAMLHandler:
                 session_index=session_index
             )
             
-        except Exception as e:
+        except (ET.ParseError, KeyError, ValueError, AttributeError) as e:
             logger.error(f"SAML response verification failed: {e}")
             return SAMLAuthenticationResult(
                 success=False,
@@ -474,7 +485,7 @@ class OIDCHandler:
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    raise Exception(f"Token request failed: {error_text}")
+                    raise ValueError(f"Token request failed: {error_text}")
                 
                 return await response.json()
     
@@ -512,14 +523,14 @@ class OIDCHandler:
         
         # Verify nonce
         if nonce and claims.get('nonce') != nonce:
-            raise Exception("Nonce mismatch")
+            raise ValueError("Nonce mismatch")
         
         return claims
     
     async def _get_signing_key(self, key_id: Optional[str] = None) -> str:
         """Fetch signing key from JWKS endpoint."""
         if not self.config.jwks_uri:
-            raise Exception("JWKS URI not configured")
+            raise ValueError("JWKS URI not configured")
         
         # Check cache
         if (self._jwks_cache and self._jwks_cache_time and
@@ -538,7 +549,7 @@ class OIDCHandler:
             if key_id is None or key.get('kid') == key_id:
                 return jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
         
-        raise Exception(f"Signing key not found: {key_id}")
+        raise KeyError(f"Signing key not found: {key_id}")
     
     async def get_user_info(self, access_token: str) -> Dict[str, Any]:
         """
@@ -896,7 +907,7 @@ class SSOHandler:
             if id_token:
                 try:
                     id_claims = await handler.validate_id_token(id_token, nonce)
-                except Exception as e:
+                except (jwt.InvalidTokenError, ValueError, KeyError) as e:
                     return OIDCAuthenticationResult(
                         success=False,
                         error=f"ID token validation failed: {e}"
@@ -927,7 +938,7 @@ class SSOHandler:
                 user_info={**id_claims, **user_info}
             )
             
-        except Exception as e:
+        except (aiohttp.ClientError, OSError, ValueError, KeyError) as e:
             logger.error(f"OIDC authentication failed: {e}")
             return OIDCAuthenticationResult(
                 success=False,

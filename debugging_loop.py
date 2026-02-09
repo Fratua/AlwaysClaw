@@ -131,9 +131,9 @@ class DebuggingLoop:
                                     message=line.strip()[:500],
                                     severity='high' if 'CRITICAL' in line else 'medium',
                                 ))
-                    except OSError:
-                        pass
-        except Exception as e:
+                    except OSError as e:
+                        logger.debug(f"Could not read log file {fpath}: {e}")
+        except (OSError, ValueError) as e:
             logger.debug(f"Log scan error: {e}")
 
         return errors
@@ -185,6 +185,6 @@ class DebuggingLoop:
                 description=response[:2000],
                 confidence=0.5,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.warning(f"Fix generation failed: {e}")
             return None

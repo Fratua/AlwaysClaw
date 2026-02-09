@@ -44,7 +44,7 @@ class CitationTracker:
                     data = json.load(f)
                     for cid, cdata in data.items():
                         self.citations_db[cid] = Citation(**cdata)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning(f"Failed to load citations: {e}")
     
     async def _save_citations(self):
@@ -57,7 +57,7 @@ class CitationTracker:
             }
             with open(self.citations_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, default=str)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to save citations: {e}")
     
     async def track_source(
@@ -208,7 +208,7 @@ class CitationTracker:
                 reason="Timeout",
                 last_verified=datetime.now()
             )
-        except Exception as e:
+        except (aiohttp.ClientError, OSError, ConnectionError) as e:
             return VerificationResult(
                 valid=False,
                 reason=str(e),
@@ -293,7 +293,7 @@ class SourceReliabilityTracker:
             try:
                 with open(self.reliability_path, 'r', encoding='utf-8') as f:
                     self.reliability_db = json.load(f)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning(f"Failed to load reliability data: {e}")
         
         # Initialize with known credible domains
@@ -314,7 +314,7 @@ class SourceReliabilityTracker:
             self.reliability_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.reliability_path, 'w', encoding='utf-8') as f:
                 json.dump(self.reliability_db, f, indent=2, default=str)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to save reliability data: {e}")
     
     async def update_reliability(

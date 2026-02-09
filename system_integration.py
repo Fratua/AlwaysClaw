@@ -136,7 +136,7 @@ class SoulEvolutionIntegration:
                     asyncio.create_task(callback(data))
                 else:
                     callback(data)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 print(f"Hook error for {event}: {e}")
     
     async def on_task_complete(self, task: Task, result: TaskResult) -> Dict:
@@ -386,7 +386,7 @@ class AgentLoopWrappers:
             
             return result
             
-        except Exception as e:
+        except (OSError, RuntimeError, PermissionError) as e:
             # Handle error
             error = AgentError(
                 id=f"error_{datetime.now().timestamp()}",

@@ -149,7 +149,7 @@ class AudioCapture:
         for callback in self._callbacks:
             try:
                 callback(frame)
-            except Exception as e:
+            except (OSError, ValueError, RuntimeError) as e:
                 logger.error(f"Capture callback error: {e}")
     
     def register_callback(self, callback: Callable[[AudioFrame], None]):
@@ -423,7 +423,7 @@ class AudioMixer:
             for callback in self._output_callbacks:
                 try:
                     callback(mixed.copy())
-                except Exception as e:
+                except (OSError, ValueError, RuntimeError) as e:
                     logger.error(f"Mix callback error: {e}")
             
             # Sleep to maintain timing
@@ -629,7 +629,7 @@ def get_default_devices() -> Dict[str, Optional[int]]:
             'input': sd.default.device[0],
             'output': sd.default.device[1]
         }
-    except Exception:
+    except (sd.PortAudioError, OSError):
         return {'input': None, 'output': None}
 
 

@@ -202,7 +202,7 @@ class ElevenLabsTTSAdapter:
         try:
             self.client.voices.delete(voice_id)
             return True
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"Error deleting voice: {e}")
             return False
 

@@ -677,7 +677,7 @@ class MonitorEngine:
                 # Update baseline
                 self.snapshots[monitor_id] = current_snapshot
                 
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 print(f"Error checking {monitor_id}: {e}")
                 
             finally:

@@ -40,6 +40,7 @@ class DaemonMaster extends EventEmitter {
     this.controlServer = null;
     this.messageBus = null;
     this.bridge = null;
+    this.bridgeReady = false;
   }
 
   async initialize() {
@@ -78,22 +79,36 @@ class DaemonMaster extends EventEmitter {
   }
   
   async startPythonBridge() {
-    try {
-      this.bridge = getBridge();
-      await this.bridge.start();
-      logger.info('[Master] Python bridge started');
+    const maxAttempts = 3;
+    const retryDelay = 5000;
 
-      this.bridge.on('error', (err) => {
-        logger.error('[Master] Python bridge error:', err);
-      });
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        this.bridge = getBridge();
+        await this.bridge.start();
+        this.bridgeReady = true;
+        logger.info('[Master] Python bridge started');
 
-      this.bridge.on('fatal', (err) => {
-        logger.error('[Master] Python bridge fatal error:', err);
-      });
-    } catch (error) {
-      logger.error('[Master] Failed to start Python bridge:', error);
-      // Don't fail initialization if bridge fails - workers can retry
+        this.bridge.on('error', (err) => {
+          logger.error('[Master] Python bridge error:', err);
+        });
+
+        this.bridge.on('fatal', (err) => {
+          logger.error('[Master] Python bridge fatal error:', err);
+          this.bridgeReady = false;
+        });
+
+        return; // Success
+      } catch (error) {
+        logger.error(`[Master] Failed to start Python bridge (attempt ${attempt}/${maxAttempts}):`, error);
+        this.bridgeReady = false;
+        if (attempt < maxAttempts) {
+          logger.info(`[Master] Retrying bridge start in ${retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+      }
     }
+    logger.error('[Master] Python bridge failed after all retry attempts');
   }
 
   async startControlServer() {
@@ -128,6 +143,7 @@ class DaemonMaster extends EventEmitter {
           }
         }
         // Fallback to first task worker
+        if (this.taskWorkers.size === 0) return null;
         const first = this.taskWorkers.values().next().value;
         return first ? first.worker : null;
       };
@@ -149,14 +165,21 @@ class DaemonMaster extends EventEmitter {
       
       // Wire Python bridge routing
       this.messageBus.routeBridgeRequest = (workerId, data) => {
-        if (!this.bridge) {
-          logger.warn('[Master] Bridge request but bridge not available');
+        if (!this.bridgeReady || !this.bridge) {
+          logger.warn('[Master] Bridge request but bridge not ready');
+          const worker = this.messageBus.findWorker(workerId);
+          if (worker) {
+            worker.send({
+              type: 'python-bridge-response',
+              data: { id: data.id, error: 'Bridge not ready' },
+            });
+          }
           return;
         }
 
         this.bridge.call(data.method, data.params).then(result => {
           const worker = this.messageBus.findWorker(workerId);
-          if (worker) {
+          if (worker && !worker.isDead()) {
             worker.send({
               type: 'python-bridge-response',
               data: { id: data.id, result },
@@ -164,7 +187,7 @@ class DaemonMaster extends EventEmitter {
           }
         }).catch(error => {
           const worker = this.messageBus.findWorker(workerId);
-          if (worker) {
+          if (worker && !worker.isDead()) {
             worker.send({
               type: 'python-bridge-response',
               data: { id: data.id, error: error.message },
@@ -349,17 +372,28 @@ class DaemonMaster extends EventEmitter {
         break;
       case 'python-bridge-request':
         // Direct bridge request from worker (bypasses message bus)
-        if (this.bridge) {
+        if (!this.bridgeReady || !this.bridge) {
+          if (!worker.isDead()) {
+            worker.send({
+              type: 'python-bridge-response',
+              data: { id: message.data.id, error: 'Bridge not ready' },
+            });
+          }
+        } else {
           this.bridge.call(message.data.method, message.data.params).then(result => {
-            worker.send({
-              type: 'python-bridge-response',
-              data: { id: message.data.id, result },
-            });
+            if (!worker.isDead()) {
+              worker.send({
+                type: 'python-bridge-response',
+                data: { id: message.data.id, result },
+              });
+            }
           }).catch(error => {
-            worker.send({
-              type: 'python-bridge-response',
-              data: { id: message.data.id, error: error.message },
-            });
+            if (!worker.isDead()) {
+              worker.send({
+                type: 'python-bridge-response',
+                data: { id: message.data.id, error: error.message },
+              });
+            }
           });
         }
         break;
@@ -486,8 +520,14 @@ class DaemonMaster extends EventEmitter {
       const { SchedulerSystem } = require('./dist/src/scheduler-system');
       const { registerAgentLoops } = require('./dist/src/agent-loops');
 
+      const dataDir = process.env.STATE_DIR || './data/scheduler';
+      const fs = require('fs');
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
       this.cronScheduler = new SchedulerSystem({
-        dataDir: process.env.STATE_DIR || './data/scheduler',
+        dataDir,
         timezone: process.env.SCHEDULER_TIMEZONE || 'UTC',
         heartbeat: {
           interval: 30000,
@@ -516,8 +556,56 @@ class DaemonMaster extends EventEmitter {
       const CronScheduler = require('./cron-scheduler');
       this.cronScheduler = new CronScheduler();
       this.cronScheduler.initialize();
-      logger.info('[Master] Fallback cron scheduler started');
+
+      // Register all cognitive loops as cron jobs in fallback mode
+      this._registerFallbackLoops();
+      logger.info('[Master] Fallback cron scheduler started with cognitive loops');
     }
+  }
+
+  _registerFallbackLoops() {
+    const loopSchedules = [
+      { name: 'ralph', method: 'loop.ralph.run_cycle', cron: '*/5 * * * *' },
+      { name: 'research', method: 'loop.research.run_cycle', cron: '*/10 * * * *' },
+      { name: 'planning', method: 'loop.planning.run_cycle', cron: '*/10 * * * *' },
+      { name: 'e2e', method: 'loop.e2e.run_cycle', cron: '*/15 * * * *' },
+      { name: 'exploration', method: 'loop.exploration.run_cycle', cron: '*/10 * * * *' },
+      { name: 'discovery', method: 'loop.discovery.run_cycle', cron: '*/15 * * * *' },
+      { name: 'bug_finder', method: 'loop.bug_finder.run_cycle', cron: '*/30 * * * *' },
+      { name: 'self_learning', method: 'loop.self_learning.run_cycle', cron: '*/20 * * * *' },
+      { name: 'meta_cognition', method: 'loop.meta_cognition.run_cycle', cron: '*/15 * * * *' },
+      { name: 'self_upgrading', method: 'loop.self_upgrading.run_cycle', cron: '0 * * * *' },
+      { name: 'self_updating', method: 'loop.self_updating.run_cycle', cron: '*/30 * * * *' },
+      { name: 'self_driven', method: 'loop.self_driven.run_cycle', cron: '*/10 * * * *' },
+      { name: 'cpel', method: 'loop.cpel.run_cycle', cron: '*/15 * * * *' },
+      { name: 'context_engineering', method: 'loop.context_engineering.run_cycle', cron: '*/15 * * * *' },
+      { name: 'debugging', method: 'loop.debugging.run_cycle', cron: '*/20 * * * *' },
+      { name: 'web_monitor', method: 'loop.web_monitor.run_cycle', cron: '*/10 * * * *' },
+    ];
+
+    for (const loop of loopSchedules) {
+      try {
+        this.cronScheduler.addJob(loop.name, loop.cron, () => {
+          this.dispatchLoopCycle(loop.name, loop.method);
+        });
+      } catch (err) {
+        logger.warn(`[Master] Failed to register fallback loop ${loop.name}: ${err.message}`);
+      }
+    }
+    logger.info(`[Master] Registered ${loopSchedules.length} cognitive loops in fallback scheduler`);
+  }
+
+  dispatchLoopCycle(loopName, method) {
+    if (!this.bridgeReady || !this.bridge) {
+      logger.debug(`[Master] Skipping loop ${loopName}: bridge not ready`);
+      return;
+    }
+
+    this.bridge.call(method, {}).then(result => {
+      logger.debug(`[Master] Loop ${loopName} completed:`, result);
+    }).catch(error => {
+      logger.warn(`[Master] Loop ${loopName} failed: ${error.message}`);
+    });
   }
 
   startHeartbeatMonitor() {

@@ -466,7 +466,7 @@ class AuditLogger:
         for callback in self._callbacks:
             try:
                 await callback(event)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Audit callback error: {e}")
         
         return event
@@ -660,7 +660,7 @@ class AlertManager:
             try:
                 await self._check_rules()
                 await asyncio.sleep(interval)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Alert monitoring error: {e}")
     
     def stop_monitoring(self) -> None:
@@ -682,7 +682,7 @@ class AlertManager:
         for callback in self._callbacks:
             try:
                 await callback(alert)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.error(f"Alert callback error: {e}")
         
         logger.warning(f"Alert triggered: {alert.title}")
@@ -875,7 +875,7 @@ class DashboardServer:
                     await asyncio.sleep(5)
                     
             except WebSocketDisconnect:
-                pass
+                logger.debug("WebSocket client disconnected")
         
         # Dashboard HTML
         @app.get("/", response_class=HTMLResponse)

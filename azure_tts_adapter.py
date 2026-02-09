@@ -122,7 +122,7 @@ class AzureTTSAdapter:
         for handler in self._event_handlers.get(event, []):
             try:
                 handler(data)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 print(f"Event handler error: {e}")
 
     def on(self, event: str, handler: Callable):

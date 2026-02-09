@@ -447,7 +447,7 @@ class AutoScaler:
                 if action != ScalingAction.NO_ACTION:
                     self.execute_scaling(action, instance_change)
                 
-            except Exception as e:
+            except (OSError, RuntimeError, PermissionError) as e:
                 logger.error(f"Error in scaling loop: {e}")
             
             # Wait for next iteration

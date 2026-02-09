@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Callable
 from enum import Enum, auto
-from collections import defaultdict
+from collections import defaultdict, deque
 import sqlite3
 import os
 
@@ -636,9 +636,14 @@ class ValueAdaptationEngine:
         ExperienceType.PROBLEM_SOLVING: ['creativity', 'thoroughness']
     }
     
+    # Sliding window size for pattern tracking
+    _PRIORITY_WINDOW_SIZE = 100
+    _DECAY_FACTOR = 0.95
+
     def __init__(self, identity: DynamicIdentity):
         self.identity = identity
         self.adaptation_history: List[Dict] = []
+        self._recent_experiences: deque = deque(maxlen=self._PRIORITY_WINDOW_SIZE)
     
     def process_experience(self, experience: Experience) -> List[IdentityChange]:
         """Process an experience and adapt relevant values"""
@@ -711,8 +716,66 @@ class ValueAdaptationEngine:
         return max(-1.0, min(1.0, base_outcome))
     
     def _update_value_priorities(self, experience: Experience):
-        """Update value priorities based on experience (simplified)"""
-        pass  # Complex implementation would track patterns over time
+        """Update value priorities using a sliding-window pattern tracker.
+
+        Tracks the last N experiences (100), examines which value-priority
+        categories were involved via experience.context, and shifts weights:
+        increase priority for values correlated with success, decrease for failure.
+        Uses exponential moving average with decay factor 0.95.
+        """
+        self._recent_experiences.append(experience)
+
+        # Map experience context keys to value priority names
+        context_to_priority = {
+            'user_feedback': 'user_satisfaction',
+            'user_satisfaction': 'user_satisfaction',
+            'task': 'task_completion',
+            'task_completion': 'task_completion',
+            'learning': 'learning_opportunity',
+            'discovery': 'learning_opportunity',
+            'resource': 'resource_efficiency',
+            'efficiency': 'resource_efficiency',
+            'collaboration': 'relationship_building',
+            'communication': 'relationship_building',
+        }
+
+        # Determine which priorities this experience touches
+        involved_priorities = set()
+        for key in experience.context:
+            mapped = context_to_priority.get(key.lower())
+            if mapped:
+                involved_priorities.add(mapped)
+
+        # Also map experience type to priorities
+        type_to_priority = {
+            ExperienceType.USER_INTERACTION: 'user_satisfaction',
+            ExperienceType.TASK_COMPLETION: 'task_completion',
+            ExperienceType.LEARNING: 'learning_opportunity',
+            ExperienceType.PROBLEM_SOLVING: 'task_completion',
+            ExperienceType.COMMUNICATION: 'relationship_building',
+            ExperienceType.SYSTEM_OPERATION: 'resource_efficiency',
+        }
+        mapped_from_type = type_to_priority.get(experience.type)
+        if mapped_from_type:
+            involved_priorities.add(mapped_from_type)
+
+        if not involved_priorities:
+            return
+
+        # Calculate outcome signal (-1 to +1)
+        outcome = self._calculate_outcome(experience)
+
+        # Apply exponential moving average update to involved priorities
+        for priority_name in involved_priorities:
+            if priority_name in self.identity.value_priorities:
+                current = self.identity.value_priorities[priority_name]
+                # Shift: success increases priority, failure decreases
+                adjustment = outcome * 0.02  # Small step size
+                new_value = (self._DECAY_FACTOR * current) + ((1 - self._DECAY_FACTOR) * (current + adjustment))
+                # Clamp between 0.1 and 0.95
+                self.identity.value_priorities[priority_name] = round(
+                    max(0.1, min(0.95, new_value)), 4
+                )
 
 # ============================================================================
 # EXPERIENCE INTEGRATION PIPELINE
@@ -1037,7 +1100,7 @@ class RollbackSystem:
                 'restored_value': change.old_value
             }
         
-        except Exception as e:
+        except (ValueError, KeyError, AttributeError) as e:
             return {'success': False, 'error': str(e)}
     
     def _rollback_personality_change(self, change: IdentityChange):
@@ -1175,72 +1238,35 @@ class SoulEvolutionSystem:
     
     def import_state(self, state: Dict):
         """Import system state"""
-        # Implementation for state restoration
-        pass
+        if 'soul_core' in state:
+            sc = state['soul_core']
+            self.soul_core.soul_id = sc.get('soul_id', self.soul_core.soul_id)
+            if 'birth_timestamp' in sc:
+                self.soul_core.birth_timestamp = datetime.fromisoformat(sc['birth_timestamp'])
+            if 'origin_signature' in sc:
+                self.soul_core.origin_signature = sc['origin_signature']
+            if 'core_values' in sc:
+                self.soul_core.core_values.update(sc['core_values'])
 
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
+        if 'identity' in state:
+            ident = state['identity']
+            if 'identity_version' in ident:
+                self.identity.identity_version = ident['identity_version']
+            if 'experience_points' in ident:
+                self.identity.experience_points = ident['experience_points']
+            if 'personality' in ident:
+                self.identity.personality = PersonalityDimensions.from_dict(ident['personality'])
+            if 'skill_levels' in ident:
+                self.identity.skill_levels = ident['skill_levels']
+            if 'maturation_level' in ident:
+                mat_name = ident['maturation_level']
+                for level in MaturationLevel:
+                    if level.value['name'] == mat_name:
+                        self.identity.maturation_level = level
+                        break
 
-def example_usage():
-    """Example of using the Soul Evolution System"""
-    
-    # Initialize the system
-    soul = SoulEvolutionSystem()
-    
-    print("=== Initial State ===")
-    print(json.dumps(soul.get_identity_summary(), indent=2))
-    
-    # Simulate some experiences
-    experiences = [
-        Experience(
-            type=ExperienceType.TASK_COMPLETION,
-            description="Completed email organization task",
-            success=True,
-            user_satisfaction=0.85,
-            efficiency_score=0.9,
-            skills_used=['email_management', 'organization'],
-            skills_improved=['email_management'],
-            complexity_score=0.6,
-            lessons_learned=['User prefers chronological sorting']
-        ),
-        Experience(
-            type=ExperienceType.PROBLEM_SOLVING,
-            description="Debugged system integration issue",
-            success=True,
-            user_satisfaction=0.95,
-            efficiency_score=0.75,
-            skills_used=['debugging', 'system_analysis'],
-            skills_improved=['debugging'],
-            complexity_score=0.8,
-            lessons_learned=['Check API rate limits first']
-        ),
-        Experience(
-            type=ExperienceType.USER_INTERACTION,
-            description="Helped user with complex query",
-            success=True,
-            user_satisfaction=0.9,
-            skills_used=['communication', 'analysis'],
-            complexity_score=0.5
-        )
-    ]
-    
-    for i, exp in enumerate(experiences):
-        print(f"\n=== Processing Experience {i+1} ===")
-        results = soul.process_experience(exp)
-        print(f"XP Earned: {results.get('xp_earned', 0)}")
-        print(f"Value Adaptations: {results.get('value_adaptations', 0)}")
-        if 'evolution' in results:
-            print(f"Evolution Triggered: {results['evolution']['triggers']}")
-            print(f"Changes: {len(results['evolution']['changes'])}")
-    
-    print("\n=== Final State ===")
-    print(json.dumps(soul.get_identity_summary(), indent=2))
-    
-    print("\n=== Evolution History ===")
-    history = soul.get_evolution_history(10)
-    for change in history:
-        print(f"- {change['change_type']}: {change['component']} ({change['delta']:+.3f})")
+        if 'maturation_history' in state:
+            self.maturation_engine.maturation_history = state['maturation_history']
 
-if __name__ == "__main__":
-    example_usage()
+        if 'config' in state:
+            self.config.update(state['config'])

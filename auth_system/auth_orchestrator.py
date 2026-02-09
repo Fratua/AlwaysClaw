@@ -387,7 +387,7 @@ class AuthenticationOrchestrator:
             
             return tokens.to_dict()
             
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             logger.error(f"OAuth authentication failed: {e}")
             return {'success': False, 'error': str(e)}
     
@@ -653,8 +653,8 @@ class AuthenticationOrchestrator:
                     await observer(event_type, data)
                 else:
                     observer(event_type, data)
-            except Exception as e:
-                logger.error(f"Observer error: {e}")
+            except (TypeError, ValueError, AttributeError, KeyError) as e:
+                logger.error(f"Observer error: {e}", exc_info=True)
     
     # ==================== Utility Methods ====================
     
@@ -690,7 +690,7 @@ class AuthenticationOrchestrator:
             logger.info("Authentication state saved")
             return True
             
-        except Exception as e:
+        except (OSError, PermissionError, ValueError) as e:
             logger.error(f"Failed to save state: {e}")
             return False
     

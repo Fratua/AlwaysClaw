@@ -63,7 +63,7 @@ class InformationExtractor:
                 content.content.content
             )
             logger.debug(f"Extracted {len(extracted.entities)} entities")
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             logger.warning(f"Entity extraction failed: {e}")
         
         # Extract facts
@@ -73,7 +73,7 @@ class InformationExtractor:
                 goals
             )
             logger.debug(f"Extracted {len(extracted.facts)} facts")
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             logger.warning(f"Fact extraction failed: {e}")
         
         # Extract relationships
@@ -83,28 +83,28 @@ class InformationExtractor:
                 extracted.entities
             )
             logger.debug(f"Extracted {len(extracted.relationships)} relationships")
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             logger.warning(f"Relationship extraction failed: {e}")
         
         # Extract claims
         try:
             extracted.claims = await self._extract_claims(content)
             logger.debug(f"Extracted {len(extracted.claims)} claims")
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             logger.warning(f"Claim extraction failed: {e}")
         
         # Extract statistics
         try:
             extracted.statistics = await self._extract_statistics(content)
             logger.debug(f"Extracted {len(extracted.statistics)} statistics")
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             logger.warning(f"Statistics extraction failed: {e}")
         
         # Extract quotes
         try:
             extracted.quotes = await self._extract_quotes(content)
             logger.debug(f"Extracted {len(extracted.quotes)} quotes")
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             logger.warning(f"Quote extraction failed: {e}")
         
         return extracted

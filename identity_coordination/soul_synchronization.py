@@ -225,7 +225,7 @@ class SoulSynchronizer:
                     "agent": agent_id,
                     "improvement": improvement
                 })
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                 sync_result["failed_agents"] = sync_result.get("failed_agents", []) + [
                     {"agent": agent_id, "error": str(e)}
                 ]
@@ -406,7 +406,7 @@ class SoulResonanceMonitor:
                 if len(self.resonance_history) > 1000:
                     self.resonance_history = self.resonance_history[-500:]
                     
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 print(f"Resonance monitoring error: {e}")
                 
             # Wait before next check

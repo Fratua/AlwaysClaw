@@ -3,6 +3,7 @@ Dynamic Weighted Load Balancer for OpenClaw AI Agent System
 Implements intelligent request distribution across agent instances
 """
 
+import os
 import random
 import time
 import psutil
@@ -317,7 +318,7 @@ class DynamicWeightedLoadBalancer:
         while not self._stop_event.is_set():
             try:
                 self._perform_health_checks()
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Health check error: {e}")
             
             self._stop_event.wait(self.health_check_interval)
@@ -327,7 +328,7 @@ class DynamicWeightedLoadBalancer:
         while not self._stop_event.is_set():
             try:
                 self._update_all_weights()
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Weight update error: {e}")
             
             self._stop_event.wait(self.weight_update_interval)
@@ -439,7 +440,7 @@ if __name__ == "__main__":
     for i in range(3):
         instance = AgentInstance(
             instance_id=f"agent-{i+1:03d}",
-            host="localhost",
+            host=os.environ.get('AGENT_HOST', 'localhost'),
             port=8080 + i,
             capacity=1.0
         )

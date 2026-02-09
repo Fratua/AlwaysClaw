@@ -5,6 +5,7 @@ Integration of web monitoring into OpenClaw's 15 agentic loops
 
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -15,6 +16,8 @@ from monitor_engine import MonitorEngine, MonitorConfig
 from scheduler import CronScheduler, SchedulePresets
 from alert_manager import AlertManager
 from dashboard_server import DashboardAPI
+
+logger = logging.getLogger(__name__)
 
 
 class WebMonitoringAgentLoop:
@@ -70,7 +73,7 @@ class WebMonitoringAgentLoop:
                     with open(path, 'r') as f:
                         config = yaml.safe_load(f)
                         return config.get('web_monitoring', {})
-                except Exception as e:
+                except (OSError, ValueError) as e:
                     print(f"Failed to load config from {path}: {e}")
         
         # Default configuration
@@ -162,7 +165,7 @@ class WebMonitoringAgentLoop:
                 component=self.LOOP_ID
             )
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             await self.agent.log(
                 f"Failed to initialize {self.LOOP_NAME}: {e}",
                 level="ERROR",
@@ -189,7 +192,7 @@ class WebMonitoringAgentLoop:
                     component=self.LOOP_ID
                 )
                 
-            except Exception as e:
+            except (KeyError, ValueError) as e:
                 await self.agent.log(
                     f"Failed to load site {site_data.get('name')}: {e}",
                     level="WARNING",
@@ -229,7 +232,7 @@ class WebMonitoringAgentLoop:
                 # Wait before next iteration
                 await asyncio.sleep(60)
                 
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 await self.agent.log(
                     f"Error in {self.LOOP_NAME} loop: {e}",
                     level="ERROR",
@@ -241,7 +244,7 @@ class WebMonitoringAgentLoop:
         """Run the monitoring scheduler"""
         try:
             await self.scheduler.run()
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             await self.agent.log(
                 f"Scheduler error: {e}",
                 level="ERROR",
@@ -270,7 +273,7 @@ class WebMonitoringAgentLoop:
                 port
             )
             
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             await self.agent.log(
                 f"Dashboard error: {e}",
                 level="ERROR",
@@ -366,7 +369,7 @@ class WebMonitoringAgentLoop:
                 ttl=604800  # 7 days
             )
             
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             await self.agent.log(
                 f"AI analysis failed: {e}",
                 level="WARNING",
@@ -504,14 +507,14 @@ class WebMonitoringAgentLoop:
             try:
                 await self._monitor_task
             except asyncio.CancelledError:
-                pass
-        
+                logger.debug("Monitor task cancelled during stop")
+
         if self._dashboard_task:
             self._dashboard_task.cancel()
             try:
                 await self._dashboard_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Dashboard task cancelled during stop")
         
         await self.agent.log(
             f"{self.LOOP_NAME} stopped",

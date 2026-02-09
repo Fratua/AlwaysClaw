@@ -294,15 +294,17 @@ class CookieJarManager:
                     for cookie in jar.cookies:
                         try:
                             cookie.value = self.encryption.decrypt(cookie.value)
-                        except Exception:
+                        except (ValueError, TypeError):
                             # If decryption fails, keep as-is (might be unencrypted)
                             pass
                     self.cookie_jars[domain] = jar
-                except Exception as e:
+                except (KeyError, ValueError, TypeError) as e:
                     logger.warning(f"Failed to load jar for {domain}: {e}")
             
             logger.info(f"Loaded {len(self.cookie_jars)} cookie jars")
-        except Exception as e:
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse cookie jar file: {e}")
+        except OSError as e:
             logger.error(f"Failed to load cookie jars: {e}")
     
     async def save_jars(self) -> bool:
@@ -336,7 +338,7 @@ class CookieJarManager:
                 logger.debug(f"Saved {len(self.cookie_jars)} cookie jars")
                 return True
                 
-            except Exception as e:
+            except (OSError, PermissionError) as e:
                 logger.error(f"Failed to save cookie jars: {e}")
                 return False
     
@@ -499,7 +501,7 @@ class CookieJarManager:
                 cookie = self._parse_set_cookie_header(header, source_url)
                 if await self.set_cookie(cookie, source_url):
                     cookies.append(cookie)
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 logger.warning(f"Failed to parse Set-Cookie header: {e}")
         
         return cookies
@@ -693,7 +695,7 @@ class CookieJarManager:
                 
                 if await self.set_cookie(cookie, source_url):
                     count += 1
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 logger.warning(f"Failed to import cookie: {e}")
         
         return count

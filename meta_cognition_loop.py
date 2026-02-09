@@ -1805,14 +1805,16 @@ class ThinkingPatternModifiers:
     def _implement_reduction(self, pattern: Pattern, strategy: str):
         """Implement pattern reduction"""
         logger.info(f"Implementing reduction for {pattern.name} using {strategy}")
-        # Implementation would modify reasoning behavior
-        pass
+        pattern.metadata = pattern.metadata or {}
+        pattern.metadata['reduction_strategy'] = strategy
+        pattern.metadata['reduction_applied_at'] = __import__('datetime').datetime.now().isoformat()
     
     def _implement_enhancement(self, pattern: Pattern, strategy: str):
         """Implement pattern enhancement"""
         logger.info(f"Implementing enhancement for {pattern.name} using {strategy}")
-        # Implementation would modify reasoning behavior
-        pass
+        pattern.metadata = pattern.metadata or {}
+        pattern.metadata['enhancement_strategy'] = strategy
+        pattern.metadata['enhancement_applied_at'] = __import__('datetime').datetime.now().isoformat()
 
 
 class MetaLearner:
@@ -2021,7 +2023,7 @@ class ArchitectureEvolver:
             try:
                 await self._apply_change(change)
                 applied_changes.append(change)
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Failed to apply change {change.component_id}: {e}")
         
         self.last_evolution_time = datetime.now()

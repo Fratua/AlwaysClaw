@@ -233,7 +233,7 @@ class LogStorageManager:
                             # Filter by timestamp
                             if start <= record.timestamp <= end:
                                 records.append(record)
-                        except Exception as e:
+                        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
                             logger.warning(f"Failed to parse audit record: {e}")
                             
             except ValueError:
@@ -270,8 +270,8 @@ class LogStorageManager:
                     log_file.unlink()
                     logger.debug(f"Archived log file: {log_file.name}")
                     
-            except Exception as e:
-                logger.error(f"Failed to archive log file: {e}")
+            except (OSError, ValueError) as e:
+                logger.error(f"Failed to archive log file: {e}", exc_info=True)
     
     def cleanup_old_records(self):
         """Remove records older than retention_days"""
@@ -290,8 +290,8 @@ class LogStorageManager:
                         archive_file.unlink()
                         logger.debug(f"Removed old archive: {archive_file.name}")
                         
-                except Exception as e:
-                    logger.error(f"Failed to cleanup archive: {e}")
+                except (OSError, ValueError) as e:
+                    logger.error(f"Failed to cleanup archive: {e}", exc_info=True)
 
 
 class ComplianceReporter:
@@ -493,7 +493,7 @@ class UpdateAuditLogger:
                     if lines:
                         last_record = json.loads(lines[-1].strip())
                         self._last_record_hash = last_record.get("checksum", "")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError) as e:
             logger.warning(f"Failed to load last record hash: {e}")
     
     def log_event(self, event_type: str, actor_type: str, actor_id: str,

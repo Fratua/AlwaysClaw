@@ -126,7 +126,7 @@ class ResearchLoop:
                 # Sleep before next iteration
                 await asyncio.sleep(self.config.poll_interval)
                 
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError, ConnectionError) as e:
                 logger.error(f"Research Loop error: {e}", exc_info=True)
                 await asyncio.sleep(5)
         
@@ -163,7 +163,7 @@ class ResearchLoop:
             for task in curiosity_tasks:
                 await self._queue_task(task)
                 
-        except Exception as e:
+        except (RuntimeError, ValueError) as e:
             logger.error(f"Error checking triggers: {e}")
     
     async def _queue_task(self, task: ResearchTask):
@@ -287,7 +287,7 @@ class ResearchLoop:
             
             logger.info(f"Research task completed: {task.id}")
             
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError, ConnectionError, asyncio.TimeoutError) as e:
             logger.error(f"Research task failed: {task.id} - {e}", exc_info=True)
             task.status = TaskStatus.FAILED
             task.error = str(e)
@@ -322,7 +322,7 @@ class ResearchLoop:
                         source,
                         crawl_config
                     )
-                except Exception as e:
+                except (OSError, ConnectionError, asyncio.TimeoutError, ValueError) as e:
                     logger.warning(f"Failed to crawl {source.url}: {e}")
                     return None
         
@@ -350,7 +350,7 @@ class ResearchLoop:
                     goals
                 )
                 extracted.append(info)
-            except Exception as e:
+            except (RuntimeError, ValueError, KeyError) as e:
                 logger.warning(f"Failed to extract from {content.source.url}: {e}")
         
         return extracted

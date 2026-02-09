@@ -333,7 +333,7 @@ class TOTPMFAHandler:
                 )
                 if element:
                     return element
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"MFA browser op failed: {e}")
                 continue
         return None
@@ -346,7 +346,7 @@ class TOTPMFAHandler:
                 if button and await button.is_visible():
                     await button.click()
                     return True
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"MFA browser op failed: {e}")
                 continue
 
@@ -354,7 +354,7 @@ class TOTPMFAHandler:
         try:
             await page.keyboard.press('Enter')
             return True
-        except Exception as e:
+        except (OSError, ValueError, TimeoutError) as e:
             logger.warning(f"MFA browser op failed: {e}")
         
         return False
@@ -389,7 +389,7 @@ class TOTPMFAHandler:
                     element = await page.query_selector(selector)
                     if element and await element.is_visible():
                         return True
-                except Exception as e:
+                except (OSError, ValueError, TimeoutError) as e:
                     logger.warning(f"MFA browser op failed: {e}")
 
             # Check for error
@@ -398,7 +398,7 @@ class TOTPMFAHandler:
                     element = await page.query_selector(selector)
                     if element and await element.is_visible():
                         return False
-                except Exception as e:
+                except (OSError, ValueError, TimeoutError) as e:
                     logger.warning(f"MFA browser op failed: {e}")
             
             await asyncio.sleep(0.5)
@@ -518,7 +518,7 @@ class SMSOTPHandler:
                     logger.debug("Triggered SMS code send")
                     await asyncio.sleep(2)  # Wait for SMS to be sent
                     return True
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"MFA browser op failed: {e}")
 
         return False
@@ -603,7 +603,7 @@ class SMSOTPHandler:
                 element = await page.wait_for_selector(selector, timeout=2000)
                 if element:
                     return element
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"MFA browser op failed: {e}")
 
         return None
@@ -622,7 +622,7 @@ class SMSOTPHandler:
                 if button:
                     await button.click()
                     return True
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"MFA browser op failed: {e}")
 
         return False
@@ -673,7 +673,7 @@ class TwilioSMSHandler(SMSOTPHandler):
                 }
                 for msg in messages
             ]
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError, AttributeError) as e:
             logger.error(f"Failed to fetch Twilio messages: {e}")
             return []
 
@@ -768,7 +768,7 @@ class BackupCodeHandler:
                 element = await page.wait_for_selector(selector, timeout=2000)
                 if element:
                     return element
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"MFA browser op failed: {e}")
 
         return None
@@ -786,7 +786,7 @@ class BackupCodeHandler:
                 if button:
                     await button.click()
                     return True
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"MFA browser op failed: {e}")
 
         return False
@@ -869,7 +869,7 @@ class MFAHandler:
                     if element and await element.is_visible():
                         logger.debug(f"Detected MFA type: {mfa_type.name}")
                         return mfa_type
-                except Exception as e:
+                except (OSError, ValueError, TimeoutError) as e:
                     logger.warning(f"MFA browser op failed: {e}")
 
         # Default to TOTP if input field found
@@ -877,7 +877,7 @@ class MFAHandler:
             code_input = await page.query_selector('input[type="number"], input[type="tel"]')
             if code_input:
                 return MFAType.TOTP
-        except Exception as e:
+        except (OSError, ValueError, TimeoutError) as e:
             logger.warning(f"MFA browser op failed: {e}")
         
         return MFAType.UNKNOWN

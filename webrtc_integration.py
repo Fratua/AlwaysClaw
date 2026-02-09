@@ -9,6 +9,7 @@ including P2P connections, SFU integration, and media streaming.
 import asyncio
 import json
 import logging
+import os
 import numpy as np
 from typing import Optional, Dict, Callable, Any, List
 from dataclasses import dataclass
@@ -94,7 +95,7 @@ class AudioTrackProcessor:
                 if self.on_frame:
                     self.on_frame(audio_data)
                     
-            except Exception as e:
+            except (OSError, RuntimeError) as e:
                 if self._is_running:
                     logger.error(f"Audio track processing error: {e}")
                 break
@@ -246,7 +247,7 @@ class WebRTCConnection:
             ice_candidate.sdpMid = candidate.get("sdpMid")
             ice_candidate.sdpMLineIndex = candidate.get("sdpMLineIndex")
             await self.pc.addIceCandidate(ice_candidate)
-        except Exception as e:
+        except (ValueError, OSError) as e:
             logger.error(f"Error adding ICE candidate: {e}")
     
     async def add_audio_track(self, audio_source):
@@ -352,7 +353,7 @@ class WebRTCSignalingServer:
         """Send message to websocket"""
         try:
             await websocket.send(json.dumps(message))
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.error(f"Error sending message: {e}")
     
     async def _remove_client(self, client_id: str):
@@ -393,8 +394,7 @@ class WebRTCManager:
     
     async def _on_signaling_message(self, client_id: str, msg_type: str, data: dict):
         """Handle signaling messages"""
-        # This can be overridden for custom handling
-        pass
+        logger.debug(f"Signaling message from {client_id}: {msg_type}")
     
     async def create_connection(self, config: WebRTCConfig = None) -> WebRTCConnection:
         """Create a new WebRTC connection"""
@@ -441,14 +441,15 @@ if __name__ == "__main__":
         # Start signaling server
         await manager.start_signaling(port=8765)
         
-        print("WebRTC signaling server running on ws://localhost:8765")
-        print("Press Ctrl+C to stop...")
+        ws_url = os.environ.get('WEBRTC_SIGNALING_URL', 'ws://localhost:8765')
+        logger.info(f"WebRTC signaling server running on {ws_url}")
+        logger.info("Press Ctrl+C to stop...")
         
         try:
             while True:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
-            print("\nStopping...")
+            logger.info("Stopping...")
         
         await manager.close_all()
     

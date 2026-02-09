@@ -169,7 +169,7 @@ class CapabilityGapAnalyzer:
                     gaps = await self.detection_methods[source]()
                     all_gaps.extend(gaps)
                     logger.info(f"Detected {len(gaps)} gaps from {source}")
-                except Exception as e:
+                except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                     logger.error(f"Error in {source} detection: {e}")
         
         # Merge and deduplicate gaps
@@ -593,7 +593,7 @@ class FeatureExperimentationFramework:
             experiment.status = 'completed'
             experiment.completed_at = datetime.utcnow()
             
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.error(f"Experiment failed: {e}")
             experiment.status = 'failed'
             experiment.decision = ExperimentDecision.ABANDON
@@ -741,7 +741,7 @@ class ComponentIntegrationSystem:
                 'details': result
             }
             
-        except Exception as e:
+        except (OSError, RuntimeError, PermissionError) as e:
             logger.error(f"Integration failed: {e}")
             raise IntegrationError(f"Failed to integrate component: {e}")
     
@@ -759,9 +759,15 @@ class ComponentIntegrationSystem:
     
     async def _validate_dependencies(self, opportunity: EnhancementOpportunity):
         """Validate all dependencies are available"""
-        logger.info("Validating dependencies...")
-        # Placeholder - would check actual dependencies
-        pass
+        logger.info(f"Validating dependencies for {opportunity.component}")
+        missing = []
+        for dep in getattr(opportunity, 'dependencies', []):
+            try:
+                __import__(dep)
+            except ImportError:
+                missing.append(dep)
+        if missing:
+            raise ValueError(f"Missing dependencies: {missing}")
     
     async def _integrate_direct(self, opportunity: EnhancementOpportunity, 
                                  experiment: Experiment) -> Dict:
@@ -1252,7 +1258,7 @@ class UpgradeOrchestrator:
                 }
             }
             
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error(f"Upgrade cycle failed: {e}")
             self.state = UpgradeState.FAILED
             raise

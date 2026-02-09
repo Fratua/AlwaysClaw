@@ -22,6 +22,7 @@ Usage:
 
 import email
 import io
+import logging
 import re
 import base64
 import quopri
@@ -34,6 +35,8 @@ from dataclasses import dataclass, field
 from email import policy
 from email.parser import BytesParser
 from email.message import EmailMessage
+
+logger = logging.getLogger(__name__)
 
 # Optional imports with fallbacks
 try:
@@ -264,9 +267,9 @@ class MIMEParser:
                             result['plain'] = payload.decode(
                                 part.get_content_charset() or 'utf-8', errors='replace'
                             )
-                    except Exception:
-                        pass
-                        
+                    except (UnicodeDecodeError, LookupError, ValueError) as exc:
+                        logger.debug("Failed to decode text/plain body part: %s", exc, exc_info=True)
+
                 elif content_type == 'text/html' and not result['html']:
                     try:
                         payload = part.get_payload(decode=True)
@@ -274,8 +277,8 @@ class MIMEParser:
                             result['html'] = payload.decode(
                                 part.get_content_charset() or 'utf-8', errors='replace'
                             )
-                    except Exception:
-                        pass
+                    except (UnicodeDecodeError, LookupError, ValueError) as exc:
+                        logger.debug("Failed to decode text/html body part: %s", exc, exc_info=True)
         
         return result
 
@@ -483,8 +486,8 @@ class AttachmentHandler:
         if HAS_MAGIC:
             try:
                 self.magic = magic.Magic(mime=True)
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                logger.debug("Failed to initialize python-magic: %s", exc, exc_info=True)
     
     def extract_attachments(self, msg: EmailMessage) -> List[EmailAttachment]:
         """Extract all attachments from email message."""
@@ -535,8 +538,8 @@ class AttachmentHandler:
                 if self.magic:
                     try:
                         content_type = self.magic.from_buffer(payload)
-                    except Exception:
-                        pass
+                    except (OSError, ValueError) as exc:
+                        logger.debug("Magic MIME detection failed: %s", exc, exc_info=True)
             
             # Classify attachment
             attachment_type = self.MIME_CATEGORIES.get(
@@ -558,10 +561,10 @@ class AttachmentHandler:
             )
             
             return attachment
-            
-        except Exception as e:
+
+        except (OSError, ValueError, KeyError) as e:
             # Log error but don't fail entire parsing
-            print(f"Error processing attachment: {e}")
+            logger.warning(f"Error processing attachment: {e}")
             return None
     
     def save_attachment(self, attachment: EmailAttachment, 
@@ -715,9 +718,10 @@ class HeaderAnalyzer:
         from email.utils import parsedate_to_datetime
         try:
             return parsedate_to_datetime(date_str)
-        except Exception:
+        except (ValueError, TypeError, OverflowError):
+            logger.debug(f"Failed to parse date header: {date_str!r}")
             return None
-    
+
     def _parse_received_date(self, msg: EmailMessage) -> Optional[datetime]:
         """Extract received date from Received headers."""
         received_headers = msg.get_all('Received', [])
@@ -856,7 +860,8 @@ class EncodingHandler:
                     parts.append(content)
             
             return ''.join(parts)
-        except Exception:
+        except (UnicodeDecodeError, LookupError, ValueError):
+            logger.debug(f"Failed to decode MIME encoded words: {text!r:.80}")
             return text
 
 
@@ -967,7 +972,8 @@ class EmailNormalizer:
             # Use talon's signature extraction
             body, signature = extract_signature(text)
             return body.strip(), signature.strip() if signature else None
-        except Exception:
+        except (ValueError, AttributeError, TypeError):
+            logger.debug("Signature extraction failed", exc_info=True)
             return text, None
     
     def _extract_quotes(self, text: str) -> Tuple[str, List[str]]:
@@ -983,7 +989,8 @@ class EmailNormalizer:
                 return reply.strip(), quotes
             
             return text.strip(), []
-        except Exception:
+        except (ValueError, AttributeError, TypeError):
+            logger.debug("Quote extraction failed", exc_info=True)
             return text.strip(), []
     
     def _find_quoted_sections(self, original: str, reply: str) -> List[str]:
@@ -1278,7 +1285,7 @@ class EmailParser:
             
             return parsed
             
-        except Exception as e:
+        except (ValueError, KeyError, UnicodeDecodeError, OSError) as e:
             errors.append(str(e))
             raise EmailParsingError(f"Failed to parse email: {'; '.join(errors)}")
     
@@ -1449,7 +1456,8 @@ class EmailParser:
         from email.utils import parsedate_to_datetime
         try:
             return parsedate_to_datetime(date_str)
-        except Exception:
+        except (ValueError, TypeError, OverflowError):
+            logger.debug(f"Failed to parse date header: {date_str!r}")
             return None
 
 

@@ -185,7 +185,7 @@ class FormDetector:
             try:
                 if not await form.is_visible():
                     continue
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"Form auth browser op failed: {e}")
                 continue
 
@@ -290,7 +290,7 @@ class FormDetector:
                 username_field = await page.query_selector(selector)
                 if username_field:
                     break
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"Form auth browser op failed: {e}")
 
         # Try to find submit button
@@ -299,7 +299,7 @@ class FormDetector:
                 submit_button = await page.query_selector(selector)
                 if submit_button:
                     break
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"Form auth browser op failed: {e}")
         
         if username_field and submit_button:
@@ -327,10 +327,10 @@ class FormDetector:
                     try:
                         if await field.is_visible():
                             return field
-                    except Exception as e:
+                    except (OSError, ValueError, TimeoutError) as e:
                         logger.warning(f"Form auth browser op failed: {e}")
                         return field
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"Form auth browser op failed: {e}")
                 continue
         return None
@@ -529,7 +529,7 @@ class LoginVerifier:
                     if element and await element.is_visible():
                         error_text = await element.text_content()
                         return False, error_text or "Login failed"
-                except Exception as e:
+                except (OSError, ValueError, TimeoutError) as e:
                     logger.warning(f"Form auth browser op failed: {e}")
 
             # Check for success indicators
@@ -538,7 +538,7 @@ class LoginVerifier:
                     element = await page.query_selector(indicator)
                     if element and await element.is_visible():
                         return True, None
-                except Exception as e:
+                except (OSError, ValueError, TimeoutError) as e:
                     logger.warning(f"Form auth browser op failed: {e}")
 
             # Check for MFA requirement
@@ -547,7 +547,7 @@ class LoginVerifier:
                     element = await page.query_selector(indicator)
                     if element and await element.is_visible():
                         return False, "MFA_REQUIRED"
-                except Exception as e:
+                except (OSError, ValueError, TimeoutError) as e:
                     logger.warning(f"Form auth browser op failed: {e}")
             
             # Check URL change
@@ -564,7 +564,7 @@ class LoginVerifier:
             
             if session_cookies:
                 return True, None
-        except Exception as e:
+        except (OSError, ValueError, TimeoutError) as e:
             logger.warning(f"Form auth browser op failed: {e}")
 
         return False, "Could not verify login status"
@@ -582,7 +582,7 @@ class LoginVerifier:
                 element = await page.query_selector(indicator)
                 if element and await element.is_visible():
                     return True
-            except Exception as e:
+            except (OSError, ValueError, TimeoutError) as e:
                 logger.warning(f"Form auth browser op failed: {e}")
         return False
 
@@ -697,7 +697,7 @@ class FormAuthenticator:
         # Wait for navigation
         try:
             await page.wait_for_load_state('networkidle', timeout=timeout * 1000)
-        except Exception as e:
+        except (OSError, TimeoutError) as e:
             logger.warning(f"Form auth browser op failed: {e}")
 
         # Check for MFA requirement

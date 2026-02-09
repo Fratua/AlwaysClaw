@@ -671,7 +671,7 @@ async def run_all_examples():
     for example in examples:
         try:
             await run_example_workflow(example)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             print(f"\n❌ Example '{example}' failed: {e}")
     
     print("\n" + "="*60)

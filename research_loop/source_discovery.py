@@ -5,6 +5,8 @@ Multi-source discovery, crawling, and content extraction.
 
 import asyncio
 import logging
+import os
+import urllib.robotparser
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from urllib.parse import urlparse, urljoin
@@ -115,7 +117,7 @@ class SourceDiscoveryEngine:
                     )
                     sources.append(source)
                     
-            except Exception as e:
+            except (OSError, ValueError, KeyError) as e:
                 logger.warning(f"Search failed on {engine_name}: {e}")
                 continue
         
@@ -245,15 +247,29 @@ class WebCrawler:
         except asyncio.TimeoutError:
             logger.warning(f"Timeout crawling {source.url}")
             return None
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.warning(f"Crawl failed for {source.url}: {e}")
             return None
     
     async def _can_fetch(self, url: str) -> bool:
         """Check if URL can be fetched according to robots.txt"""
-        # Simplified robots.txt check
-        # Production would use a proper robots.txt parser
-        return True
+        parsed = urlparse(url)
+        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+
+        if robots_url in self.robots_cache:
+            rp = self.robots_cache[robots_url]
+        else:
+            rp = urllib.robotparser.RobotFileParser()
+            rp.set_url(robots_url)
+            try:
+                await asyncio.to_thread(rp.read)
+            except (OSError, ValueError) as e:
+                logger.debug(f"Could not fetch robots.txt for {parsed.netloc}: {e}")
+                return True  # Allow if robots.txt is unreachable
+            self.robots_cache[robots_url] = rp
+
+        user_agent = self.config.search.user_agent
+        return rp.can_fetch(user_agent, url)
     
     async def _extract_content(
         self,
@@ -339,7 +355,7 @@ class WebCrawler:
                 content.publish_date = datetime.fromisoformat(
                     date_meta.get('content', '').replace('Z', '+00:00')
                 )
-            except Exception as e:
+            except (ValueError, TypeError) as e:
                 logger.debug(f"Failed to parse publish date: {e}")
         
         # Extract main content
@@ -751,46 +767,163 @@ class SearchEngine:
 
 
 class GoogleSearchEngine(SearchEngine):
-    """Google Search implementation"""
-    
+    """Google Custom Search API implementation"""
+
+    def __init__(self):
+        self.api_key = os.environ.get('GOOGLE_SEARCH_API_KEY', '')
+        self.cx = os.environ.get('GOOGLE_SEARCH_CX', '')
+
     async def search(self, query: str, num_results: int = 10) -> List[Dict[str, Any]]:
-        # Would use Google Custom Search API
-        # For now, return placeholder
-        logger.debug(f"Google search: {query}")
-        return []
+        if not self.api_key or not self.cx:
+            logger.debug("Google Search: GOOGLE_SEARCH_API_KEY or GOOGLE_SEARCH_CX not set")
+            return []
+
+        results = []
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    'key': self.api_key,
+                    'cx': self.cx,
+                    'q': query,
+                    'num': min(num_results, 10),
+                }
+                async with session.get(
+                    'https://www.googleapis.com/customsearch/v1',
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Google Search API returned {resp.status}")
+                        return []
+                    data = await resp.json()
+                    for item in data.get('items', []):
+                        results.append({
+                            'url': item.get('link', ''),
+                            'title': item.get('title', ''),
+                            'snippet': item.get('snippet', ''),
+                        })
+        except (aiohttp.ClientError, KeyError, ValueError) as e:
+            logger.warning(f"Google Search error: {e}")
+        return results
 
 
 class BingSearchEngine(SearchEngine):
-    """Bing Search implementation"""
-    
+    """Bing Web Search API v7 implementation"""
+
+    def __init__(self):
+        self.api_key = os.environ.get('BING_SEARCH_API_KEY', '')
+
     async def search(self, query: str, num_results: int = 10) -> List[Dict[str, Any]]:
-        # Would use Bing Search API
-        logger.debug(f"Bing search: {query}")
-        return []
+        if not self.api_key:
+            logger.debug("Bing Search: BING_SEARCH_API_KEY not set")
+            return []
+
+        results = []
+        try:
+            headers = {'Ocp-Apim-Subscription-Key': self.api_key}
+            params = {'q': query, 'count': min(num_results, 50)}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    'https://api.bing.microsoft.com/v7.0/search',
+                    headers=headers,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Bing Search API returned {resp.status}")
+                        return []
+                    data = await resp.json()
+                    for item in data.get('webPages', {}).get('value', []):
+                        results.append({
+                            'url': item.get('url', ''),
+                            'title': item.get('name', ''),
+                            'snippet': item.get('snippet', ''),
+                        })
+        except (aiohttp.ClientError, KeyError, ValueError) as e:
+            logger.warning(f"Bing Search error: {e}")
+        return results
 
 
 class DuckDuckGoSearchEngine(SearchEngine):
-    """DuckDuckGo Search implementation"""
-    
+    """DuckDuckGo Search via duckduckgo-search package (no API key needed)"""
+
     async def search(self, query: str, num_results: int = 10) -> List[Dict[str, Any]]:
-        # Would use DuckDuckGo API or scraping
-        logger.debug(f"DuckDuckGo search: {query}")
-        return []
+        results = []
+        try:
+            from duckduckgo_search import DDGS
+
+            def _search_sync():
+                with DDGS() as ddgs:
+                    return list(ddgs.text(query, max_results=num_results))
+
+            raw = await asyncio.get_event_loop().run_in_executor(None, _search_sync)
+            for item in raw:
+                results.append({
+                    'url': item.get('href', item.get('link', '')),
+                    'title': item.get('title', ''),
+                    'snippet': item.get('body', item.get('snippet', '')),
+                })
+        except ImportError:
+            logger.warning("duckduckgo-search not installed (pip install duckduckgo-search)")
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"DuckDuckGo search error: {e}")
+        return results
 
 
 class GoogleScholarEngine(SearchEngine):
-    """Google Scholar implementation"""
-    
+    """Google Scholar via scholarly package (no API key, rate-limited)"""
+
     async def search(self, query: str, num_results: int = 10) -> List[Dict[str, Any]]:
-        # Would use Google Scholar API
-        logger.debug(f"Google Scholar search: {query}")
-        return []
+        results = []
+        try:
+            from scholarly import scholarly
+
+            def _search_sync():
+                found = []
+                search_query = scholarly.search_pubs(query)
+                for _ in range(num_results):
+                    try:
+                        pub = next(search_query)
+                        bib = pub.get('bib', {})
+                        found.append({
+                            'url': pub.get('pub_url', pub.get('eprint_url', '')),
+                            'title': bib.get('title', ''),
+                            'snippet': bib.get('abstract', '')[:300] if bib.get('abstract') else '',
+                        })
+                    except StopIteration:
+                        break
+                return found
+
+            results = await asyncio.get_event_loop().run_in_executor(None, _search_sync)
+        except ImportError:
+            logger.debug("scholarly not installed - Google Scholar disabled")
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"Google Scholar error: {e}")
+        return results
 
 
 class ArXivEngine(SearchEngine):
-    """ArXiv implementation"""
-    
+    """ArXiv search via arxiv package (free API, no key needed)"""
+
     async def search(self, query: str, num_results: int = 10) -> List[Dict[str, Any]]:
-        # Would use ArXiv API
-        logger.debug(f"ArXiv search: {query}")
-        return []
+        results = []
+        try:
+            import arxiv
+
+            def _search_sync():
+                found = []
+                search = arxiv.Search(query=query, max_results=num_results)
+                for paper in search.results():
+                    found.append({
+                        'url': paper.entry_id,
+                        'title': paper.title,
+                        'snippet': (paper.summary or '')[:300],
+                    })
+                return found
+
+            results = await asyncio.get_event_loop().run_in_executor(None, _search_sync)
+        except ImportError:
+            logger.warning("arxiv package not installed (pip install arxiv)")
+        except (OSError, RuntimeError) as e:
+            logger.warning(f"ArXiv search error: {e}")
+        return results

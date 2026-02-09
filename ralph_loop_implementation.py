@@ -890,7 +890,7 @@ class JobOrchestrator:
                 if job.id == task.id:
                     await self.job_completed(job.id, result)
                     break
-        except Exception as e:
+        except (RuntimeError, ValueError, OSError) as e:
             logger.error(f"Task execution failed: {e}")
             for job in self.jobs.values():
                 if job.id == task.id:
@@ -927,7 +927,7 @@ class PreemptionManager:
             task.preemption_count += 1
             
             return True
-        except Exception as e:
+        except (RuntimeError, KeyError) as e:
             logger.error(f"Preemption failed: {e}")
             return False
     
@@ -1077,7 +1077,7 @@ class RecoveryManager:
                 )
             report.tasks_queued = len(tasks)
             
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             report.errors.append(str(e))
             logger.error(f"Recovery failed: {e}")
         
@@ -1116,7 +1116,7 @@ class MetricsCollector:
         for name, supplier in self.gauges.items():
             try:
                 snapshot.gauges[name] = supplier()
-            except Exception as e:
+            except (TypeError, ValueError, RuntimeError) as e:
                 logger.error(f"Failed to collect gauge {name}: {e}")
         
         # Collect counters
@@ -1147,7 +1147,7 @@ class HealthMonitor:
             try:
                 result = check()
                 report.checks[name] = result
-            except Exception as e:
+            except (RuntimeError, OSError) as e:
                 report.checks[name] = HealthCheckResult(
                     status=HealthStatus.ERROR,
                     message=str(e)
@@ -1374,7 +1374,7 @@ class RalphLoop:
                 if health.overall == HealthStatus.CRITICAL:
                     logger.error(f"Critical health status detected: {health}")
                 
-            except Exception as e:
+            except (RuntimeError, OSError) as e:
                 logger.error(f"Monitoring error: {e}")
             
             await asyncio.sleep(interval)

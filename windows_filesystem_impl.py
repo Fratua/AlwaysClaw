@@ -279,7 +279,7 @@ class NTFSFileManager:
                     os.replace(temp_path, path)
                     
                 return True
-            except Exception as e:
+            except OSError as e:
                 self.logger.error(f"Atomic write failed: {e}")
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
@@ -337,10 +337,10 @@ class NTFSFileManager:
                 None
             ))
             return True
-        except Exception as e:
+        except (OSError, ImportError) as e:
             self.logger.error(f"Recycle bin operation failed: {e}")
             return False
-            
+
     def _secure_delete(self, path: str, passes: int = 3) -> None:
         """Securely delete file by overwriting"""
         file_size = os.path.getsize(path)
@@ -515,7 +515,7 @@ class NTFSFileManager:
                         continue
                         
                     yield info
-                except Exception as e:
+                except (OSError, PermissionError) as e:
                     self.logger.warning(f"Could not get info for {full_path}: {e}")
 
 # =============================================================================
@@ -572,9 +572,9 @@ class WindowsPathManager:
                     try:
                         path = shell.SHGetKnownFolderPath(guid)
                         self._folder_cache[name.lower()] = path
-                    except Exception:
+                    except OSError:
                         pass
-            except Exception as e:
+            except (OSError, ImportError) as e:
                 self.logger.warning(f"Could not load known folders: {e}")
                 
     def resolve_path(self, path: str, expand_env: bool = True) -> str:
@@ -623,18 +623,18 @@ class WindowsPathManager:
     def to_long_path(self, path: str) -> str:
         """Convert to extended-length path"""
         path = self.normalize_path(path)
-        if not path.startswith(r"\\?\"):
-            if path.startswith(r"\\"):
-                path = r"\\?\UNC\" + path[2:]
+        if not path.startswith("\\\\?\\"):
+            if path.startswith("\\\\"):
+                path = "\\\\?\\UNC\\" + path[2:]
             else:
-                path = r"\\?\" + path
+                path = "\\\\?\\" + path
         return path
         
     def from_long_path(self, path: str) -> str:
         """Remove extended-length path prefix"""
-        if path.startswith(r"\\?\UNC\"):
-            return r"\\" + path[8:]
-        elif path.startswith(r"\\?\"):
+        if path.startswith("\\\\?\\UNC\\"):
+            return "\\\\" + path[8:]
+        elif path.startswith("\\\\?\\"):
             return path[4:]
         return path
         
@@ -1026,11 +1026,11 @@ class FileWatcher:
                             buffer, bytes_returned, path, callback
                         )
                         
-                except Exception as e:
+                except OSError as e:
                     if not stop_event.is_set():
                         self.logger.error(f"Watch error: {e}")
-                        
-        except Exception as e:
+
+        except OSError as e:
             self.logger.error(f"Failed to start watch: {e}")
         finally:
             if 'handle' in locals():
@@ -1072,7 +1072,7 @@ class FileWatcher:
             
             try:
                 callback(event)
-            except Exception as e:
+            except (OSError, ValueError, RuntimeError) as e:
                 self.logger.error(f"Callback error: {e}")
             
             if next_entry_offset == 0:
@@ -1165,7 +1165,7 @@ class TempFileManager:
             with self._lock:
                 self._tracked_files.discard(path)
             return True
-        except Exception as e:
+        except OSError as e:
             self.logger.error(f"Failed to delete temp file: {e}")
             return False
             
@@ -1180,7 +1180,7 @@ class TempFileManager:
             with self._lock:
                 self._tracked_dirs.discard(path)
             return True
-        except Exception as e:
+        except OSError as e:
             self.logger.error(f"Failed to delete temp directory: {e}")
             return False
             
@@ -1249,7 +1249,7 @@ class RecycleBinManager:
             ))
             
             return result == 0 and not aborted
-        except Exception as e:
+        except (OSError, ImportError) as e:
             self.logger.error(f"Recycle bin operation failed: {e}")
             return False
             
@@ -1278,7 +1278,7 @@ class RecycleBinManager:
                 
             shell.SHEmptyRecycleBin(None, drive, flags)
             return True
-        except Exception as e:
+        except (OSError, ImportError) as e:
             self.logger.error(f"Empty recycle bin failed: {e}")
             return False
 

@@ -901,7 +901,7 @@ class ContextManager:
             )
             conn.commit()
             conn.close()
-        except Exception as e:
+        except (sqlite3.Error, OSError) as e:
             logger.warning(f"Failed to persist context: {e}")
         
     def _deserialize_context(self, data: Dict) -> ConversationContext:
@@ -1453,7 +1453,7 @@ class ResponseTimingManager:
             }
             sys.stdout.write(json.dumps(response, default=str) + '\n')
             sys.stdout.flush()
-        except Exception as e:
+        except (OSError, BrokenPipeError) as e:
             logger.warning(f"Failed to deliver acknowledgment: {e}")
 
     async def _deliver_chunk(self, chunk: str):
@@ -1467,7 +1467,7 @@ class ResponseTimingManager:
             }
             sys.stdout.write(json.dumps(response, default=str) + '\n')
             sys.stdout.flush()
-        except Exception as e:
+        except (OSError, BrokenPipeError) as e:
             logger.warning(f"Failed to deliver chunk: {e}")
 
 

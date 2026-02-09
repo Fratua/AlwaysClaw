@@ -126,7 +126,7 @@ class MemoryWriter:
                         "content": match.group(0),
                         "position": match.start()
                     }
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.warning(f"Error reading memory: {e}")
         
         return None

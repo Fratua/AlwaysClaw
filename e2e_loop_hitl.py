@@ -242,7 +242,7 @@ class GmailNotificationService(NotificationService):
             logger.info(f"Email sent to {recipient}")
             return True
             
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Failed to send email to {recipient}: {e}")
             return False
 
@@ -279,7 +279,7 @@ class TwilioSMSService(NotificationService):
             logger.info(f"SMS sent to {recipient}")
             return True
             
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             logger.error(f"Failed to send SMS to {recipient}: {e}")
             return False
 
@@ -319,7 +319,7 @@ class TwilioVoiceService(NotificationService):
             logger.info(f"Voice call initiated to {recipient}")
             return True
             
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             logger.error(f"Failed to make voice call to {recipient}: {e}")
             return False
     
@@ -379,7 +379,7 @@ class SlackNotificationService(NotificationService):
                         logger.error(f"Slack API error: {result.get('error')}")
                         return False
                         
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             logger.error(f"Failed to send Slack notification: {e}")
             return False
     
@@ -490,7 +490,7 @@ class ApprovalStore:
         for callback in callbacks:
             try:
                 await callback(request)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.error(f"Callback error: {e}")
 
 
@@ -690,7 +690,7 @@ class HITLManager:
                                 'approval_url': f"/approval/{request.id}"
                             }
                         )
-                    except Exception as e:
+                    except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                         logger.error(f"Failed to send {channel.value} notification: {e}")
     
     def _build_notification_message(self, request: ApprovalRequest) -> NotificationMessage:
@@ -841,8 +841,8 @@ To approve, press 1. To reject, press 2."""
             await self._log_audit_event('approval_timeout', request)
             
         except asyncio.CancelledError:
-            pass
-        except Exception as e:
+            logger.debug("Approval timeout handler cancelled")
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"Timeout handler error: {e}")
     
     async def _log_audit_event(
@@ -872,7 +872,7 @@ To approve, press 1. To reject, press 2."""
         for callback in self._audit_callbacks:
             try:
                 await callback(event)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.error(f"Audit callback error: {e}")
     
     def register_audit_callback(self, callback: Callable) -> None:

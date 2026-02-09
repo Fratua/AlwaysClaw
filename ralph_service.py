@@ -93,7 +93,7 @@ class RalphLoopService(win32serviceutil.ServiceFramework):
             self.running = True
             asyncio.run(self._run_service())
             
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.exception("Service error")
             servicemanager.LogMsg(
                 servicemanager.EVENTLOG_ERROR_TYPE,
@@ -160,7 +160,7 @@ class RalphLoopService(win32serviceutil.ServiceFramework):
                     logger.info("Stop event received")
                     break
                     
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.exception("Error in service loop")
             raise
         finally:
@@ -285,7 +285,7 @@ def install_service():
         print(f"  python ralph_service.py start")
         print("\nOr use Windows Services console:")
         print("  services.msc")
-    except Exception as e:
+    except (OSError, RuntimeError) as e:
         print(f"Failed to install service: {e}")
         raise
 
@@ -295,7 +295,7 @@ def remove_service():
     try:
         win32serviceutil.RemoveService(RalphLoopService._svc_name_)
         print(f"Service '{RalphLoopService._svc_name_}' removed successfully")
-    except Exception as e:
+    except (OSError, RuntimeError) as e:
         print(f"Failed to remove service: {e}")
         raise
 
@@ -305,7 +305,7 @@ def start_service():
     try:
         win32serviceutil.StartService(RalphLoopService._svc_name_)
         print(f"Service '{RalphLoopService._svc_name_}' started")
-    except Exception as e:
+    except (OSError, RuntimeError) as e:
         print(f"Failed to start service: {e}")
         raise
 
@@ -315,7 +315,7 @@ def stop_service():
     try:
         win32serviceutil.StopService(RalphLoopService._svc_name_)
         print(f"Service '{RalphLoopService._svc_name_}' stopped")
-    except Exception as e:
+    except (OSError, RuntimeError) as e:
         print(f"Failed to stop service: {e}")
         raise
 

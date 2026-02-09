@@ -447,7 +447,7 @@ class ContextWindowManager:
                     result = await memory_tools.write_memory(**tool_call['arguments'])
                     if result.success:
                         memories_written.append(result.memory_id)
-                except Exception as e:
+                except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                     print(f"Failed to write memory: {e}")
         
         self.flushed_this_cycle = True

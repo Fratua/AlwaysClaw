@@ -346,7 +346,7 @@ class HistoricalPatternLearner:
                     anomaly_mean=np.mean(anomaly_values)
                 ))
                 
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.debug(f"Error analyzing correlation for {feature}: {e}")
                 continue
         

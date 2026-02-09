@@ -329,7 +329,7 @@ class HypothesisEngine:
                     context
                 )
                 all_hypotheses.extend(strategy_hypotheses)
-            except Exception as e:
+            except (KeyError, ValueError, RuntimeError) as e:
                 logger.warning(f"Strategy {strategy} failed: {e}")
         
         # Score and rank
@@ -340,7 +340,7 @@ class HypothesisEngine:
                 if scores["overall"] >= self.config["min_confidence"]:
                     hypothesis.scores = scores
                     scored_hypotheses.append(hypothesis)
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 logger.warning(f"Scoring failed for hypothesis: {e}")
         
         # Sort by overall score
@@ -1361,7 +1361,7 @@ class ExplorationLoop:
                     )
                     experiments.append(experiment)
                     results["experiments_designed"] += 1
-                except Exception as e:
+                except (KeyError, ValueError, RuntimeError) as e:
                     logger.error(f"Failed to design experiment: {e}")
                     results["errors"].append(f"Design error: {str(e)}")
             
@@ -1371,7 +1371,7 @@ class ExplorationLoop:
                     result = await self._execute_experiment(experiment)
                     self.experiment_results[experiment.id] = result
                     results["experiments_completed"] += 1
-                except Exception as e:
+                except (RuntimeError, OSError, ValueError) as e:
                     logger.error(f"Failed to execute experiment: {e}")
                     results["errors"].append(f"Execution error: {str(e)}")
             
@@ -1404,11 +1404,11 @@ class ExplorationLoop:
                         if integration["success"]:
                             results["findings_integrated"] += 1
                     
-                except Exception as e:
+                except (KeyError, ValueError, RuntimeError) as e:
                     logger.error(f"Failed to analyze/integrate: {e}")
                     results["errors"].append(f"Analysis error: {str(e)}")
             
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             logger.error(f"Exploration cycle failed: {e}")
             results["errors"].append(f"Cycle error: {str(e)}")
         

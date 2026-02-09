@@ -438,7 +438,7 @@ class CronScheduler:
                     if config.schedule_type == ScheduleType.ADAPTIVE:
                         self.adaptive.record_change(monitor_id)
                         
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             print(f"Error running check for {monitor_id}: {e}")
     
     def stop(self):

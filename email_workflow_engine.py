@@ -1013,7 +1013,7 @@ class ActionExecutor:
                     attempts=attempt + 1,
                     execution_time_ms=execution_time
                 )
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 if attempt < action.retry_count:
                     await asyncio.sleep(action.retry_delay.total_seconds() * (2 ** attempt))
                 else:
@@ -1271,13 +1271,13 @@ class EmailScheduler:
                 except ImportError:
                     logger.warning("Gmail client not available for scheduled email send")
                     raise RuntimeError("Gmail client not available")
-                except Exception as send_err:
+                except (OSError, ConnectionError, TimeoutError, RuntimeError, ValueError) as send_err:
                     logger.error(f"Failed to send scheduled email to {recipient}: {send_err}")
                     raise
             
             email.status = ScheduleStatus.SENT
             
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             email.status = ScheduleStatus.FAILED
             email.error_message = str(e)
             email.attempts += 1
@@ -1584,7 +1584,7 @@ class SmartAutoResponder:
                 body = getattr(email, 'body', '') or ''
                 return value.lower() in body.lower()
             return True  # Unknown condition types pass by default
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             return True
 
     async def generate_response(
@@ -1692,7 +1692,7 @@ class EmailWorkflowEngine:
                             if hasattr(self, 'auto_responder_engine') else None
                         if response:
                             logger.info(f"Auto-response generated for {email.from_address}")
-                except Exception as e:
+                except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                     logger.warning(f"Auto-responder error: {e}")
         
         return result
