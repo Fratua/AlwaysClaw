@@ -1550,6 +1550,54 @@ class RalphLoop:
         """Get system health"""
         return await self.health_monitor.run_checks()
     
+    async def run_single_cycle(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Run a single cycle of the Ralph Loop for adapter integration."""
+        try:
+            # Initialize if not yet done
+            if not self.running:
+                await self.initialize()
+
+            # Check health
+            health = await self.health_monitor.run_checks()
+
+            # Process pending tasks - dequeue and execute up to 10
+            tasks_processed = 0
+            for _ in range(10):
+                task = await self.priority_queue.dequeue()
+                if task is None:
+                    break
+                try:
+                    await self.layer_manager.execute_task(task)
+                    tasks_processed += 1
+                except (RuntimeError, ValueError, OSError) as e:
+                    logger.error(f"Task execution failed in single cycle: {e}")
+
+            # Collect stats
+            stats = await self.get_stats()
+            metrics = await self.metrics_collector.collect()
+
+            return {
+                "loop": "ralph",
+                "success": True,
+                "result": {
+                    "health": health.overall.name,
+                    "health_checks": {k: v.status.name for k, v in health.checks.items()},
+                    "tasks_processed": tasks_processed,
+                    "queue_stats": stats.get("queue_stats", {}),
+                    "metrics_snapshot": {
+                        "gauges": metrics.gauges,
+                        "counters": dict(metrics.counters),
+                    },
+                },
+            }
+        except (RuntimeError, ValueError, OSError, KeyError) as e:
+            logger.error(f"Ralph single cycle error: {e}")
+            return {
+                "loop": "ralph",
+                "success": False,
+                "error": str(e),
+            }
+
     async def _monitoring_loop(self):
         """Background monitoring loop"""
         interval = self.config.get('monitoring', {}).get('interval_seconds', 10)

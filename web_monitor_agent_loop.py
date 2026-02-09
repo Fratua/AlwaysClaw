@@ -486,6 +486,54 @@ class WebMonitoringAgentLoop:
             'health': 'healthy' if self.running else 'stopped'
         }
     
+    async def run_single_cycle(self, context: Dict = None) -> Dict[str, Any]:
+        """Run a single cycle of the Web Monitoring Loop for adapter integration."""
+        try:
+            # Initialize if needed
+            if not self.initialized:
+                await self.initialize()
+
+            # Check scheduled monitors
+            due_monitors = []
+            if self.scheduler:
+                due_monitors = self.scheduler.get_due_jobs()
+
+            # Run checks on due monitors
+            changes_detected = []
+            for monitor_id in due_monitors:
+                try:
+                    change = await self.monitor_engine.run_check(monitor_id)
+                    if change:
+                        changes_detected.append(change.to_dict())
+                        await self.on_change_detected(change)
+                except (RuntimeError, ValueError, OSError) as e:
+                    logger.warning(f"Monitor check failed for {monitor_id}: {e}")
+
+            # Process any pending alerts
+            alert_count = len(self.alert_manager.alert_history) if self.alert_manager else 0
+
+            # Collect statistics
+            stats = self.get_statistics()
+
+            return {
+                "loop": "web_monitor",
+                "success": True,
+                "result": {
+                    "monitors_checked": len(due_monitors),
+                    "changes_detected": len(changes_detected),
+                    "changes": changes_detected,
+                    "total_alerts": alert_count,
+                    "statistics": stats,
+                },
+            }
+        except (RuntimeError, ValueError, OSError, TypeError, KeyError) as e:
+            logger.error(f"Web monitor single cycle error: {e}")
+            return {
+                "loop": "web_monitor",
+                "success": False,
+                "error": str(e),
+            }
+
     async def stop(self):
         """Stop the monitoring loop"""
         await self.agent.log(

@@ -361,8 +361,18 @@ def run_discovery_cycle(**context) -> Dict:
 
 
 def run_bug_finder_cycle(**context) -> Dict:
+    async def _default_bug_finder_source():
+        import psutil
+        return {
+            'system_metrics': {
+                'cpu_percent': psutil.cpu_percent(),
+                'memory_percent': psutil.virtual_memory().percent,
+                'disk_usage': psutil.disk_usage('C:\\').percent,
+            }
+        }
+
     return _safe_run('bug_finder', _get_bug_finder_loop,
-                     lambda loop: _loop_run_async('bug_finder', loop._detection_cycle()) if hasattr(loop, '_detection_cycle')
+                     lambda loop: _loop_run_async('bug_finder', loop._detection_cycle(_default_bug_finder_source)) if hasattr(loop, '_detection_cycle')
                      else {"status": "completed", "note": "detection cycle not available"})
 
 

@@ -1,0 +1,10 @@
+# OpenClaw Bottleneck Detector Service
+# Python-based performance bottleneck detection
+
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY scaling_modules/ ./scaling_modules/
+EXPOSE 8082
+ENTRYPOINT ["python", "-m", "scaling_modules.bottleneck_detector"]

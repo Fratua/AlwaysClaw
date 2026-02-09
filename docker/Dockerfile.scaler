@@ -1,0 +1,10 @@
+# OpenClaw Auto-Scaler Service
+# Python-based dynamic scaling for agent instances
+
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY scaling_modules/ ./scaling_modules/
+EXPOSE 8081
+ENTRYPOINT ["python", "-m", "scaling_modules.auto_scaler"]

@@ -2037,7 +2037,8 @@ class ContextPromptEngineeringLoop:
 
 async def main():
     """Example usage of the Context Prompt Engineering Loop."""
-    
+    # Demo/example only - production uses real LLM calls via get_optimized_prompt()
+
     # Initialize CPEL
     cpel = ContextPromptEngineeringLoop()
     await cpel.initialize()

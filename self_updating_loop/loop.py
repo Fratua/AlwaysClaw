@@ -612,6 +612,67 @@ class SelfUpdatingLoop:
         
         return result
     
+    async def run_single_cycle(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Run a single cycle of the Self-Updating Loop for adapter integration."""
+        try:
+            # Detect updates
+            self.set_state(UpdateLoopState.DETECTING)
+            updates = await self._detect_updates()
+
+            if not updates:
+                self.set_state(UpdateLoopState.IDLE)
+                return {
+                    "loop": "self_updating",
+                    "success": True,
+                    "result": {
+                        "state": self.get_state().value,
+                        "updates_detected": 0,
+                        "updates_processed": 0,
+                        "pending_updates": len(self._pending_updates),
+                        "history_count": len(self._update_history),
+                    },
+                }
+
+            # Analyze each update for safety
+            analyzed = []
+            for update in updates:
+                self.set_state(UpdateLoopState.ANALYZING)
+                impact = await self._analyze_update(update)
+                analyzed.append({
+                    "event_id": update.event_id,
+                    "type": update.update_type.value,
+                    "risk": impact.risk_level.name,
+                    "approval_required": impact.approval_required,
+                })
+
+                # Validate
+                self.set_state(UpdateLoopState.VALIDATING)
+                valid = await self._validate_update(update)
+                if valid and self._should_auto_apply(update):
+                    await self._process_update(update)
+
+            self.set_state(UpdateLoopState.IDLE)
+
+            return {
+                "loop": "self_updating",
+                "success": True,
+                "result": {
+                    "state": self.get_state().value,
+                    "updates_detected": len(updates),
+                    "updates_analyzed": analyzed,
+                    "pending_updates": len(self._pending_updates),
+                    "history_count": len(self._update_history),
+                },
+            }
+        except (OSError, ValueError, KeyError, AttributeError, TypeError) as e:
+            logger.error(f"Self-updating single cycle error: {e}")
+            self.set_state(UpdateLoopState.ERROR)
+            return {
+                "loop": "self_updating",
+                "success": False,
+                "error": str(e),
+            }
+
     def get_status(self) -> Dict[str, Any]:
         """Get current loop status"""
         return {

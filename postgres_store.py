@@ -5,9 +5,19 @@ Provides durable archival storage as the cold tier.
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, List
+
+try:
+    import asyncpg
+    _PG_ERRORS: tuple = (asyncpg.PostgresError, asyncpg.InterfaceError)
+    _CONNECT_ERRORS: tuple = (ImportError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError)
+except ImportError:
+    asyncpg = None          # type: ignore[assignment]
+    _PG_ERRORS = (Exception,)
+    _CONNECT_ERRORS = (ImportError, OSError, Exception)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +45,8 @@ class PostgresStore:
 
     def __init__(self, config: PostgresStoreConfig):
         self.config = config
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$', self.config.table_name):
+            raise ValueError(f"Invalid table name: {self.config.table_name!r}")
         self._pool = None
         self._available = False
         self._connect_error: Optional[str] = None
@@ -42,7 +54,8 @@ class PostgresStore:
     async def connect(self) -> None:
         """Connect to PostgreSQL and create the archive table."""
         try:
-            import asyncpg
+            if asyncpg is None:
+                raise ImportError("asyncpg is not installed")
 
             self._pool = await asyncpg.create_pool(
                 host=self.config.host,
@@ -74,7 +87,7 @@ class PostgresStore:
                 "PostgreSQL cold store connected at %s:%d/%s",
                 self.config.host, self.config.port, self.config.database,
             )
-        except Exception as exc:
+        except _CONNECT_ERRORS as exc:
             self._available = False
             self._connect_error = str(exc)
             logger.warning(
@@ -127,7 +140,7 @@ class PostgresStore:
                     embedding,
                     importance,
                 )
-        except Exception as exc:
+        except _PG_ERRORS as exc:
             logger.warning("PostgreSQL store error: %s", exc)
 
     async def retrieve(self, entry_id: str) -> Optional[dict]:
@@ -157,21 +170,24 @@ class PostgresStore:
                     "importance": row["importance"],
                     "tier": row["tier"],
                 }
-        except Exception as exc:
+        except _PG_ERRORS as exc:
             logger.warning("PostgreSQL retrieve error: %s", exc)
             return None
 
     async def search(
-        self, query_embedding: bytes, limit: int = 10
+        self, query_embedding: bytes = None, limit: int = 10
     ) -> List[dict]:
         """
         Basic search returning entries ordered by importance DESC.
 
         A proper vector-similarity search would require pgvector;
         this fallback sorts by importance and returns the top results.
+        # TODO: Implement pgvector similarity search
         """
         if not self._available:
             return []
+        if query_embedding is not None:
+            logger.warning("query_embedding provided but ignored - pgvector not implemented")
         try:
             table = self.config.table_name
             async with self._pool.acquire() as conn:
@@ -189,7 +205,7 @@ class PostgresStore:
                     }
                     for r in rows
                 ]
-        except Exception as exc:
+        except _PG_ERRORS as exc:
             logger.warning("PostgreSQL search error: %s", exc)
             return []
 
@@ -223,7 +239,7 @@ class PostgresStore:
                         for e in entries
                     ],
                 )
-        except Exception as exc:
+        except _PG_ERRORS as exc:
             logger.warning("PostgreSQL archive_batch error: %s", exc)
 
     async def get_archived_since(self, since: datetime) -> List[dict]:
@@ -248,7 +264,7 @@ class PostgresStore:
                     }
                     for r in rows
                 ]
-        except Exception as exc:
+        except _PG_ERRORS as exc:
             logger.warning("PostgreSQL get_archived_since error: %s", exc)
             return []
 
@@ -265,7 +281,7 @@ class PostgresStore:
                 )
                 # asyncpg returns e.g. "DELETE 5"
                 return int(result.split()[-1])
-        except Exception as exc:
+        except _PG_ERRORS as exc:
             logger.warning("PostgreSQL delete_old error: %s", exc)
             return 0
 
@@ -280,5 +296,5 @@ class PostgresStore:
             async with self._pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
             return {'available': True, 'error': None}
-        except Exception as exc:
+        except _PG_ERRORS as exc:
             return {'available': False, 'error': str(exc)}

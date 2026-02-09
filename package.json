@@ -16,7 +16,7 @@
     "service:status": "node service-install.js status",
     "logs": "powershell -Command \"Get-Content logs/application-$(Get-Date -Format 'yyyy-MM-dd').log -Wait\"",
     "logs:error": "powershell -Command \"Get-Content logs/error-$(Get-Date -Format 'yyyy-MM-dd').log -Wait\"",
-    "test": "jest",
+    "test": "python -m pytest tests/ -v --tb=short",
     "lint": "eslint .",
     "health": "curl http://localhost:8080/health",
     "workers": "curl http://localhost:8080/workers",

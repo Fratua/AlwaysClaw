@@ -550,6 +550,45 @@ class ResearchLoop:
             "uptime": (datetime.now() - self.stats["start_time"]).total_seconds() if self.stats["start_time"] else 0
         }
     
+    async def run_single_cycle(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Run a single cycle of the Research Loop for adapter integration."""
+        try:
+            # Initialize components if needed
+            if self.trigger_engine is None:
+                await self.initialize()
+            if self.stats["start_time"] is None:
+                self.stats["start_time"] = datetime.now()
+
+            # 1. Check triggers and queue tasks
+            await self._check_triggers()
+
+            # 2. Process queued tasks
+            await self._process_task_queue()
+
+            # 3. Collect statistics
+            statistics = await self.get_statistics()
+
+            return {
+                "loop": "research",
+                "success": True,
+                "result": {
+                    "tasks_completed": self.stats["tasks_completed"],
+                    "tasks_failed": self.stats["tasks_failed"],
+                    "active_tasks": len(self.active_tasks),
+                    "queue_size": self.task_queue.qsize(),
+                    "sources_discovered": self.stats["sources_discovered"],
+                    "facts_extracted": self.stats["facts_extracted"],
+                    "statistics": statistics,
+                },
+            }
+        except (RuntimeError, ValueError, OSError, ConnectionError) as e:
+            logger.error(f"Research single cycle error: {e}")
+            return {
+                "loop": "research",
+                "success": False,
+                "error": str(e),
+            }
+
     async def force_trigger(self, trigger_name: str) -> List[str]:
         """Force a specific trigger to execute"""
         task_ids = []

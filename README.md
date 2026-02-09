@@ -212,6 +212,17 @@ npm run logs:error
 ### Project Structure
 ```
 openclaw-agent/
+├── auth_system/           # OAuth, JWT, MFA, SSO authentication
+├── research_loop/         # Autonomous research with citations
+├── self_driven_loop/      # Intrinsic motivation engine
+├── self_updating_loop/    # Self-patching with rollback
+├── scaling_modules/       # Auto-scaling & load balancing
+├── identity_coordination/ # Multi-agent identity system
+├── user_modeling/         # User preference learning
+├── tests/                 # pytest test suite
+├── docs/                  # Architecture documentation
+├── docker/                # Docker Compose orchestration
+├── config/                # Configuration files
 ├── service.js              # Main entry point
 ├── daemon-master.js        # Master process management
 ├── control-server.js       # HTTP control plane

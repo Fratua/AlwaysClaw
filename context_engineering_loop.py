@@ -1523,6 +1523,67 @@ class ContextEngineeringLoop:
             conversation_id, user_message, assistant_response, metadata
         )
     
+    async def run_single_cycle(self, context: Dict = None) -> Dict[str, Any]:
+        """Run a single cycle of the Context Engineering Loop for adapter integration."""
+        try:
+            # Start if not active
+            if not self.loop_active:
+                await self.start()
+
+            # Analyze current context utilization
+            current_util = self.monitor.current_utilization
+            avg_util = self.monitor.get_average_utilization(hours=1)
+            peak_util = self.monitor.get_peak_utilization(hours=24)
+
+            # Run optimization if a query is provided
+            optimization_result = None
+            ctx = context or {}
+            if ctx.get("user_message") and ctx.get("system_prompt"):
+                optimized = await self.build_optimized_context(
+                    system_prompt=ctx["system_prompt"],
+                    user_message=ctx["user_message"],
+                    conversation_id=ctx.get("conversation_id", "default"),
+                    tool_outputs=ctx.get("tool_outputs"),
+                    include_memory=ctx.get("include_memory", True),
+                )
+                optimization_result = {
+                    "total_tokens": optimized.total_tokens,
+                    "was_compressed": optimized.was_compressed,
+                    "elements_included": optimized.elements_included,
+                    "elements_dropped": optimized.elements_dropped,
+                }
+
+            # Collect token usage stats
+            token_usage = {
+                "last_hour": self.token_tracker.get_usage_last_hour(),
+                "last_day": self.token_tracker.get_usage_last_day(),
+            }
+
+            return {
+                "loop": "context_engineering",
+                "success": True,
+                "result": {
+                    "context_utilization": {
+                        "current": current_util,
+                        "average_1h": avg_util,
+                        "peak_24h": peak_util,
+                    },
+                    "token_usage": token_usage,
+                    "optimization": optimization_result,
+                    "memory_stats": {
+                        "hot_memory_size": len(self.memory.hot_memory),
+                        "facts_stored": len(self.memory.facts),
+                    },
+                },
+            }
+        except (RuntimeError, ValueError, OSError, KeyError, AttributeError) as e:
+            logger.error(f"Context engineering single cycle error: {e}")
+            return {
+                "loop": "context_engineering",
+                "success": False,
+                "error": str(e),
+            }
+
     def get_metrics(self) -> Dict:
         """Get current metrics for the loop."""
         return {

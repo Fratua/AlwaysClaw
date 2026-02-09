@@ -1038,6 +1038,59 @@ class DiscoveryLoop:
             next_exploration=datetime.now() + timedelta(seconds=300)
         )
     
+    async def run_single_cycle(self, context: Dict = None) -> Dict[str, Any]:
+        """Run a single cycle of the Discovery Loop for adapter integration."""
+        try:
+            # Identify knowledge gaps
+            gaps = await self.gap_identifier.identify_gaps()
+
+            # Get current territory stats
+            stats = await self.mapper.get_stats()
+            balance_context = {
+                "coverage": stats.density,
+                "discovery_rate": 0.1,
+            }
+
+            # Decide explore vs exploit
+            decision = await self.balancer.get_balance(balance_context)
+
+            # Execute one iteration
+            if decision.action == "explore":
+                result = await self.explorer.explore(self.seed_topics)
+                discoveries_count = len(result.discoveries)
+                for discovery in result.discoveries:
+                    await self.logger.log_discovery(discovery)
+                    await self.mapper.add_discovery(discovery)
+            else:
+                await self._exploit()
+                discoveries_count = 0
+
+            # Detect novelties from recent discoveries
+            recent_count = await self.logger.get_recent_count(hours=24)
+
+            return {
+                "loop": "discovery",
+                "success": True,
+                "result": {
+                    "action": decision.action,
+                    "strategy": decision.strategy,
+                    "exploration_rate": decision.exploration_rate,
+                    "discoveries": discoveries_count,
+                    "territory_nodes": stats.total_nodes,
+                    "territory_edges": stats.total_edges,
+                    "density": stats.density,
+                    "knowledge_gaps": len(gaps),
+                    "recent_discoveries_24h": recent_count,
+                },
+            }
+        except (OSError, ValueError, KeyError, RuntimeError) as e:
+            logging.getLogger(__name__).error(f"Discovery single cycle error: {e}")
+            return {
+                "loop": "discovery",
+                "success": False,
+                "error": str(e),
+            }
+
     def stop(self):
         """Stop the discovery loop"""
         self.running = False
